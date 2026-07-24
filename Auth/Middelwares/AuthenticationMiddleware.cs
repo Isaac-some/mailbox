@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
+using System.Security.Claims;
 
 namespace MailArchiver.Auth.Middlewares
 {
@@ -12,15 +13,20 @@ namespace MailArchiver.Auth.Middlewares
     {
         private readonly RequestDelegate _next;
         private readonly ILogger<AuthenticationMiddleware> _logger;
+        private readonly MailArchiver.Models.AuthenticationOptions _authenticationOptions;
 
-        public AuthenticationMiddleware(RequestDelegate next, ILogger<AuthenticationMiddleware> logger)
+        public AuthenticationMiddleware(
+            RequestDelegate next,
+            ILogger<AuthenticationMiddleware> logger,
+            IOptions<MailArchiver.Models.AuthenticationOptions> authenticationOptions)
         {
             _next = next;
             _logger = logger;
+            _authenticationOptions = authenticationOptions.Value;
         }
 
         public async Task InvokeAsync(HttpContext context, MailArchiver.Services.IAuthenticationService authService,
-            IOptions<ApiOptions> apiOptions)
+            IUserService userService, IOptions<ApiOptions> apiOptions)
         {
             var path = context.Request.Path.Value?.ToLower() ?? string.Empty;
 
@@ -28,6 +34,31 @@ namespace MailArchiver.Auth.Middlewares
             if (path.StartsWith("/api/"))
             {
                 await HandleApiRequestAsync(context, apiOptions.Value);
+                return;
+            }
+
+            if (!_authenticationOptions.Enabled)
+            {
+                var localUser = await userService.GetUserByUsernameAsync(_authenticationOptions.LocalBypassUsername);
+                if (localUser == null)
+                {
+                    _logger.LogError("Local no-login user {Username} was not initialized", _authenticationOptions.LocalBypassUsername);
+                    context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                    return;
+                }
+
+                var claims = new List<Claim>
+                {
+                    new(ClaimTypes.Name, localUser.Username),
+                    new(ClaimTypes.NameIdentifier, localUser.Id.ToString()),
+                    new("UserId", localUser.Id.ToString()),
+                    new(ClaimTypes.Role, "Admin")
+                };
+                context.User = new ClaimsPrincipal(new ClaimsIdentity(
+                    claims,
+                    CookieAuthenticationDefaults.AuthenticationScheme));
+
+                await _next(context);
                 return;
             }
 

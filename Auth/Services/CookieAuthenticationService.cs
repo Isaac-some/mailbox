@@ -32,7 +32,7 @@ namespace MailArchiver.Auth.Services
 
         public bool IsAuthenticationRequired()
         {
-            return true; // Always require authentication
+            return _authOptions.Enabled;
         }
 
         public bool ValidateCredentials(string username, string password)

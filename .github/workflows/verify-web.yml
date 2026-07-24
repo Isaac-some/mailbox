@@ -18,8 +18,6 @@ jobs:
           openssl rand -base64 32 > secrets/credential_encryption_key
           cat > .env <<'EOF'
           POSTGRES_PASSWORD=github-actions-postgres-password
-          MAILARCHIVE_ADMIN_USERNAME=admin
-          MAILARCHIVE_ADMIN_PASSWORD=github-actions-admin-password
           EOF
           docker compose up -d --build
       - name: Verify login page

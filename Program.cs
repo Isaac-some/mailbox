@@ -77,20 +77,9 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
     options.KnownProxies.Clear();
 });
 
-// Check if authentication is explicitly disabled in appsettings.json
-var authEnabled = builder.Configuration.GetSection("Authentication:Enabled").Value;
-if (authEnabled != null && authEnabled.Equals("false", StringComparison.OrdinalIgnoreCase))
-{
-    // Create a logger to log the error message
-    var logger = builder.Services.BuildServiceProvider().GetRequiredService<ILogger<Program>>();
-    logger.LogError("Authentication is now mandatory and must be enabled. Please remove the 'Enabled' property from the 'Authentication' section in appsettings.json or set it to 'true' and define admin credentials to access the application.");
-    logger.LogError("For more information, please refer to the documentation ( https://github.com/s1t5/mail-archiver/blob/main/doc/Setup.md ) on how to set up username and password using environment variables.");
-    Environment.Exit(1);
-}
-
-// Check if authentication password is set and not empty
+var authEnabled = builder.Configuration.GetValue("Authentication:Enabled", true);
 var authPassword = builder.Configuration.GetSection("Authentication:Password").Value;
-if (string.IsNullOrWhiteSpace(authPassword))
+if (authEnabled && string.IsNullOrWhiteSpace(authPassword))
 {
     // Create a logger to log the error message
     var logger = builder.Services.BuildServiceProvider().GetRequiredService<ILogger<Program>>();
@@ -728,24 +717,31 @@ using (var scope = app.Services.CreateScope())
                 normalizedCount);
         }
 
-        // Create admin user if it doesn't exist
+        // Create the configured administrator, or the internal local user used
+        // by the browser edition when its login screen is disabled.
         var authOptions = services.GetRequiredService<IOptions<AuthenticationOptions>>().Value;
-        if (authOptions.Enabled)
+        var bootstrapUsername = authOptions.Enabled
+            ? authOptions.Username
+            : authOptions.LocalBypassUsername;
+        if (!string.IsNullOrWhiteSpace(bootstrapUsername))
         {
             var userService = services.GetRequiredService<IUserService>();
-            var adminUser = await userService.GetUserByUsernameAsync(authOptions.Username);
+            var adminUser = await userService.GetUserByUsernameAsync(bootstrapUsername);
             if (adminUser == null)
             {
-                var adminEmail = $"{authOptions.Username}@local";
+                var adminEmail = $"{bootstrapUsername}@local";
+                var bootstrapPassword = string.IsNullOrWhiteSpace(authOptions.Password)
+                    ? Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32))
+                    : authOptions.Password;
                 adminUser = await userService.CreateUserAsync(
-                    authOptions.Username,
+                    bootstrapUsername,
                     adminEmail,
-                    authOptions.Password,
+                    bootstrapPassword,
                     true);
                 var userLogger = services.GetRequiredService<ILogger<Program>>();
-                userLogger.LogInformation("Admin user created: {Username} with email {Email}", authOptions.Username, adminEmail);
+                userLogger.LogInformation("Administrator user created: {Username} with email {Email}", bootstrapUsername, adminEmail);
             }
-            else if (!string.IsNullOrWhiteSpace(authOptions.Password) &&
+            else if (authOptions.Enabled && !string.IsNullOrWhiteSpace(authOptions.Password) &&
                      !userService.VerifyPassword(authOptions.Password, adminUser.PasswordHash ?? string.Empty))
             {
                 // The local deployment treats .env as the source of truth for

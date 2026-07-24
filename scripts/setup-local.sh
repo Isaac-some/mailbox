@@ -16,13 +16,10 @@ fi
 
 if [ ! -f .env ]; then
   postgres_password=$(openssl rand -base64 36 | tr -d '\n')
-  admin_password=$(openssl rand -base64 36 | tr -d '\n')
   cat > .env <<EOF
 POSTGRES_PASSWORD=${postgres_password}
-MAILARCHIVE_ADMIN_USERNAME=admin
-MAILARCHIVE_ADMIN_PASSWORD=${admin_password}
 EOF
 fi
 
-echo "本机配置已创建。密钥和密码仅保存在 secrets/ 与 .env，均不会进入 Git。"
+echo "本机配置已创建。数据库密码和加密密钥仅保存在 .env 与 secrets/，均不会进入 Git。"
 echo "启动前请先打开 Docker Desktop，然后执行：docker compose up -d --build"

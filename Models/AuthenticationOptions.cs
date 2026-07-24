@@ -4,9 +4,10 @@ namespace MailArchiver.Models
     {
         public const string Authentication = "Authentication";
 
-        public bool Enabled { get; set; } = true; // Always true now
+        public bool Enabled { get; set; } = true;
         public string Username { get; set; } = "admin";
         public string Password { get; set; } = "password";
+        public string LocalBypassUsername { get; set; } = "local-admin";
         public int SessionTimeoutMinutes { get; set; } = 60;
         public string CookieName { get; set; } = "MailArchiverAuth";
         

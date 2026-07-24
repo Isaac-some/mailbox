@@ -8,8 +8,8 @@ services:
       - "127.0.0.1:5000:5000"
     environment:
       ConnectionStrings__DefaultConnection: "Host=postgres;Database=MailArchiver;Username=mailuser;Password=${POSTGRES_PASSWORD:?set in .env}"
-      Authentication__Username: "${MAILARCHIVE_ADMIN_USERNAME:?set in .env}"
-      Authentication__Password: "${MAILARCHIVE_ADMIN_PASSWORD:?set in .env}"
+      Authentication__Enabled: "false"
+      Authentication__LocalBypassUsername: "local-admin"
       TimeZone__DisplayTimeZoneId: "Asia/Shanghai"
       MailSync__IntervalSeconds: "${MAILARCHIVE_SYNC_INTERVAL_SECONDS:-21600}"
       MailSync__LookbackDays: "${MAILARCHIVE_SYNC_LOOKBACK_DAYS:-30}"

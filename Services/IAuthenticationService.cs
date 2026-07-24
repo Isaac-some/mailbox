@@ -3,6 +3,7 @@ namespace MailArchiver.Services
 {
     public interface IAuthenticationService
     {
+        bool IsAuthenticationRequired();
         bool ValidateCredentials(string username, string password);
         Task StartUserSessionAsync(User user, bool rememberMe = false);
         void SignOut(HttpContext context);

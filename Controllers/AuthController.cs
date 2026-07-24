@@ -49,6 +49,11 @@ namespace MailArchiver.Controllers
         [HttpGet]
         public IActionResult Login(string returnUrl = null)
         {
+            if (!_authService.IsAuthenticationRequired())
+            {
+                return RedirectToAction("Index", "MailAccounts");
+            }
+
             // If already authenticated, redirect to return URL or home
             if (_authService.IsAuthenticated(HttpContext))
             {

@@ -14,7 +14,7 @@ cd "/Users/zhaoxiaohandexinwanju/Documents/蔻姿邮箱助手/mail-archiver-main
 docker compose up -d --build
 ```
 
-浏览器打开 [http://127.0.0.1:5000](http://127.0.0.1:5000)。首次登录账号是 `.env` 中的 `MAILARCHIVE_ADMIN_USERNAME`，密码是 `MAILARCHIVE_ADMIN_PASSWORD`。
+浏览器打开 [http://127.0.0.1:5000](http://127.0.0.1:5000)，会直接进入邮箱账户页面，无需账号或密码。
 
 查看服务状态或日志：
 
@@ -58,7 +58,7 @@ git status
 ## 安全边界
 
 - 默认仅监听本机 `127.0.0.1:5000`，不会直接暴露到互联网。
-- 要在局域网或公网提供服务，必须先配置 HTTPS 反向代理，再有针对性地修改端口绑定。
+- 要在局域网或公网提供服务，必须先恢复 `Authentication__Enabled=true`、配置管理员账号密码，并配置 HTTPS 反向代理。
 - PostgreSQL 数据在 `.runtime/postgres/`；数据保护密钥在 `.runtime/data-protection-keys/`。备份时必须同时备份两者和 `secrets/credential_encryption_key`。
 
 ## 开发与验证
