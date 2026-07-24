@@ -1,0 +1,41 @@
+@{
+    ViewData["Title"] = "本机数据";
+}
+
+<div class="row justify-content-center">
+    <div class="col-12 col-lg-8 col-xl-7">
+        <div class="d-flex align-items-center mb-4">
+            <i class="bi bi-pc-display-horizontal fs-3 text-primary me-3"></i>
+            <div>
+                <h1 class="h3 mb-1">本机数据</h1>
+                <p class="text-muted mb-0">管理这台 Mac 上的邮箱存档。</p>
+            </div>
+        </div>
+
+        <section class="border-top pt-4 mb-5">
+            <h2 class="h5">清空邮件和附件</h2>
+            <p class="text-muted">删除已下载的邮件、附件和同步记录，保留已导入的邮箱账号。</p>
+            <form asp-action="ClearMailData" method="post" onsubmit="return confirm('确定清空这台 Mac 上的所有邮件和附件吗？邮箱账号会保留。');">
+                @Html.AntiForgeryToken()
+                <button type="submit" class="btn btn-outline-danger">
+                    <i class="bi bi-trash3 me-1" aria-hidden="true"></i>清空邮件和附件
+                </button>
+            </form>
+        </section>
+
+        <section class="border-top pt-4">
+            <h2 class="h5 text-danger">恢复出厂设置</h2>
+            <p class="text-muted">删除这台 Mac 上的所有账号、邮件、附件和本机访问授权；应用随后会重新启动。</p>
+            <form asp-action="FactoryReset" method="post" onsubmit="return confirm('恢复出厂设置不可撤销，确定继续吗？');">
+                @Html.AntiForgeryToken()
+                <label for="factory-reset-confirmation" class="form-label">输入 RESET 以确认</label>
+                <div class="input-group" style="max-width: 320px;">
+                    <input id="factory-reset-confirmation" name="confirmation" class="form-control" autocomplete="off" required />
+                    <button type="submit" class="btn btn-danger" aria-label="恢复出厂设置" title="恢复出厂设置">
+                        <i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i>
+                    </button>
+                </div>
+            </form>
+        </section>
+    </div>
+</div>

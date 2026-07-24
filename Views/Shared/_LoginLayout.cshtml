@@ -1,0 +1,76 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"] - Mail Archiver</title>
+    <link rel="stylesheet" href="~/lib/bootstrap/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="~/lib/bootstrap-icons/bootstrap-icons.css">
+    <link rel="icon" type="image/svg" href="~/favicon.svg">
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .login-container {
+            width: 100%;
+            max-width: 400px;
+            padding: 0 20px;
+        }
+        .login-card {
+            border: none;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            backdrop-filter: blur(10px);
+            background: rgba(255, 255, 255, 0.95);
+        }
+        .card-body {
+            padding: 2rem;
+        }
+        .card-footer {
+            background: transparent;
+            border-top: 1px solid rgba(0, 0, 0, 0.1);
+            border-radius: 0 0 15px 15px;
+        }
+        .form-control, .input-group-text {
+            border-radius: 10px;
+        }
+        .input-group .form-control {
+            border-left: none;
+            border-top-left-radius: 0;
+            border-bottom-left-radius: 0;
+        }
+        .input-group-text {
+            background: #f8f9fa;
+            border-right: none;
+        }
+        .btn-lg {
+            border-radius: 10px;
+            padding: 12px;
+        }
+        .alert {
+            border-radius: 10px;
+        }
+        @@media (max-width: 480px) {
+            .login-container {
+                padding: 0 10px;
+            }
+            .card-body {
+                padding: 1.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <main class="login-main">
+        @RenderBody()
+    </main>
+    <script src="~/lib/jquery/jquery.min.js"></script>
+    <script src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
+    @await RenderSectionAsync("Scripts", required: false)
+</body>
+</html>

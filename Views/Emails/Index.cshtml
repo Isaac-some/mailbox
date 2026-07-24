@@ -1,0 +1,193 @@
+@using MailArchiver.Models
+@inject MailArchiver.Services.IAuthenticationService AuthService
+@inject Microsoft.Extensions.Localization.IStringLocalizer<MailArchiver.SharedResource> Localizer
+@model MailArchiver.Models.ViewModels.SearchViewModel
+@{
+    var account = ViewBag.SelectedAccount;
+    var selectedEmail = Model.SearchResults?.FirstOrDefault(email => email.Id == Model.SelectedEmailId);
+    var totalPages = Math.Max(1, Model.TotalPages);
+    var syncState = ViewBag.SyncState as string;
+    ViewData["Title"] = account?.Name ?? "收件箱";
+}
+
+<div class="mailbox-page" data-mailbox-sync-account="@account?.Id">
+    <header class="mailbox-header">
+        <div class="mailbox-header__identity">
+            <a asp-controller="MailAccounts" asp-action="Index" class="icon-button" aria-label="返回邮箱账号" title="返回邮箱账号">
+                <i class="bi bi-arrow-left" aria-hidden="true"></i>
+            </a>
+            <div>
+                <p class="mailbox-header__eyebrow">收件箱</p>
+                <h1>@account?.Name</h1>
+                <p>@account?.EmailAddress</p>
+            </div>
+        </div>
+        <div class="mailbox-header__actions">
+            <form asp-controller="MailAccounts" asp-action="Sync" asp-route-id="@account?.Id" method="post">
+                @Html.AntiForgeryToken()
+                <button type="submit" class="btn btn-primary btn-sm">
+                    <i class="bi bi-arrow-clockwise" aria-hidden="true"></i>
+                    刷新邮件
+                </button>
+            </form>
+            <a asp-controller="MailAccounts" asp-action="Edit" asp-route-id="@account?.Id" class="icon-button" aria-label="编辑账号" title="编辑账号">
+                <i class="bi bi-three-dots" aria-hidden="true"></i>
+            </a>
+        </div>
+    </header>
+
+    <div class="mailbox-sync-status" id="mailbox-sync-status" aria-live="polite" hidden>
+        <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+        <span>正在获取最新邮件...</span>
+    </div>
+    <form id="mailbox-watch-sync-token" class="d-none">
+        @Html.AntiForgeryToken()
+    </form>
+
+    <section class="mailbox-toolbar">
+        <form asp-action="Index" method="get" class="mailbox-search">
+            <input type="hidden" name="SelectedAccountId" value="@Model.SelectedAccountId" />
+            <input type="hidden" name="PageNumber" value="1" />
+            <i class="bi bi-search" aria-hidden="true"></i>
+            <input type="search" name="SearchTerm" value="@Model.SearchTerm" placeholder="搜索主题或发件人" aria-label="搜索主题或发件人" autocomplete="off" />
+            <button type="submit" class="btn btn-light btn-sm">搜索</button>
+        </form>
+        <span class="mailbox-toolbar__meta">
+            @Model.TotalResults.ToString("N0") 封邮件 · 最近 @ViewBag.LookbackDays 天
+        </span>
+    </section>
+
+    <section class="mailbox-split">
+        <div class="mailbox-list" aria-label="邮件列表">
+            @if (Model.SearchResults != null && Model.SearchResults.Any())
+            {
+                @foreach (var email in Model.SearchResults)
+                {
+                    var isSelected = email.Id == Model.SelectedEmailId;
+                    <a asp-action="Index"
+                       asp-route-SelectedAccountId="@Model.SelectedAccountId"
+                       asp-route-SelectedEmailId="@email.Id"
+                       asp-route-SearchTerm="@Model.SearchTerm"
+                       asp-route-PageNumber="@Model.PageNumber"
+                       asp-route-PageSize="@Model.PageSize"
+                       class="mail-item @(isSelected ? "mail-item--selected" : "")">
+                        <div class="mail-item__topline">
+                            <strong>@(string.IsNullOrWhiteSpace(email.From) ? "未知发件人" : email.From)</strong>
+                            <time class="utc-timestamp" data-utc-time="@email.ReceivedDate.ToString("yyyy-MM-ddTHH:mm:ss")">@email.ReceivedDate.ToString("MM-dd HH:mm")</time>
+                        </div>
+                        <div class="mail-item__subject">@(string.IsNullOrWhiteSpace(email.Subject) ? "(无主题)" : email.Subject)</div>
+                        <div class="mail-item__preview">@((email.Body ?? string.Empty).Replace("\r", " ").Replace("\n", " ").Trim())</div>
+                    </a>
+                }
+            }
+            else
+            {
+                <div class="mailbox-empty">
+                    <i class="bi bi-inbox" aria-hidden="true"></i>
+                    <strong>收件箱为空</strong>
+                    <span>点击右上角刷新邮件。</span>
+                </div>
+            }
+        </div>
+
+        <article class="mail-viewer">
+            @if (selectedEmail != null)
+            {
+                <header class="mail-viewer__header">
+                    <h2>@(string.IsNullOrWhiteSpace(selectedEmail.Subject) ? "(无主题)" : selectedEmail.Subject)</h2>
+                    <p>
+                        <strong>@selectedEmail.From</strong>
+                        <span>收件于 <time class="utc-timestamp" data-utc-time="@selectedEmail.ReceivedDate.ToString("yyyy-MM-ddTHH:mm:ss")">@selectedEmail.ReceivedDate.ToString("yyyy-MM-dd HH:mm")</time></span>
+                    </p>
+                    <a asp-controller="Emails" asp-action="Details" asp-route-id="@selectedEmail.Id" class="mail-viewer__details">
+                        打开完整邮件 <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i>
+                    </a>
+                </header>
+                <div class="mail-viewer__body">
+                    @if (!string.IsNullOrWhiteSpace(selectedEmail.Body))
+                    {
+                        <pre>@selectedEmail.Body</pre>
+                    }
+                    else
+                    {
+                        <p class="text-muted">该邮件没有可显示的纯文本内容，请打开完整邮件查看。</p>
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="mail-viewer__empty">
+                    <i class="bi bi-envelope-open" aria-hidden="true"></i>
+                    <span>请选择一封邮件</span>
+                </div>
+            }
+        </article>
+    </section>
+
+    @if (totalPages > 1)
+    {
+        <nav class="mailbox-pagination" aria-label="邮件分页">
+            @if (Model.PageNumber > 1)
+            {
+                <a asp-action="Index" asp-route-SelectedAccountId="@Model.SelectedAccountId" asp-route-SearchTerm="@Model.SearchTerm" asp-route-PageNumber="@(Model.PageNumber - 1)" asp-route-PageSize="@Model.PageSize" class="btn btn-light btn-sm">
+                    <i class="bi bi-chevron-left" aria-hidden="true"></i> 上一页
+                </a>
+            }
+            <span>第 @Model.PageNumber / @totalPages 页</span>
+            @if (Model.PageNumber < totalPages)
+            {
+                <a asp-action="Index" asp-route-SelectedAccountId="@Model.SelectedAccountId" asp-route-SearchTerm="@Model.SearchTerm" asp-route-PageNumber="@(Model.PageNumber + 1)" asp-route-PageSize="@Model.PageSize" class="btn btn-light btn-sm">
+                    下一页 <i class="bi bi-chevron-right" aria-hidden="true"></i>
+                </a>
+            }
+        </nav>
+    }
+</div>
+
+@section Scripts {
+<script>
+    (() => {
+        const page = document.querySelector('[data-mailbox-sync-account]');
+        const token = document.querySelector('#mailbox-watch-sync-token input[name="__RequestVerificationToken"]');
+        const status = document.getElementById('mailbox-sync-status');
+        if (!page || !page.dataset.mailboxSyncAccount || !token || !status) return;
+
+        const accountId = page.dataset.mailboxSyncAccount;
+        let sawActiveSync = '@syncState' === 'Queued' || '@syncState' === 'Running';
+
+        const setStatus = (active) => {
+            status.hidden = !active;
+        };
+
+        const watch = async () => {
+            try {
+                const body = new URLSearchParams({
+                    id: accountId,
+                    __RequestVerificationToken: token.value
+                });
+                const response = await fetch('@Url.Action("WatchSync", "MailAccounts")', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+                    body,
+                    credentials: 'same-origin'
+                });
+                if (!response.ok) return;
+
+                const payload = await response.json();
+                const active = payload.state === 'Queued' || payload.state === 'Running';
+                setStatus(active);
+                if (payload.completedSinceLastCheck && sawActiveSync) {
+                    window.location.reload();
+                    return;
+                }
+                sawActiveSync = sawActiveSync || active;
+            } catch (_) {
+                // A transient local network failure must not interrupt mailbox reading.
+            }
+        };
+
+        setStatus(sawActiveSync);
+        window.setInterval(watch, 5000);
+    })();
+</script>
+}

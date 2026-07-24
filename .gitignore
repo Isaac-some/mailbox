@@ -1,0 +1,315 @@
+﻿# Visual Studio und Visual Studio Code 
+.vs/
+.vscode/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.userprefs
+.editorconfig
+nextrelease.md
+
+# Import
+uploads/*
+
+# DataProtection Keys
+DataProtection-Keys/
+secrets/*
+!secrets/.gitkeep
+
+# Browser runtime data. This must not be named `data` because macOS merges it
+# with the source directory `Data` on its default case-insensitive filesystem.
+.runtime/
+Data/postgres/
+Data/data-protection-keys/
+Data/logs/
+
+# The desktop package is maintained and released separately.
+local-app/
+
+# Build-Ergebnisse
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+build/
+bld/
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+msbuild.log
+msbuild.err
+msbuild.wrn
+/[Bb]in/
+/[Oo]bj/
+/[Oo]ut/
+bin/
+obj/
+packages/
+
+## Logs
+*.log
+/Diagnostics/
+
+## Notes
+*_README.md
+
+# Visual Studio Profiler und Trace
+*.psess
+*.vsp
+*.vspx
+*.sap
+
+# ReSharper (JetBrains)
+_ReSharper*/
+*.[Rr]e[Ss]harper
+*.DotSettings.user
+
+# TeamCity
+_TeamCity*
+
+# DotCover & dotTrace
+*.dotCover
+*.dotTrace
+
+# NCrunch
+_NCrunch_*
+.*crunch*.local.xml
+nCrunchTemp_*
+
+# MightyMoose
+*.mm.*
+AutoTest.Net/
+
+# Web workbench (sass)
+.sass-cache/
+
+# Installationsverzeichnisse
+[Ee]xpress/
+
+# DocProject
+DocProject/buildhelp/
+DocProject/Help/*.HxT
+DocProject/Help/*.HxC
+DocProject/Help/*.hhc
+DocProject/Help/*.hhk
+DocProject/Help/*.hhp
+DocProject/Help/Html2
+DocProject/Help/html
+
+# Klick-einmal-Verzeichnis
+publish/
+
+# Veröffentlichungsausgabe
+*.publish.xml
+*.pubxml
+*.publishproj
+
+# NuGet
+.nuget/
+**/packages/*
+*.nupkg
+**/[Pp]ackages/*
+!/[Pp]ackages/build/
+*.nuget.props
+*.nuget.targets
+
+# Windows Azure-Buildausgabe
+csx/
+*.build.csdef
+
+# Windows Store-App-Paketverzeichnis
+AppPackages/
+
+# Andere
+sql/
+*.Cache
+ClientBin/
+[Ss]tyle[Cc]op.*
+~$*
+*~
+*.dbmdl
+*.dbproj.schemaview
+*.pfx
+*.publishsettings
+*.db
+orleans.codegen.cs
+
+# SQL Server-Dateien
+*.mdf
+*.ldf
+*.ndf
+
+# Business Intelligence-Projekte
+*.rdl.data
+*.bim.layout
+*.bim_*.settings
+*.rptproj.rsuser
+
+# Microsoft Fakes
+FakesAssemblies/
+
+# Node.js-Tools für Visual Studio
+.ntvs_analysis.dat
+node_modules/
+
+# Typoscript
+*.js.map
+
+# Visual Studio 6-Build-Protokoll
+*.plg
+
+# Visual Studio 6-Arbeitsbereichsoptionen
+*.opt
+
+# Visual Studio 6-Autogenerierte Workspace-Datei (enthält welche Dateien in .sln geöffnet wurden usw.)
+*.vbw
+
+# Visual Studio LightSwitch-Buildausgabe
+**/*.HTMLClient/GeneratedArtifacts
+**/*.DesktopClient/GeneratedArtifacts
+**/*.DesktopClient/ModelManifest.xml
+**/*.Server/GeneratedArtifacts
+**/*.Server/ModelManifest.xml
+_Pvt_Extensions
+.vs/
+*.user
+*.suo
+*.sln.docstates
+*.userprefs
+*.psess
+*.vsp
+*.vspx
+*.sap
+
+# Backup-Dateien & Dateien vom lokalen Verlauf
+*Backup*.rdl
+Backup*/
+UpgradeLog*.XML
+UpgradeLog*.htm
+ServiceFabricBackup/
+*.rptproj.bak
+
+# SQL Server-Dateien
+*.mdf
+*.ldf
+
+# Business Intelligence-Projekte
+*.rdl.data
+*.bim.layout
+*.bim_*.settings
+*.rptproj.rsuser
+
+# GhostDoc-Plugin-Einstellungsdatei
+*.GhostDoc.xml
+
+# Visual Studio 2015/2017 cache/options directory
+.vs/
+
+# BenchmarkDotNet-Artefakte
+BenchmarkDotNet.Artifacts/
+
+# ASP.NET Scaffolding
+ScaffoldingReadMe.txt
+
+# StyleCop
+StyleCopReport.xml
+
+# Testdateien
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+
+# Azure Stream Analytics local run output
+ASALocalRun/
+
+# MSBuild Binary and Structured Log
+*.binlog
+
+# NVidia Nsight GPU debugger configuration file
+*.nvuser
+
+# MFractors (Xamarin productivity tool) working folder
+.mfractor/
+
+# Local History for Visual Studio
+.localhistory/
+
+# VS temporary files
+.vs/
+.vscode/
+
+# Dateien für Rider
+.idea/
+*.sln.iml
+
+# Docker
+.docker/data/
+docker-volumes/
+
+# Umgebungsvariablen
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Betriebssystemdateien
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Protokolldateien
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Lokale Konfigurationsdateien
+appsettings.Local.json
+*.Development.json
+*.Local.json
+
+
+## OS junk
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+## Secrets
+*.key
+secrets.json
+credentials.json
+appsettings.Local.json
+*.Local.json
+.localsettings.json
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Temp-Verzeichnisse
+[Tt]emp/
+.tmp/
+
+# Code Coverage
+coverage/
+*.coverage
+*.coveragexml
+/obj
+/obj
+*.cache
+*.sln
+!MailArchiver.sln
+/ResXManager.config.xml
+update_resource_files.ps1
+*.cache
+/exports
+/obj
+/.clinerules
+nextrelease.md
+AGENTS.md
+tests/MailArchiver.Tests/appsettings.Test.json

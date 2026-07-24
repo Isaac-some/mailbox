@@ -1,0 +1,3007 @@
+using MailArchiver.Attributes;
+using MailArchiver.Data;
+using MailArchiver.Models;
+using MailArchiver.Models.ViewModels;
+using MailArchiver.Services;
+using MailArchiver.Services.Providers;
+using MailArchiver.ViewModels;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Rendering;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using System.IO.Compression;
+using System.Text.RegularExpressions;
+using System.Web;
+using Microsoft.Extensions.Localization;
+using Ganss.Xss;
+
+namespace MailArchiver.Controllers
+{
+    [UserAccessRequired]
+    public class EmailsController : Controller
+    {
+        private readonly MailArchiverDbContext _context;
+        private readonly MailArchiver.Services.Core.EmailCoreService _emailCoreService;
+        private readonly MailArchiver.Services.Factories.ProviderEmailServiceFactory _providerFactory;
+        private readonly IGraphEmailService _graphEmailService;
+        private readonly ILogger<EmailsController> _logger;
+        private readonly IBatchRestoreService? _batchRestoreService;
+        private readonly BatchRestoreOptions _batchOptions;
+        private readonly ISyncJobService _syncJobService;
+        private readonly IStringLocalizer<SharedResource> _localizer;
+        private readonly IExportService? _exportService;
+        private readonly ISelectedEmailsExportService? _selectedEmailsExportService;
+        private readonly SelectionOptions _selectionOptions;
+        private readonly IAccessLogService _accessLogService;
+        private readonly IServiceScopeFactory _serviceScopeFactory;
+        private readonly MailArchiver.Services.IAuthenticationService _authService;
+        private readonly IEmailDeletionService? _emailDeletionService;
+        private readonly ViewOptions _viewOptions;
+        private readonly DeletionPolicyOptions _deletionPolicy;
+        private readonly IConfiguration _configuration;
+        private readonly IOnDemandMailSyncQueue _onDemandSyncQueue;
+
+        public EmailsController(
+            MailArchiverDbContext context,
+            IConfiguration configuration,
+            MailArchiver.Services.Core.EmailCoreService emailCoreService,
+            MailArchiver.Services.Factories.ProviderEmailServiceFactory providerFactory,
+            IGraphEmailService graphEmailService,
+            ILogger<EmailsController> logger,
+            IOptions<BatchRestoreOptions> batchOptions,
+            IOptions<SelectionOptions> selectionOptions,
+            IOptions<ViewOptions> viewOptions,
+            IOptions<DeletionPolicyOptions> deletionPolicy,
+            IBatchRestoreService? batchRestoreService = null,
+            ISyncJobService? syncJobService = null,
+            IStringLocalizer<SharedResource> localizer = null,
+            IExportService? exportService = null,
+            ISelectedEmailsExportService? selectedEmailsExportService = null,
+            IAccessLogService? accessLogService = null,
+            IServiceScopeFactory? serviceScopeFactory = null,
+            MailArchiver.Services.IAuthenticationService? authService = null,
+            IEmailDeletionService? emailDeletionService = null,
+            IOnDemandMailSyncQueue? onDemandSyncQueue = null)
+
+        {
+            _context = context;
+            _configuration = configuration;
+            _emailCoreService = emailCoreService;
+            _providerFactory = providerFactory;
+            _graphEmailService = graphEmailService;
+            _logger = logger;
+            _batchRestoreService = batchRestoreService;
+            _syncJobService = syncJobService;
+            _batchOptions = batchOptions.Value;
+            _selectionOptions = selectionOptions.Value;
+            _viewOptions = viewOptions.Value;
+            _deletionPolicy = deletionPolicy.Value;
+            _localizer = localizer;
+            _exportService = exportService;
+            _selectedEmailsExportService = selectedEmailsExportService;
+            _accessLogService = accessLogService;
+            _serviceScopeFactory = serviceScopeFactory;
+            _authService = authService;
+            _emailDeletionService = emailDeletionService;
+            _onDemandSyncQueue = onDemandSyncQueue ?? throw new ArgumentNullException(nameof(onDemandSyncQueue));
+        }
+
+        // GET: Emails
+        public async Task<IActionResult> Index(SearchViewModel model)
+        {
+            // Standardwerte für die Suche
+            if (model == null)
+            {
+                model = new SearchViewModel();
+            }
+            if (!model.SelectedAccountId.HasValue)
+            {
+                return RedirectToAction("Index", "MailAccounts");
+            }
+
+            // This surface is an inbox, not the archive-wide search screen.
+            model.SelectedFolder = "INBOX";
+            model.IsOutgoing = false;
+            model.SortBy = "ReceivedDate";
+            model.SortOrder = "desc";
+
+            var lookbackDays = Math.Max(1, _configuration.GetValue<int?>("MailSync:LookbackDays") ?? 30);
+            var lookbackCutoff = DateTime.UtcNow.Date.AddDays(-lookbackDays);
+            if (!model.FromDate.HasValue || model.FromDate.Value < lookbackCutoff)
+            {
+                model.FromDate = lookbackCutoff;
+            }
+            if (!model.ToDate.HasValue || model.ToDate.Value.Date > DateTime.UtcNow.Date)
+            {
+                model.ToDate = DateTime.UtcNow.Date;
+            }
+            if (model.PageNumber <= 0) model.PageNumber = 1;
+            
+            // Validate and set page size to allowed values
+            var allowedPageSizes = new[] { 20, 50, 75, 100, 150 };
+            if (!allowedPageSizes.Contains(model.PageSize))
+            {
+                model.PageSize = 20; // Default to 20 if invalid value
+            }
+
+            // Ensure DirectionOptions are localized if model was created by the binder (parameterless ctor)
+            if (model.DirectionOptions == null || model.DirectionOptions.Count < 3)
+            {
+                model.DirectionOptions = new List<SelectListItem>
+                {
+                    new SelectListItem { Text = _localizer?["All"] ?? "All", Value = "" },
+                    new SelectListItem { Text = _localizer?["Incoming"] ?? "Incoming", Value = "false" },
+                    new SelectListItem { Text = _localizer?["Outgoing"] ?? "Outgoing", Value = "true" }
+                };
+            }
+            else if (_localizer != null)
+            {
+                // Refresh texts for localization
+                model.DirectionOptions[0].Text = _localizer["All"];
+                model.DirectionOptions[1].Text = _localizer["Incoming"];
+                model.DirectionOptions[2].Text = _localizer["Outgoing"];
+            }
+
+            // Store search state for return navigation
+            StoreSearchState(model);
+
+            // Get current user's allowed accounts
+            List<int> allowedAccountIds = null;
+            var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
+            var userService = HttpContext.RequestServices.GetService<IUserService>();
+            
+            if (authService != null && userService != null && !authService.IsCurrentUserAdmin(HttpContext))
+            {
+                var username = authService.GetCurrentUserDisplayName(HttpContext);
+                var user = await userService.GetUserByUsernameAsync(username);
+                if (user != null)
+                {
+                    var userAccounts = await userService.GetUserMailAccountsAsync(user.Id);
+                    allowedAccountIds = userAccounts.Select(a => a.Id).ToList();
+                    
+                    // Log for debugging
+                    _logger.LogInformation("User {Username} has access to {Count} accounts: {AccountIds}", 
+                        username, allowedAccountIds.Count, string.Join(", ", allowedAccountIds));
+                }
+                else
+                {
+                    // If user not found, set empty list to prevent access to any emails
+                    allowedAccountIds = new List<int>();
+                    _logger.LogWarning("User {Username} not found in database", username);
+                }
+            }
+
+            if (model.SelectedAccountId.HasValue &&
+                allowedAccountIds != null &&
+                !allowedAccountIds.Contains(model.SelectedAccountId.Value))
+            {
+                return NotFound();
+            }
+
+            var selectedAccount = await _context.MailAccounts
+                .AsNoTracking()
+                .Where(a => a.Id == model.SelectedAccountId.Value)
+                .Select(a => new { a.Id, a.Name, a.EmailAddress, a.LastSync, a.IsEnabled })
+                .FirstOrDefaultAsync();
+            if (selectedAccount == null)
+            {
+                return NotFound();
+            }
+            ViewBag.SelectedAccount = selectedAccount;
+            ViewBag.LookbackDays = lookbackDays;
+            if (selectedAccount.IsEnabled)
+            {
+                var syncStatus = _onDemandSyncQueue.Enqueue(selectedAccount.Id, MailSyncRequestPriority.Interactive);
+                ViewBag.SyncState = syncStatus.State.ToString();
+            }
+            model.AccountOptions = new List<SelectListItem>
+            {
+                new SelectListItem
+                {
+                    Text = $"{selectedAccount.Name} ({selectedAccount.EmailAddress})",
+                    Value = selectedAccount.Id.ToString(),
+                    Selected = true
+                }
+            };
+
+            // Keep the legacy search model populated for shared service code.
+            model.FolderOptions = new List<SelectListItem>
+            {
+                new SelectListItem { Text = "INBOX", Value = "INBOX", Selected = true }
+            };
+
+            // Berechnen der Anzahl zu überspringender Elemente für die Paginierung
+            int skip = (model.PageNumber - 1) * model.PageSize;
+
+            // For non-admin users, we need to ensure they only see emails from their assigned accounts
+            // If they haven't selected a specific account, we still need to filter by their allowed accounts
+            int? accountIdForSearch = model.SelectedAccountId;
+            
+            // Suche durchführen
+            var (emails, totalCount) = await _emailCoreService.SearchEmailsAsync(
+                model.SearchTerm,
+                model.FromDate,
+                model.ToDate,
+                accountIdForSearch,
+                model.SelectedFolder,
+                model.IsOutgoing,
+                skip,
+                model.PageSize,
+                allowedAccountIds,
+                model.SortBy,
+                model.SortOrder,
+                useReceivedDateForRange: true);
+
+            model.SearchResults = emails;
+            model.TotalResults = totalCount;
+
+                    // Log the search action
+                    if (_accessLogService != null && _serviceScopeFactory != null)
+                    {
+                        // Capture the current username before starting the background task
+                        var currentUsername = _authService?.GetCurrentUserDisplayName(HttpContext);
+                        
+                        if (!string.IsNullOrEmpty(currentUsername))
+                        {
+                            // Create a separate scope for logging to avoid DbContext concurrency issues
+                            Task.Run(async () =>
+                            {
+                                try
+                                {
+                                    using var scope = _serviceScopeFactory.CreateScope();
+                                    var accessLogService = scope.ServiceProvider.GetRequiredService<IAccessLogService>();
+                                    
+                                    var searchParams = new List<string>();
+                                    if (!string.IsNullOrEmpty(model.SearchTerm))
+                                        searchParams.Add($"term:{model.SearchTerm}");
+                                    if (model.FromDate.HasValue)
+                                        searchParams.Add($"from:{model.FromDate.Value:yyyy-MM-dd}");
+                                    if (model.ToDate.HasValue)
+                                        searchParams.Add($"to:{model.ToDate.Value:yyyy-MM-dd}");
+                                    if (model.SelectedAccountId.HasValue)
+                                        searchParams.Add($"account:{model.SelectedAccountId}");
+                                    if (!string.IsNullOrEmpty(model.SelectedFolder))
+                                        searchParams.Add($"folder:{model.SelectedFolder}");
+                                    if (model.IsOutgoing.HasValue)
+                                        searchParams.Add($"direction:{(model.IsOutgoing.Value ? "out" : "in")}");
+                                    
+                                    var searchParamsString = string.Join(", ", searchParams);
+                                    
+                                    await accessLogService.LogAccessAsync(currentUsername, AccessLogType.Search, 
+                                        searchParameters: searchParamsString.Length > 255 ? searchParamsString.Substring(0, 255) : searchParamsString);
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogError(ex, "Error logging search action");
+                                }
+                            });
+                        }
+                    }
+
+            // Log the state of ShowSelectionControls for debugging
+            _logger.LogInformation("Selection mode is {SelectionMode}", model.ShowSelectionControls ? "enabled" : "disabled");
+
+            // Batch-Optionen für die View verfügbar machen
+            ViewBag.AsyncThreshold = _batchOptions.AsyncThreshold;
+            ViewBag.MaxSyncEmails = _batchOptions.MaxSyncEmails;
+            ViewBag.MaxAsyncEmails = _batchOptions.MaxAsyncEmails;
+            
+            // Selection-Optionen für die View verfügbar machen
+            ViewBag.MaxSelectableEmails = _selectionOptions.MaxSelectableEmails;
+
+            // Aktive Jobs für die View
+            if (_batchRestoreService != null)
+            {
+                var activeJobs = _batchRestoreService.GetActiveJobs();
+                ViewBag.ActiveJobsCount = activeJobs.Count;
+            }
+
+            return View(model);
+        }
+
+        // GET: Emails/Details/5
+        [EmailAccessRequired]
+        public async Task<IActionResult> Details(int id, string returnUrl = null)
+        {
+            _logger.LogInformation("User requesting details for email ID: {EmailId}", id);
+            
+            var email = await _context.ArchivedEmails
+                .Include(e => e.MailAccount)
+                .Include(e => e.Attachments)
+                    .ThenInclude(a => a.AttachmentContent)
+                .FirstOrDefaultAsync(e => e.Id == id);
+
+            if (email == null)
+            {
+                _logger.LogWarning("Email with ID {EmailId} not found", id);
+                return View("Details404");
+            }
+
+            _logger.LogInformation("Found email with ID {EmailId} from account {AccountId}", 
+                id, email.MailAccountId);
+
+
+            // Use original body if available (preserves null bytes and truncation), with fallback to untruncated and regular body
+            // Priority: OriginalBody (bytes with nulls/truncation) > BodyUntruncated (legacy) > Body
+            var htmlBodyToDisplay = email.OriginalBodyHtml != null
+                ? System.Text.Encoding.UTF8.GetString(email.OriginalBodyHtml)
+                : (!string.IsNullOrEmpty(email.BodyUntruncatedHtml) 
+                    ? email.BodyUntruncatedHtml 
+                    : email.HtmlBody);
+            
+            var textBodyToDisplay = email.OriginalBodyText != null
+                ? System.Text.Encoding.UTF8.GetString(email.OriginalBodyText)
+                : (!string.IsNullOrEmpty(email.BodyUntruncatedText) 
+                    ? email.BodyUntruncatedText 
+                    : email.Body);
+
+            var model = new EmailDetailViewModel
+            {
+                Email = email,
+                AccountName = email.MailAccount?.Name ?? "Unknown account",
+                FormattedHtmlBody = !string.IsNullOrEmpty(htmlBodyToDisplay) 
+                    ? ResolveInlineImagesInHtml(SanitizeHtml(htmlBodyToDisplay, _viewOptions.BlockExternalResources), email.Attachments) 
+                    : string.Empty,
+                PlainTextBody = textBodyToDisplay ?? string.Empty,
+                DefaultToPlainText = _viewOptions.DefaultToPlainText,
+                BlockExternalResources = _viewOptions.BlockExternalResources,
+                HasHtmlBody = !string.IsNullOrEmpty(htmlBodyToDisplay),
+                HasPlainTextBody = !string.IsNullOrEmpty(textBodyToDisplay),
+            };
+
+            // Store return URL in ViewBag
+            ViewBag.ReturnUrl = returnUrl ?? Url.Action("Index");
+
+            // Log the email open action
+            if (_accessLogService != null && _serviceScopeFactory != null)
+            {
+                // Capture the current username before starting the background task
+                var currentUsername = _authService?.GetCurrentUserDisplayName(HttpContext);
+                
+                if (!string.IsNullOrEmpty(currentUsername))
+                {
+                    // Create a separate scope for logging to avoid DbContext concurrency issues
+                    Task.Run(async () =>
+                    {
+                        try
+                        {
+                            using var scope = _serviceScopeFactory.CreateScope();
+                            var accessLogService = scope.ServiceProvider.GetRequiredService<IAccessLogService>();
+                            
+                            await accessLogService.LogAccessAsync(currentUsername, AccessLogType.Open, 
+                                emailId: email.Id, 
+                                emailSubject: email.Subject.Length > 255 ? email.Subject.Substring(0, 255) : email.Subject,
+                                emailFrom: email.From.Length > 255 ? email.From.Substring(0, 255) : email.From);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Error logging email open action");
+                        }
+                    });
+                }
+            }
+
+            return View(model);
+        }
+
+        // Helper method to store search state in session
+        private void StoreSearchState(SearchViewModel searchModel)
+        {
+            try
+            {
+                var searchState = new
+                {
+                    SearchTerm = searchModel.SearchTerm,
+                    FromDate = searchModel.FromDate?.ToString("yyyy-MM-dd"),
+                    ToDate = searchModel.ToDate?.ToString("yyyy-MM-dd"),
+                    SelectedAccountId = searchModel.SelectedAccountId,
+                    SelectedFolder = searchModel.SelectedFolder,
+                    IsOutgoing = searchModel.IsOutgoing,
+                    PageNumber = searchModel.PageNumber,
+                    PageSize = searchModel.PageSize,
+                    SortBy = searchModel.SortBy,
+                    SortOrder = searchModel.SortOrder,
+                    ShowSelectionControls = searchModel.ShowSelectionControls
+                };
+
+                HttpContext.Session.SetString("LastSearchState",
+                    System.Text.Json.JsonSerializer.Serialize(searchState));
+
+                _logger.LogDebug("Stored search state in session");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to store search state in session");
+            }
+        }
+
+        // Helper method to restore search state from session
+        private string? GetStoredReturnUrl()
+        {
+            try
+            {
+                var searchStateJson = HttpContext.Session.GetString("LastSearchState");
+                if (string.IsNullOrEmpty(searchStateJson))
+                    return null;
+
+                var searchState = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(searchStateJson);
+
+                var queryParams = new List<string>();
+
+                foreach (var kvp in searchState)
+                {
+                    if (kvp.Value != null && !string.IsNullOrEmpty(kvp.Value.ToString()))
+                    {
+                        queryParams.Add($"{kvp.Key}={Uri.EscapeDataString(kvp.Value.ToString())}");
+                    }
+                }
+
+                if (queryParams.Any())
+                {
+                    return Url.Action("Index") + "?" + string.Join("&", queryParams);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to restore search state from session");
+            }
+
+            return Url.Action("Index");
+        }
+
+        // GET: Emails/Attachment/5/1
+        [EmailAccessRequired]
+        public async Task<IActionResult> Attachment(int emailId, int attachmentId)
+        {
+            var attachment = await _context.EmailAttachments
+                .Include(a => a.ArchivedEmail)
+                .Include(a => a.AttachmentContent)
+                .FirstOrDefaultAsync(a => a.Id == attachmentId && a.ArchivedEmailId == emailId);
+
+            if (attachment == null)
+            {
+                _logger.LogWarning("Attachment with ID {AttachmentId} for email {EmailId} not found", attachmentId, emailId);
+                return View("Details404");
+            }
+
+            return File(attachment.Content, attachment.ContentType, attachment.FileName);
+        }
+
+        // GET: Emails/AttachmentPreview/5/1
+        [EmailAccessRequired]
+        public async Task<IActionResult> AttachmentPreview(int emailId, int attachmentId)
+        {
+            var attachment = await _context.EmailAttachments
+                .Include(a => a.ArchivedEmail)
+                .Include(a => a.AttachmentContent)
+                .FirstOrDefaultAsync(a => a.Id == attachmentId && a.ArchivedEmailId == emailId);
+
+            if (attachment == null)
+            {
+                _logger.LogWarning("Attachment with ID {AttachmentId} for email {EmailId} not found", attachmentId, emailId);
+                return View("Details404");
+            }
+
+            // For PDF files, we need to ensure they can be displayed inline
+            if (attachment.ContentType == "application/pdf")
+            {
+                // Add headers to ensure PDF can be displayed inline
+                Response.Headers.Add("Content-Disposition", "inline");
+                Response.Headers.Add("X-Content-Type-Options", "nosniff");
+            }
+
+            // Return the attachment content without forcing download
+            return File(attachment.Content, attachment.ContentType);
+        }
+
+        // GET: Emails/DownloadAllAttachments/5
+        [EmailAccessRequired]
+        public async Task<IActionResult> DownloadAllAttachments(int id)
+        {
+            var email = await _context.ArchivedEmails
+                .Include(e => e.MailAccount)
+                .Include(e => e.Attachments)
+                    .ThenInclude(a => a.AttachmentContent)
+                .FirstOrDefaultAsync(e => e.Id == id);
+
+            if (email == null)
+            {
+                _logger.LogWarning("Email with ID {EmailId} not found", id);
+                return View("Details404");
+            }
+
+            // Check if email has attachments
+            if (!email.Attachments.Any())
+            {
+                TempData["ErrorMessage"] = "This email has no attachments.";
+                return RedirectToAction(nameof(Details), new { id });
+            }
+
+            // Create a ZIP file containing all attachments
+            using (var memoryStream = new MemoryStream())
+            {
+                using (var archive = new ZipArchive(memoryStream, ZipArchiveMode.Create, true))
+                {
+                    foreach (var attachment in email.Attachments)
+                    {
+                        var entry = archive.CreateEntry(attachment.FileName, CompressionLevel.Optimal);
+                        using (var entryStream = entry.Open())
+                        {
+                            entryStream.Write(attachment.Content, 0, attachment.Content.Length);
+                        }
+                    }
+                }
+
+                var zipBytes = memoryStream.ToArray();
+                var fileName = $"attachments-{email.Id}-{DateTime.Now:yyyyMMdd-HHmmss}.zip";
+
+                Response.Headers.Add("Content-Disposition", $"attachment; filename=\"{fileName}\"");
+                return File(zipBytes, "application/zip", fileName);
+            }
+        }
+
+        // GET: Emails/Export/5
+        [EmailAccessRequired]
+        public async Task<IActionResult> Export(int id, ExportFormat format = ExportFormat.Eml)
+        {
+            var email = await _context.ArchivedEmails
+                .Include(e => e.MailAccount)
+                .Include(e => e.Attachments)
+                    .ThenInclude(a => a.AttachmentContent)
+                .FirstOrDefaultAsync(e => e.Id == id);
+
+            if (email == null)
+            {
+                _logger.LogWarning("Email with ID {EmailId} not found", id);
+                return View("Details404");
+            }
+
+            // Get current user's allowed accounts for filtering
+            List<int> allowedAccountIds = null;
+            var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
+            var userService = HttpContext.RequestServices.GetService<IUserService>();
+            
+            if (authService != null && userService != null && !authService.IsCurrentUserAdmin(HttpContext))
+            {
+                var username = authService.GetCurrentUserDisplayName(HttpContext);
+                var user = await userService.GetUserByUsernameAsync(username);
+                if (user != null)
+                {
+                    var userAccounts = await userService.GetUserMailAccountsAsync(user.Id);
+                    allowedAccountIds = userAccounts.Select(a => a.Id).ToList();
+                }
+            }
+
+            // Check if user has access to this email's account
+            if (allowedAccountIds != null && !allowedAccountIds.Contains(email.MailAccountId))
+            {
+                TempData["ErrorMessage"] = "You do not have access to this email.";
+                return RedirectToAction("Index");
+            }
+
+            try
+            {
+                var exportParams = new ExportViewModel
+                {
+                    Format = format,
+                    EmailId = id
+                };
+
+                var fileBytes = await _emailCoreService.ExportEmailsAsync(exportParams, allowedAccountIds);
+
+                string contentType;
+                string fileName;
+
+                switch (format)
+                {
+                    case ExportFormat.Eml:
+                        contentType = "message/rfc822";
+                        fileName = $"email-{id}-{DateTime.Now:yyyyMMdd-HHmmss}.eml";
+                        break;
+                    default:
+                        contentType = "application/octet-stream";
+                        fileName = $"email-{id}.bin";
+                        break;
+                }
+
+                Response.Headers.Add("Content-Disposition", $"attachment; filename=\"{fileName}\"");
+                return File(fileBytes, contentType, fileName);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error exporting email {EmailId} as {Format}", id, format);
+                TempData["ErrorMessage"] = $"Export failed: {ex.Message}";
+                return RedirectToAction("Details", new { id });
+            }
+            finally
+            {
+                // Log the email export action
+                if (_accessLogService != null && _serviceScopeFactory != null)
+                {
+                    // Capture the current username before starting the background task
+                    var currentUsername = _authService?.GetCurrentUserDisplayName(HttpContext);
+                    
+                    if (!string.IsNullOrEmpty(currentUsername))
+                    {
+                        // Create a separate scope for logging to avoid DbContext concurrency issues
+                        Task.Run(async () =>
+                        {
+                            try
+                            {
+                                using var scope = _serviceScopeFactory.CreateScope();
+                                var accessLogService = scope.ServiceProvider.GetRequiredService<IAccessLogService>();
+                                
+                                // Create a new context for this scope to avoid concurrency issues
+                                using var newContext = scope.ServiceProvider.GetRequiredService<MailArchiverDbContext>();
+                                var email = await newContext.ArchivedEmails.FindAsync(id);
+                                if (email != null)
+                                {
+                                    await accessLogService.LogAccessAsync(currentUsername, AccessLogType.Download, 
+                                        emailId: email.Id, 
+                                        emailSubject: email.Subject.Length > 255 ? email.Subject.Substring(0, 255) : email.Subject,
+                                        emailFrom: email.From.Length > 255 ? email.From.Substring(0, 255) : email.From);
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogError(ex, "Error logging email export action");
+                            }
+                        });
+                    }
+                }
+            }
+        }
+
+        // GET: Emails/Restore/5
+        [HttpGet]
+        [EmailAccessRequired]
+        public async Task<IActionResult> Restore(int id)
+        {
+            var email = await _context.ArchivedEmails
+                .Include(e => e.MailAccount)
+                .FirstOrDefaultAsync(e => e.Id == id);
+
+            if (email == null)
+            {
+                _logger.LogWarning("Email with ID {EmailId} not found", id);
+                return View("Details404");
+            }
+
+            // Get current user's allowed accounts
+            List<int> allowedAccountIds = null;
+            var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
+            var userService = HttpContext.RequestServices.GetService<IUserService>();
+            
+            if (authService != null && userService != null && !authService.IsCurrentUserAdmin(HttpContext))
+            {
+                var username = authService.GetCurrentUserDisplayName(HttpContext);
+                var user = await userService.GetUserByUsernameAsync(username);
+                if (user != null)
+                {
+                    var userAccounts = await userService.GetUserMailAccountsAsync(user.Id);
+                    allowedAccountIds = userAccounts.Select(a => a.Id).ToList();
+                }
+            }
+
+            // Liste aller aktiven E-Mail-Konten abrufen (ohne IMPORT-Konten)
+            IQueryable<MailAccount> accountsQuery = _context.MailAccounts
+                .Where(a => a.IsEnabled && a.Provider != ProviderType.IMPORT)
+                .OrderBy(a => a.Name);
+            
+            // Filter by allowed accounts for non-admin users
+            if (allowedAccountIds != null)
+            {
+                if (allowedAccountIds.Any())
+                {
+                    accountsQuery = accountsQuery.Where(a => allowedAccountIds.Contains(a.Id));
+                }
+                else
+                {
+                    // User has no access to any accounts, return empty list
+                    accountsQuery = accountsQuery.Where(a => false);
+                }
+            }
+            
+            var accounts = await accountsQuery.ToListAsync();
+
+            var model = new EmailRestoreViewModel
+            {
+                EmailId = email.Id,
+                EmailSubject = email.Subject,
+                EmailDate = email.SentDate,
+                EmailSender = email.From,
+                AvailableAccounts = accounts.Select(a => new SelectListItem
+                {
+                    Value = a.Id.ToString(),
+                    Text = $"{a.Name} ({a.EmailAddress})"
+                }).ToList()
+            };
+
+            // Preselect the source account as the target when it is a valid restore target
+            // (enabled, non-IMPORT and within the user's allowed accounts)
+            var sourceAccountValid = accounts.Any(a => a.Id == email.MailAccountId);
+            if (sourceAccountValid)
+            {
+                model.TargetAccountId = email.MailAccountId;
+                var sourceItem = model.AvailableAccounts.First(a => a.Value == email.MailAccountId.ToString());
+                sourceItem.Selected = true;
+
+                var folders = await LoadFoldersForAccountAsync(email.MailAccountId);
+                model.AvailableFolders = folders.Select(f => new SelectListItem
+                {
+                    Value = f,
+                    Text = f
+                }).ToList();
+
+                // Preselect the source folder if present in the target, otherwise INBOX
+                var preselectedFolderItem = !string.IsNullOrEmpty(email.FolderName)
+                    ? model.AvailableFolders.FirstOrDefault(f => string.Equals(f.Value, email.FolderName, StringComparison.OrdinalIgnoreCase))
+                    : null;
+                if (preselectedFolderItem != null)
+                {
+                    preselectedFolderItem.Selected = true;
+                    model.TargetFolder = preselectedFolderItem.Value;
+                }
+                else
+                {
+                    var inbox = model.AvailableFolders.FirstOrDefault(f => f.Value.ToUpper() == "INBOX");
+                    if (inbox != null)
+                    {
+                        inbox.Selected = true;
+                        model.TargetFolder = inbox.Value;
+                    }
+                }
+            }
+            // If there's only one account, select it by default and load its folders
+            else if (model.AvailableAccounts.Count == 1)
+            {
+                model.TargetAccountId = int.Parse(model.AvailableAccounts[0].Value);
+                model.AvailableAccounts[0].Selected = true;
+                var folders = await LoadFoldersForAccountAsync(model.TargetAccountId);
+                model.AvailableFolders = folders.Select(f => new SelectListItem
+                {
+                    Value = f,
+                    Text = f
+                }).ToList();
+                // Select INBOX by default if available
+                var inbox = model.AvailableFolders.FirstOrDefault(f => f.Value.ToUpper() == "INBOX");
+                if (inbox != null)
+                {
+                    inbox.Selected = true;
+                    model.TargetFolder = inbox.Value;
+                }
+            }
+
+            return View(model);
+        }
+
+        // POST: Emails/Restore
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Restore(EmailRestoreViewModel model)
+        {
+            _logger.LogInformation("Restore POST method called with Email ID: {EmailId}, Target Account ID: {AccountId}, Target Folder: {Folder}",
+                model.EmailId, model.TargetAccountId, model.TargetFolder);
+
+            // Ignore validation errors for the display-only fields
+            if (ModelState.ContainsKey("EmailSender"))
+                ModelState.Remove("EmailSender");
+            if (ModelState.ContainsKey("EmailSubject"))
+                ModelState.Remove("EmailSubject");
+
+            // Get current user's allowed accounts
+            List<int> allowedAccountIds = null;
+            var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
+            var userService = HttpContext.RequestServices.GetService<IUserService>();
+            
+            if (authService != null && userService != null && !authService.IsCurrentUserAdmin(HttpContext))
+            {
+                var username = authService.GetCurrentUserDisplayName(HttpContext);
+                var user = await userService.GetUserByUsernameAsync(username);
+                if (user != null)
+                {
+                    var userAccounts = await userService.GetUserMailAccountsAsync(user.Id);
+                    allowedAccountIds = userAccounts.Select(a => a.Id).ToList();
+                }
+            }
+
+            // Check if user is allowed to access the target account
+            if (allowedAccountIds != null && !allowedAccountIds.Contains(model.TargetAccountId))
+            {
+                _logger.LogWarning("User {Username} attempted to restore email to account {AccountId} which they don't have access to", 
+                    authService?.GetCurrentUserDisplayName(HttpContext), model.TargetAccountId);
+                TempData["ErrorMessage"] = "You do not have access to the selected account.";
+                return RedirectToAction(nameof(Details), new { id = model.EmailId });
+            }
+
+            if (!ModelState.IsValid)
+            {
+                _logger.LogWarning("Model validation failed for email restoration");
+                foreach (var modelState in ModelState.Values)
+                {
+                    foreach (var error in modelState.Errors)
+                    {
+                        _logger.LogWarning("Validation error: {ErrorMessage}", error.ErrorMessage);
+                    }
+                }
+
+                // Reload account list if validation fails
+                var accounts = await _context.MailAccounts
+                    .Where(a => a.IsEnabled)
+                    .OrderBy(a => a.Name)
+                    .ToListAsync();
+
+                model.AvailableAccounts = accounts.Select(a => new SelectListItem
+                {
+                    Value = a.Id.ToString(),
+                    Text = $"{a.Name} ({a.EmailAddress})",
+                    Selected = a.Id == model.TargetAccountId
+                }).ToList();
+
+                // Reload folders for the selected account
+                if (model.TargetAccountId > 0)
+                {
+                    var targetAccount = await _context.MailAccounts.FindAsync(model.TargetAccountId);
+                    List<string> folders;
+                    
+                    if (targetAccount?.Provider == ProviderType.M365)
+                    {
+                        folders = await _graphEmailService.GetMailFoldersAsync(targetAccount);
+                    }
+                    else
+                    {
+                        var provider = await _providerFactory.GetServiceForAccountAsync(model.TargetAccountId);
+                        folders = await provider.GetMailFoldersAsync(model.TargetAccountId);
+                    }
+                    
+                    model.AvailableFolders = folders.Select(f => new SelectListItem
+                    {
+                        Value = f,
+                        Text = f,
+                        Selected = f == model.TargetFolder
+                    }).ToList();
+                }
+
+                // Reload email details if needed
+                var email = await _context.ArchivedEmails.FindAsync(model.EmailId);
+                if (email != null)
+                {
+                    model.EmailSubject = email.Subject;
+                    model.EmailSender = email.From;
+                    model.EmailDate = email.SentDate;
+                }
+
+                return View(model);
+            }
+
+            try
+            {
+                _logger.LogInformation("Attempting to restore email {EmailId} to folder '{Folder}' of account {AccountId}",
+                    model.EmailId, model.TargetFolder, model.TargetAccountId);
+
+                // Get target account to check provider type
+                var targetAccount = await _context.MailAccounts.FindAsync(model.TargetAccountId);
+                bool result;
+
+                // Route to appropriate service based on provider type
+                if (targetAccount?.Provider == ProviderType.M365)
+                {
+                    _logger.LogInformation("Using Graph API service for M365 account {AccountId}", model.TargetAccountId);
+                    var email = await _context.ArchivedEmails
+                        .Include(e => e.Attachments)
+                            .ThenInclude(a => a.AttachmentContent)
+                        .FirstOrDefaultAsync(e => e.Id == model.EmailId);
+                    
+                    if (email == null)
+                    {
+                        _logger.LogError("Email with ID {EmailId} not found", model.EmailId);
+                        TempData["ErrorMessage"] = "The email could not be found.";
+                        return RedirectToAction(nameof(Details), new { id = model.EmailId });
+                    }
+                    
+                    result = await _graphEmailService.RestoreEmailToFolderAsync(email, targetAccount, model.TargetFolder, model.PreserveFolderStructure);
+                }
+                else
+                {
+                    var restoreProvider = await _providerFactory.GetServiceForAccountAsync(model.TargetAccountId);
+                    result = await restoreProvider.RestoreEmailToFolderAsync(
+                        model.EmailId,
+                        model.TargetAccountId,
+                        model.TargetFolder,
+                        model.PreserveFolderStructure);
+                }
+
+                if (result)
+                {
+                    _logger.LogInformation("Email restoration successful");
+                    TempData["SuccessMessage"] = "The email has been successfully copied to the specified folder.";
+                    
+                    // Log the email restore action
+                    if (_accessLogService != null && _serviceScopeFactory != null)
+                    {
+                        // Capture the current username before starting the background task
+                        var currentUsername = _authService?.GetCurrentUserDisplayName(HttpContext);
+                        
+                        if (!string.IsNullOrEmpty(currentUsername))
+                        {
+                            // Create a separate scope for logging to avoid DbContext concurrency issues
+                            Task.Run(async () =>
+                            {
+                                try
+                                {
+                                    using var scope = _serviceScopeFactory.CreateScope();
+                                    var accessLogService = scope.ServiceProvider.GetRequiredService<IAccessLogService>();
+                                    
+                                    // Create a new context for this scope to avoid concurrency issues
+                                    using var newContext = scope.ServiceProvider.GetRequiredService<MailArchiverDbContext>();
+                                    var email = await newContext.ArchivedEmails.FindAsync(model.EmailId);
+                                    if (email != null)
+                                    {
+                                        await accessLogService.LogAccessAsync(currentUsername, AccessLogType.Restore, 
+                                            emailId: email.Id, 
+                                            emailSubject: email.Subject.Length > 255 ? email.Subject.Substring(0, 255) : email.Subject,
+                                            emailFrom: email.From.Length > 255 ? email.From.Substring(0, 255) : email.From,
+                                            mailAccountId: model.TargetAccountId);
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogError(ex, "Error logging email restore action");
+                                }
+                            });
+                        }
+                    }
+                    
+                    return RedirectToAction(nameof(Details), new { id = model.EmailId });
+                }
+                else
+                {
+                    _logger.LogWarning("Email restoration failed, but no exception was thrown");
+                    TempData["ErrorMessage"] = "The email could not be copied to the specified folder. Please check the logs.";
+                    return RedirectToAction(nameof(Details), new { id = model.EmailId });
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Exception occurred during email restoration");
+                TempData["ErrorMessage"] = $"An error occurred: {ex.Message}";
+                return RedirectToAction(nameof(Details), new { id = model.EmailId });
+            }
+        }
+
+        // POST: Emails/BatchRestoreStart - Startet Batch-Operation
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> BatchRestoreStart(List<int> ids, string returnUrl = null)
+        {
+            if (ids == null || !ids.Any())
+            {
+                TempData["ErrorMessage"] = "No emails selected for batch operation.";
+                return Redirect(returnUrl ?? Url.Action("Index"));
+            }
+
+            _logger.LogInformation("BatchRestoreStart called with {Count} emails. Thresholds: Async={AsyncThreshold}, MaxSync={MaxSync}, MaxAsync={MaxAsync}",
+                ids.Count, _batchOptions.AsyncThreshold, _batchOptions.MaxSyncEmails, _batchOptions.MaxAsyncEmails);
+
+            // Prüfe absolute Limits
+            if (ids.Count > _batchOptions.MaxAsyncEmails)
+            {
+                TempData["ErrorMessage"] = $"Too many emails selected ({ids.Count:N0}). Maximum allowed is {_batchOptions.MaxAsyncEmails:N0} emails per operation.";
+                return Redirect(returnUrl ?? Url.Action("Index"));
+            }
+
+            // Entscheide basierend auf konfigurierten Schwellenwerten
+            var useBackgroundJob = ShouldUseBackgroundJob(ids.Count);
+
+            if (useBackgroundJob)
+            {
+                _logger.LogInformation("Using background job for {Count} emails (threshold: {Threshold})",
+                    ids.Count, _batchOptions.AsyncThreshold);
+                return await StartAsyncBatchRestore(ids, returnUrl);
+            }
+
+            // Direkte Verarbeitung über Session
+            _logger.LogInformation("Using direct processing for {Count} emails (threshold: {Threshold})",
+                ids.Count, _batchOptions.AsyncThreshold);
+
+            try
+            {
+                // Fresh user selection: clear any leftover preserve-folder default from a prior "copy all" flow
+                HttpContext.Session.Remove("BatchRestorePreserveFolders");
+                HttpContext.Session.SetString("BatchRestoreIds", string.Join(",", ids));
+                HttpContext.Session.SetString("BatchRestoreReturnUrl", returnUrl ?? "");
+                return RedirectToAction("BatchRestore");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to store {Count} email IDs in session", ids.Count);
+
+                // Fallback zu Background Job wenn Session fehlschlägt
+                if (_batchRestoreService != null && ids.Count <= _batchOptions.MaxAsyncEmails)
+                {
+                    _logger.LogWarning("Session storage failed, falling back to background job");
+                    return await StartAsyncBatchRestore(ids, returnUrl);
+                }
+                else
+                {
+                    TempData["ErrorMessage"] = $"Too many emails selected for direct processing ({ids.Count:N0}). Maximum for direct processing is {_batchOptions.MaxSyncEmails:N0} emails.";
+                    return Redirect(returnUrl ?? Url.Action("Index"));
+                }
+            }
+        }
+
+        private bool ShouldUseBackgroundJob(int emailCount)
+        {
+            // Background Job wenn:
+            // 1. Service verfügbar ist UND
+            // 2. Anzahl über AsyncThreshold liegt UND
+            // 3. Anzahl unter MaxAsyncEmails liegt
+            if (_batchRestoreService == null)
+            {
+                _logger.LogDebug("Background service not available, using direct processing");
+                return false;
+            }
+
+            if (emailCount > _batchOptions.AsyncThreshold)
+            {
+                _logger.LogDebug("Email count {Count} exceeds async threshold {Threshold}, using background job",
+                    emailCount, _batchOptions.AsyncThreshold);
+                return true;
+            }
+
+            _logger.LogDebug("Email count {Count} below async threshold {Threshold}, using direct processing",
+                emailCount, _batchOptions.AsyncThreshold);
+            return false;
+        }
+
+        private async Task<List<string>> LoadFoldersForAccountAsync(int accountId)
+        {
+            try
+            {
+                var targetAccount = await _context.MailAccounts.FindAsync(accountId);
+                if (targetAccount == null)
+                {
+                    return new List<string> { "INBOX" };
+                }
+
+                List<string> folders;
+                if (targetAccount.Provider == ProviderType.M365)
+                {
+                    folders = await _graphEmailService.GetMailFoldersAsync(targetAccount);
+                }
+                else if (targetAccount.Provider == ProviderType.IMAP)
+                {
+                    var provider = await _providerFactory.GetServiceForAccountAsync(accountId);
+                    folders = await provider.GetMailFoldersAsync(accountId);
+                }
+                else
+                {
+                    return new List<string> { "INBOX" };
+                }
+
+                if (folders == null || !folders.Any())
+                {
+                    return new List<string> { "INBOX" };
+                }
+                return folders;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Exception while loading folders for account {AccountId}", accountId);
+                return new List<string> { "INBOX" };
+            }
+        }
+
+        // GET: Emails/BatchRestore - Zeigt das Form an
+        [HttpGet]
+        public async Task<IActionResult> BatchRestore()
+        {
+            var idsString = HttpContext.Session.GetString("BatchRestoreIds");
+            var returnUrl = HttpContext.Session.GetString("BatchRestoreReturnUrl");
+
+            if (string.IsNullOrEmpty(idsString))
+            {
+                TempData["ErrorMessage"] = "No emails selected for batch operation.";
+                return RedirectToAction("Index");
+            }
+
+            var ids = idsString.Split(',').Select(int.Parse).ToList();
+
+            // Preserve-folder-structure default (set by the "copy all emails of an account" flow)
+            var preserveFoldersStr = HttpContext.Session.GetString("BatchRestorePreserveFolders");
+            var preserveFolderStructureDefault = string.Equals(preserveFoldersStr, "true", StringComparison.OrdinalIgnoreCase);
+            HttpContext.Session.Remove("BatchRestorePreserveFolders");
+
+            // Get current user's allowed accounts
+            List<int> allowedAccountIds = null;
+            var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
+            var userService = HttpContext.RequestServices.GetService<IUserService>();
+            
+            if (authService != null && userService != null && !authService.IsCurrentUserAdmin(HttpContext))
+            {
+                var username = authService.GetCurrentUserDisplayName(HttpContext);
+                var user = await userService.GetUserByUsernameAsync(username);
+                if (user != null)
+                {
+                    var userAccounts = await userService.GetUserMailAccountsAsync(user.Id);
+                    allowedAccountIds = userAccounts.Select(a => a.Id).ToList();
+                }
+            }
+
+            // Get active email accounts for dropdown (without IMPORT accounts)
+            IQueryable<MailAccount> accountsQuery = _context.MailAccounts
+                .Where(a => a.IsEnabled && a.Provider != ProviderType.IMPORT)
+                .OrderBy(a => a.Name);
+            
+            // Filter by allowed accounts for non-admin users
+            if (allowedAccountIds != null)
+            {
+                if (allowedAccountIds.Any())
+                {
+                    accountsQuery = accountsQuery.Where(a => allowedAccountIds.Contains(a.Id));
+                }
+                else
+                {
+                    // User has no access to any accounts, return empty list
+                    accountsQuery = accountsQuery.Where(a => false);
+                }
+            }
+            
+            var accounts = await accountsQuery.ToListAsync();
+
+            // Detect source mailbox(es) of the selected emails to preselect the target
+            var sourceInfo = await _context.ArchivedEmails
+                .Where(e => ids.Contains(e.Id))
+                .Select(e => new { e.MailAccountId, e.FolderName })
+                .ToListAsync();
+
+            var distinctSourceAccounts = sourceInfo.Select(s => s.MailAccountId).Distinct().ToList();
+            var distinctSourceFolders = sourceInfo.Select(s => s.FolderName ?? "")
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+            _logger.LogInformation("BatchRestore GET: {EmailCount} emails from {SourceCount} distinct source account(s): [{Accounts}], {FolderCount} distinct folder(s), {AvailableCount} available target account(s): [{AvailableAccounts}]",
+                ids.Count, distinctSourceAccounts.Count, string.Join(",", distinctSourceAccounts),
+                distinctSourceFolders.Count, accounts.Count, string.Join(",", accounts.Select(a => a.Id)));
+
+            // Preselect the source account as target when all emails come from one valid source account
+            var preselectedAccountId = 0;
+            string preselectedFolder = null;
+            if (distinctSourceAccounts.Count == 1)
+            {
+                var sourceAccountId = distinctSourceAccounts[0];
+                var sourceInAccounts = accounts.Any(a => a.Id == sourceAccountId);
+                _logger.LogInformation("BatchRestore GET: single source account {AccountId}, in available targets: {InAccounts}", sourceAccountId, sourceInAccounts);
+                if (sourceInAccounts)
+                {
+                    preselectedAccountId = sourceAccountId;
+                    if (distinctSourceFolders.Count == 1 && !string.IsNullOrEmpty(distinctSourceFolders[0]))
+                    {
+                        preselectedFolder = distinctSourceFolders[0];
+                    }
+                }
+            }
+            else
+            {
+                _logger.LogInformation("BatchRestore GET: not preselecting target (sourceAccounts={Count})", distinctSourceAccounts.Count);
+            }
+
+            var model = new BatchRestoreViewModel
+            {
+                SelectedEmailIds = ids,
+                ReturnUrl = returnUrl,
+                PreserveFolderStructure = preserveFolderStructureDefault,
+                AvailableAccounts = accounts.Select(a => new SelectListItem
+                {
+                    Value = a.Id.ToString(),
+                    Text = $"{a.Name} ({a.EmailAddress})"
+                }).ToList()
+            };
+
+            // Preselect the source account as the target if all emails come from one valid source account
+            if (preselectedAccountId > 0)
+            {
+                model.TargetAccountId = preselectedAccountId;
+                var sourceItem = model.AvailableAccounts.First(a => a.Value == preselectedAccountId.ToString());
+                sourceItem.Selected = true;
+
+                var folders = await LoadFoldersForAccountAsync(preselectedAccountId);
+                model.AvailableFolders = folders.Select(f => new SelectListItem
+                {
+                    Value = f,
+                    Text = f
+                }).ToList();
+
+                SelectListItem preselectedFolderItem = null;
+                if (!string.IsNullOrEmpty(preselectedFolder))
+                {
+                    preselectedFolderItem = model.AvailableFolders.FirstOrDefault(f => string.Equals(f.Value, preselectedFolder, StringComparison.OrdinalIgnoreCase));
+                }
+                if (preselectedFolderItem != null)
+                {
+                    preselectedFolderItem.Selected = true;
+                    model.TargetFolder = preselectedFolderItem.Value;
+                }
+                else
+                {
+                    var inbox = model.AvailableFolders.FirstOrDefault(f => f.Value.ToUpper() == "INBOX");
+                    if (inbox != null)
+                    {
+                        inbox.Selected = true;
+                        model.TargetFolder = inbox.Value;
+                    }
+                }
+            }
+            // If there's only one account, select it by default and load its folders
+            else if (model.AvailableAccounts.Count == 1)
+            {
+                model.TargetAccountId = int.Parse(model.AvailableAccounts[0].Value);
+                var folders = await LoadFoldersForAccountAsync(model.TargetAccountId);
+                model.AvailableFolders = folders.Select(f => new SelectListItem
+                {
+                    Value = f,
+                    Text = f
+                }).ToList();
+
+                // Select INBOX by default if available
+                var inbox = model.AvailableFolders.FirstOrDefault(f => f.Value.ToUpper() == "INBOX");
+                if (inbox != null)
+                {
+                    inbox.Selected = true;
+                    model.TargetFolder = inbox.Value;
+                }
+            }
+
+            return View(model);
+        }
+
+        // POST: Emails/BatchRestore
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> BatchRestore(BatchRestoreViewModel model)
+        {
+            _logger.LogInformation("BatchRestore POST method called with {Count} emails, Target Account ID: {AccountId}, Target Folder: {Folder}",
+                model.SelectedEmailIds.Count, model.TargetAccountId, model.TargetFolder);
+
+            // Get current user's allowed accounts
+            List<int> allowedAccountIds = null;
+            var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
+            var userService = HttpContext.RequestServices.GetService<IUserService>();
+            
+            if (authService != null && userService != null && !authService.IsCurrentUserAdmin(HttpContext))
+            {
+                var username = authService.GetCurrentUserDisplayName(HttpContext);
+                var user = await userService.GetUserByUsernameAsync(username);
+                if (user != null)
+                {
+                    var userAccounts = await userService.GetUserMailAccountsAsync(user.Id);
+                    allowedAccountIds = userAccounts.Select(a => a.Id).ToList();
+                }
+            }
+
+            // Check if user is allowed to access the target account
+            if (allowedAccountIds != null && !allowedAccountIds.Contains(model.TargetAccountId))
+            {
+                _logger.LogWarning("User {Username} attempted to restore emails to account {AccountId} which they don't have access to", 
+                    authService?.GetCurrentUserDisplayName(HttpContext), model.TargetAccountId);
+                TempData["ErrorMessage"] = "You do not have access to the selected account.";
+                return Redirect(model.ReturnUrl ?? Url.Action("Index"));
+            }
+
+            // Hole IDs aus Session falls sie nicht im Model sind
+            if (!model.SelectedEmailIds.Any())
+            {
+                var idsString = HttpContext.Session.GetString("BatchRestoreIds");
+                if (!string.IsNullOrEmpty(idsString))
+                {
+                    model.SelectedEmailIds = idsString.Split(',').Select(int.Parse).ToList();
+                }
+            }
+
+            if (!ModelState.IsValid)
+            {
+                _logger.LogWarning("Model validation failed for batch email restoration");
+                // Reload account list if validation fails
+                var accounts = await _context.MailAccounts
+                    .Where(a => a.IsEnabled)
+                    .OrderBy(a => a.Name)
+                    .ToListAsync();
+
+                model.AvailableAccounts = accounts.Select(a => new SelectListItem
+                {
+                    Value = a.Id.ToString(),
+                    Text = $"{a.Name} ({a.EmailAddress})",
+                    Selected = a.Id == model.TargetAccountId
+                }).ToList();
+
+                // Reload folders for the selected account
+                if (model.TargetAccountId > 0)
+                {
+                    var targetAccount = await _context.MailAccounts.FindAsync(model.TargetAccountId);
+                    List<string> folders;
+                    
+                    if (targetAccount?.Provider == ProviderType.M365)
+                    {
+                        folders = await _graphEmailService.GetMailFoldersAsync(targetAccount);
+                    }
+                    else
+                    {
+                        var provider = await _providerFactory.GetServiceForAccountAsync(model.TargetAccountId);
+                        folders = await provider.GetMailFoldersAsync(model.TargetAccountId);
+                    }
+                    
+                    model.AvailableFolders = folders.Select(f => new SelectListItem
+                    {
+                        Value = f,
+                        Text = f,
+                        Selected = f == model.TargetFolder
+                    }).ToList();
+                }
+
+                return View(model);
+            }
+
+            try
+            {
+                _logger.LogInformation("Attempting to restore {Count} emails to folder '{Folder}' of account {AccountId}",
+                    model.SelectedEmailIds.Count, model.TargetFolder, model.TargetAccountId);
+
+                // Log the batch restore action
+                var currentUsername = _authService?.GetCurrentUserDisplayName(HttpContext);
+                if (!string.IsNullOrEmpty(currentUsername))
+                {
+                    await _accessLogService.LogAccessAsync(currentUsername, AccessLogType.Restore, 
+                        searchParameters: $"Started batch restore for {model.SelectedEmailIds.Count} emails to account {model.TargetAccountId} in folder {model.TargetFolder}");
+                }
+
+                // Get target account to check provider type
+                var targetAccount = await _context.MailAccounts.FindAsync(model.TargetAccountId);
+                int successful, failed;
+
+                // Route to appropriate service based on provider type
+                if (targetAccount?.Provider == ProviderType.M365)
+                {
+                    _logger.LogInformation("Using Graph API service for M365 account {AccountId}, preserveFolderStructure={Preserve}", model.TargetAccountId, model.PreserveFolderStructure);
+                    
+                    // For M365, we need to restore emails one by one using the Graph API
+                    successful = 0;
+                    failed = 0;
+                    
+                    foreach (var emailId in model.SelectedEmailIds)
+                    {
+                        try
+                        {
+                            var email = await _context.ArchivedEmails
+                                .Include(e => e.Attachments)
+                                    .ThenInclude(a => a.AttachmentContent)
+                                .FirstOrDefaultAsync(e => e.Id == emailId);
+                            
+                            if (email == null)
+                            {
+                                _logger.LogWarning("Email with ID {EmailId} not found during batch restore", emailId);
+                                failed++;
+                                continue;
+                            }
+                            
+                            var result = await _graphEmailService.RestoreEmailToFolderAsync(email, targetAccount, model.TargetFolder, model.PreserveFolderStructure);
+                            if (result)
+                            {
+                                successful++;
+                                _logger.LogInformation("Successfully restored email {EmailId} to M365 account {AccountId}", emailId, model.TargetAccountId);
+                            }
+                            else
+                            {
+                                failed++;
+                                _logger.LogWarning("Failed to restore email {EmailId} to M365 account {AccountId}", emailId, model.TargetAccountId);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            failed++;
+                            _logger.LogError(ex, "Exception occurred during batch email restoration of email {EmailId} to M365 account {AccountId}", emailId, model.TargetAccountId);
+                        }
+                    }
+                }
+                else
+                {
+                    var batchProvider = await _providerFactory.GetServiceForAccountAsync(model.TargetAccountId);
+                    var result = await batchProvider.RestoreMultipleEmailsWithProgressAsync(
+                        model.SelectedEmailIds,
+                        model.TargetAccountId,
+                        model.TargetFolder,
+                        model.PreserveFolderStructure,
+                        (processed, successCount, failedCount) => {
+                            // Empty progress callback for synchronous processing
+                        });
+                    
+                    successful = result.Successful;
+                    failed = result.Failed;
+                }
+
+                if (successful > 0)
+                {
+                    if (failed == 0)
+                    {
+                        TempData["SuccessMessage"] = $"All {successful} emails have been successfully copied to the specified folder.";
+                    }
+                    else
+                    {
+                        TempData["SuccessMessage"] = $"{successful} emails have been copied, but {failed} could not be copied. Check the logs for details.";
+                    }
+                }
+                else
+                {
+                    TempData["ErrorMessage"] = "None of the selected emails could be copied. Please check the logs for details.";
+                }
+
+                // Session-Daten löschen
+                HttpContext.Session.Remove("BatchRestoreIds");
+                HttpContext.Session.Remove("BatchRestoreReturnUrl");
+
+                // Redirect to the return URL if provided, otherwise to the index
+                return Redirect(model.ReturnUrl ?? Url.Action("Index"));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Exception occurred during batch email restoration");
+                TempData["ErrorMessage"] = $"An error occurred: {ex.Message}";
+                return Redirect(model.ReturnUrl ?? Url.Action("Index"));
+            }
+        }
+
+        // GET: Emails/StartAsyncBatchRestoreFromAccount
+        [HttpGet]
+        public async Task<IActionResult> StartAsyncBatchRestoreFromAccount(int accountId, string returnUrl = null, bool preserveFolders = false)
+        {
+            var account = await _context.MailAccounts.FindAsync(accountId);
+            if (account == null)
+            {
+                TempData["ErrorMessage"] = "Mail account not found.";
+                return Redirect(returnUrl ?? Url.Action("Index"));
+            }
+
+            var emailIds = await _context.ArchivedEmails
+                .Where(e => e.MailAccountId == accountId)
+                .Select(e => e.Id)
+                .ToListAsync();
+
+            if (!emailIds.Any())
+            {
+                TempData["ErrorMessage"] = "No emails found to copy for this account.";
+                return Redirect(returnUrl ?? Url.Action("Index"));
+            }
+
+            _logger.LogInformation("Account {AccountId} has {Count} emails to process", accountId, emailIds.Count);
+
+            // Prüfe absolute Limits
+            if (emailIds.Count > _batchOptions.MaxAsyncEmails)
+            {
+                TempData["ErrorMessage"] = $"Too many emails in this account ({emailIds.Count:N0}). Maximum allowed is {_batchOptions.MaxAsyncEmails:N0} emails per operation.";
+                return Redirect(returnUrl ?? Url.Action("Index"));
+            }
+
+            // Für Account-Restores: Verwende Background-Job wenn verfügbar und sinnvoll
+            // Session-basierte Verarbeitung nur für sehr kleine Accounts (< 50 Emails)
+            var useBackgroundJob = _batchRestoreService != null && emailIds.Count >= _batchOptions.AsyncThreshold;
+
+            if (useBackgroundJob)
+            {
+                _logger.LogInformation("Using background job for account restore with {Count} emails", emailIds.Count);
+                return await StartAsyncBatchRestore(emailIds, returnUrl, preserveFolderStructureDefault: preserveFolders);
+            }
+            else
+            {
+                // Verwende normale Session-basierte Verarbeitung nur für sehr kleine Accounts
+                // Berechne ungefähre Session-Größe (jede ID ca. 10 Zeichen + Komma)
+                var estimatedSessionSize = emailIds.Count * 11; // konservative Schätzung
+                var maxSafeSessionSize = 3000; // Sicherer Grenzwert unter typischen 4KB Session-Limits
+
+                if (estimatedSessionSize > maxSafeSessionSize)
+                {
+                    _logger.LogWarning("Email count {Count} would exceed safe session size ({EstimatedSize} bytes), forcing background job", 
+                        emailIds.Count, estimatedSessionSize);
+                    
+                    if (_batchRestoreService != null)
+                    {
+                        return await StartAsyncBatchRestore(emailIds, returnUrl, preserveFolderStructureDefault: preserveFolders);
+                    }
+                    else
+                    {
+                        TempData["ErrorMessage"] = $"Too many emails ({emailIds.Count:N0}) for direct processing and background service is not available. Please contact your administrator.";
+                        return Redirect(returnUrl ?? Url.Action("Index"));
+                    }
+                }
+
+                try
+                {
+                    HttpContext.Session.SetString("BatchRestoreIds", string.Join(",", emailIds));
+                    HttpContext.Session.SetString("BatchRestoreReturnUrl", returnUrl ?? "");
+                    if (preserveFolders)
+                    {
+                        HttpContext.Session.SetString("BatchRestorePreserveFolders", "true");
+                    }
+                    _logger.LogInformation("Using session-based processing for {Count} emails", emailIds.Count);
+                    return RedirectToAction("BatchRestore");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to store {Count} email IDs in session", emailIds.Count);
+
+                    if (_batchRestoreService != null)
+                    {
+                        _logger.LogWarning("Session storage failed, falling back to background job");
+                        return await StartAsyncBatchRestore(emailIds, returnUrl, preserveFolderStructureDefault: preserveFolders);
+                    }
+                    else
+                    {
+                        TempData["ErrorMessage"] = "Too many emails to process. Please try with a smaller selection.";
+                        return Redirect(returnUrl ?? Url.Action("Index"));
+                    }
+                }
+            }
+        }
+
+        // Asynchrone Batch-Restore-Methoden (nur wenn Service verfügbar)
+        private async Task<IActionResult> StartAsyncBatchRestore(List<int> ids, string returnUrl, bool preserveFolderStructureDefault = false)
+        {
+            if (_batchRestoreService == null)
+            {
+                // Fallback zur Session-basierten Verarbeitung
+                try
+                {
+                    HttpContext.Session.SetString("BatchRestoreIds", string.Join(",", ids));
+                    HttpContext.Session.SetString("BatchRestoreReturnUrl", returnUrl ?? "");
+                    if (preserveFolderStructureDefault)
+                    {
+                        HttpContext.Session.SetString("BatchRestorePreserveFolders", "true");
+                    }
+                    return RedirectToAction("BatchRestore");
+                }
+                catch
+                {
+                    TempData["ErrorMessage"] = "Too many emails selected. Please select fewer emails and try again.";
+                    return Redirect(returnUrl ?? Url.Action("Index"));
+                }
+            }
+
+            // Speichere die Email-IDs in der Session um HTTP 400-Fehler bei großen Listen zu vermeiden
+            try
+            {
+                HttpContext.Session.SetString("AsyncBatchRestoreIds", string.Join(",", ids));
+                HttpContext.Session.SetString("AsyncBatchRestoreReturnUrl", returnUrl ?? "");
+                _logger.LogInformation("Stored {Count} email IDs in session for async batch restore", ids.Count);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to store {Count} email IDs in session for async batch restore", ids.Count);
+                TempData["ErrorMessage"] = "Too many emails to process. Please contact your administrator.";
+                return Redirect(returnUrl ?? Url.Action("Index"));
+            }
+
+            // Get current user's allowed accounts
+            List<int> allowedAccountIds = null;
+            var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
+            var userService = HttpContext.RequestServices.GetService<IUserService>();
+            
+            if (authService != null && userService != null && !authService.IsCurrentUserAdmin(HttpContext))
+            {
+                var username = authService.GetCurrentUserDisplayName(HttpContext);
+                var user = await userService.GetUserByUsernameAsync(username);
+                if (user != null)
+                {
+                    var userAccounts = await userService.GetUserMailAccountsAsync(user.Id);
+                    allowedAccountIds = userAccounts.Select(a => a.Id).ToList();
+                }
+            }
+
+            // Get active email accounts (without IMPORT accounts)
+            IQueryable<MailAccount> accountsQuery = _context.MailAccounts
+                .Where(a => a.IsEnabled && a.Provider != ProviderType.IMPORT)
+                .OrderBy(a => a.Name);
+            
+            // Filter by allowed accounts for non-admin users
+            if (allowedAccountIds != null)
+            {
+                if (allowedAccountIds.Any())
+                {
+                    accountsQuery = accountsQuery.Where(a => allowedAccountIds.Contains(a.Id));
+                }
+                else
+                {
+                    // User has no access to any accounts, return empty list
+                    accountsQuery = accountsQuery.Where(a => false);
+                }
+            }
+            
+            var accounts = await accountsQuery.ToListAsync();
+
+            if (!accounts.Any())
+            {
+                TempData["ErrorMessage"] = "No enabled email accounts found.";
+                return Redirect(returnUrl ?? Url.Action("Index"));
+            }
+
+            // Detect source mailbox(es) of the selected emails to preselect the target.
+            // Chunked to avoid huge IN-clauses for large async batches (up to MaxAsyncEmails).
+            var sourceAccountIds = new HashSet<int>();
+            var sourceFolders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            const int chunkSize = 1000;
+            for (int i = 0; i < ids.Count; i += chunkSize)
+            {
+                var chunk = ids.Skip(i).Take(chunkSize).ToList();
+                var chunkInfo = await _context.ArchivedEmails
+                    .Where(e => chunk.Contains(e.Id))
+                    .Select(e => new { e.MailAccountId, e.FolderName })
+                    .ToListAsync();
+                foreach (var info in chunkInfo)
+                {
+                    sourceAccountIds.Add(info.MailAccountId);
+                    sourceFolders.Add(info.FolderName ?? "");
+                }
+            }
+
+            var distinctSourceAccounts = sourceAccountIds.ToList();
+            var distinctSourceFolders = sourceFolders.ToList();
+
+            // Preselect the source account as target when all emails come from one valid source account
+            var preselectedAccountId = 0;
+            string preselectedFolder = null;
+            if (distinctSourceAccounts.Count == 1)
+            {
+                var sourceAccountId = distinctSourceAccounts[0];
+                if (accounts.Any(a => a.Id == sourceAccountId))
+                {
+                    preselectedAccountId = sourceAccountId;
+                    if (distinctSourceFolders.Count == 1 && !string.IsNullOrEmpty(distinctSourceFolders[0]))
+                    {
+                        preselectedFolder = distinctSourceFolders[0];
+                    }
+                }
+            }
+
+            var model = new AsyncBatchRestoreViewModel
+            {
+                // Nicht die IDs im ViewModel speichern, um HTTP 400 bei POST zu vermeiden
+                EmailIds = new List<int>(),
+                ReturnUrl = returnUrl,
+                PreserveFolderStructure = preserveFolderStructureDefault,
+                AvailableAccounts = accounts.Select(a => new SelectListItem
+                {
+                    Value = a.Id.ToString(),
+                    Text = $"{a.Name} ({a.EmailAddress})"
+                }).ToList()
+            };
+
+            // Setze EmailCount für die View
+            ViewBag.EmailCount = ids.Count;
+
+            // Preselect the source account as the target if all emails come from one valid source account
+            if (preselectedAccountId > 0)
+            {
+                model.TargetAccountId = preselectedAccountId;
+                var sourceItem = model.AvailableAccounts.First(a => a.Value == preselectedAccountId.ToString());
+                sourceItem.Selected = true;
+
+                var folders = await LoadFoldersForAccountAsync(preselectedAccountId);
+                model.AvailableFolders = folders.Select(f => new SelectListItem
+                {
+                    Value = f,
+                    Text = f
+                }).ToList();
+
+                SelectListItem preselectedFolderItem = null;
+                if (!string.IsNullOrEmpty(preselectedFolder))
+                {
+                    preselectedFolderItem = model.AvailableFolders.FirstOrDefault(f => string.Equals(f.Value, preselectedFolder, StringComparison.OrdinalIgnoreCase));
+                }
+                if (preselectedFolderItem != null)
+                {
+                    preselectedFolderItem.Selected = true;
+                    model.TargetFolder = preselectedFolderItem.Value;
+                }
+                else
+                {
+                    var inbox = model.AvailableFolders.FirstOrDefault(f => f.Value.ToUpper() == "INBOX");
+                    if (inbox != null)
+                    {
+                        inbox.Selected = true;
+                        model.TargetFolder = inbox.Value;
+                    }
+                }
+            }
+            // Auto-select single account
+            else if (model.AvailableAccounts.Count == 1)
+            {
+                model.TargetAccountId = int.Parse(model.AvailableAccounts[0].Value);
+                var folders = await LoadFoldersForAccountAsync(model.TargetAccountId);
+                model.AvailableFolders = folders.Select(f => new SelectListItem
+                {
+                    Value = f,
+                    Text = f
+                }).ToList();
+
+                var inbox = model.AvailableFolders.FirstOrDefault(f => f.Value.ToUpper() == "INBOX");
+                if (inbox != null)
+                {
+                    inbox.Selected = true;
+                    model.TargetFolder = inbox.Value;
+                }
+            }
+
+            return View("AsyncBatchRestore", model);
+        }
+
+        // POST: Emails/StartAsyncBatchRestore
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> StartAsyncBatchRestore(AsyncBatchRestoreViewModel model)
+        {
+            if (_batchRestoreService == null)
+            {
+                TempData["ErrorMessage"] = "Asynchronous batch restore is not available.";
+                return Redirect(model.ReturnUrl ?? Url.Action("Index"));
+            }
+
+            // Hole IDs aus Session (sie wurden dort gespeichert um HTTP 400 zu vermeiden)
+            var idsString = HttpContext.Session.GetString("AsyncBatchRestoreIds");
+            if (string.IsNullOrEmpty(idsString))
+            {
+                TempData["ErrorMessage"] = "No emails selected for async batch restore.";
+                return Redirect(model.ReturnUrl ?? Url.Action("Index"));
+            }
+
+            var emailIds = idsString.Split(',').Select(int.Parse).ToList();
+            _logger.LogInformation("Retrieved {Count} email IDs from session for async batch restore", emailIds.Count);
+
+            // Get current user's allowed accounts
+            List<int> allowedAccountIds = null;
+            var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
+            var userService = HttpContext.RequestServices.GetService<IUserService>();
+            
+            if (authService != null && userService != null && !authService.IsCurrentUserAdmin(HttpContext))
+            {
+                var username = authService.GetCurrentUserDisplayName(HttpContext);
+                var user = await userService.GetUserByUsernameAsync(username);
+                if (user != null)
+                {
+                    var userAccounts = await userService.GetUserMailAccountsAsync(user.Id);
+                    allowedAccountIds = userAccounts.Select(a => a.Id).ToList();
+                }
+            }
+
+            // Check if user is allowed to access the target account
+            if (allowedAccountIds != null && !allowedAccountIds.Contains(model.TargetAccountId))
+            {
+                _logger.LogWarning("User {Username} attempted to restore emails to account {AccountId} which they don't have access to", 
+                    authService?.GetCurrentUserDisplayName(HttpContext), model.TargetAccountId);
+                TempData["ErrorMessage"] = "You do not have access to the selected account.";
+                return Redirect(model.ReturnUrl ?? Url.Action("Index"));
+            }
+
+            if (!ModelState.IsValid)
+            {
+                // Reload data
+                var accounts = await _context.MailAccounts
+                    .Where(a => a.IsEnabled)
+                    .OrderBy(a => a.Name)
+                    .ToListAsync();
+
+                model.AvailableAccounts = accounts.Select(a => new SelectListItem
+                {
+                    Value = a.Id.ToString(),
+                    Text = $"{a.Name} ({a.EmailAddress})",
+                    Selected = a.Id == model.TargetAccountId
+                }).ToList();
+
+                if (model.TargetAccountId > 0)
+                {
+                    var provider = await _providerFactory.GetServiceForAccountAsync(model.TargetAccountId);
+                    var folders = await provider.GetMailFoldersAsync(model.TargetAccountId);
+                    model.AvailableFolders = folders.Select(f => new SelectListItem
+                    {
+                        Value = f,
+                        Text = f,
+                        Selected = f == model.TargetFolder
+                    }).ToList();
+                }
+
+                // Setze EmailCount für die View
+                ViewBag.EmailCount = emailIds.Count;
+
+                return View("AsyncBatchRestore", model);
+            }
+
+            try
+            {
+                var job = new BatchRestoreJob
+                {
+                    EmailIds = emailIds, // Verwende IDs aus Session
+                    TargetAccountId = model.TargetAccountId,
+                    TargetFolder = model.TargetFolder,
+                    PreserveFolderStructure = model.PreserveFolderStructure,
+                    ReturnUrl = model.ReturnUrl ?? "",
+                    UserId = HttpContext.User.Identity?.Name ?? "Anonymous"
+                };
+
+                var jobId = _batchRestoreService.QueueJob(job);
+
+                // Log the batch restore action
+                var currentUsername = _authService?.GetCurrentUserDisplayName(HttpContext);
+                if (!string.IsNullOrEmpty(currentUsername))
+                {
+                    await _accessLogService.LogAccessAsync(currentUsername, AccessLogType.Restore, 
+                        searchParameters: $"Started batch restore for {emailIds.Count} emails to account {model.TargetAccountId} in folder {model.TargetFolder}");
+                }
+
+                // Session-Daten löschen
+                HttpContext.Session.Remove("AsyncBatchRestoreIds");
+                HttpContext.Session.Remove("AsyncBatchRestoreReturnUrl");
+
+                TempData["SuccessMessage"] = $"Batch restore job started with {emailIds.Count:N0} emails. Job ID: {jobId}";
+
+                return RedirectToAction("BatchRestoreStatus", new { jobId });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to start async batch restore");
+                TempData["ErrorMessage"] = $"Failed to start batch restore: {ex.Message}";
+                return Redirect(model.ReturnUrl ?? Url.Action("Index"));
+            }
+        }
+
+        // GET: Emails/BatchRestoreStatus
+        [HttpGet]
+        public IActionResult BatchRestoreStatus(string jobId)
+        {
+            _logger.LogDebug("BatchRestoreStatus called with jobId: {JobId}", jobId ?? "null");
+
+            if (_batchRestoreService == null)
+            {
+                _logger.LogWarning("Batch restore service is not available");
+                TempData["ErrorMessage"] = "Batch restore service is not available.";
+                return RedirectToAction("Index");
+            }
+
+            if (string.IsNullOrEmpty(jobId))
+            {
+                _logger.LogWarning("Empty or null jobId provided to BatchRestoreStatus");
+                TempData["ErrorMessage"] = "Invalid job ID.";
+                return RedirectToAction("Index");
+            }
+
+            var job = _batchRestoreService.GetJob(jobId);
+            if (job == null)
+            {
+                _logger.LogWarning("Job with ID {JobId} not found in BatchRestoreService", jobId);
+                TempData["ErrorMessage"] = "Batch restore job not found. The job may have been completed or cleaned up.";
+                return RedirectToAction("Jobs");
+            }
+
+            _logger.LogDebug("Successfully retrieved job {JobId} with status {Status}", jobId, job.Status);
+            return View(job);
+        }
+
+        // POST: Emails/CancelBatchRestore
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public IActionResult CancelBatchRestore(string jobId, string returnUrl = null)
+        {
+            if (_batchRestoreService == null)
+            {
+                TempData["ErrorMessage"] = "Batch restore service is not available.";
+                return Redirect(returnUrl ?? Url.Action("Index"));
+            }
+
+            if (string.IsNullOrEmpty(jobId))
+            {
+                TempData["ErrorMessage"] = "Invalid job ID.";
+                return Redirect(returnUrl ?? Url.Action("Index"));
+            }
+
+            var success = _batchRestoreService.CancelJob(jobId);
+
+            if (success)
+            {
+                TempData["SuccessMessage"] = "Batch restore job has been cancelled.";
+            }
+            else
+            {
+                TempData["ErrorMessage"] = "Could not cancel the batch restore job.";
+            }
+
+            return Redirect(returnUrl ?? Url.Action("Index"));
+        }
+
+        // POST: Emails/CancelSyncJob
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> CancelSyncJob(string jobId, string returnUrl = null)
+        {
+            if (_syncJobService == null)
+            {
+                TempData["ErrorMessage"] = "Sync job service is not available.";
+                return Redirect(returnUrl ?? Url.Action("Index"));
+            }
+
+            var job = _syncJobService.GetJob(jobId);
+            var success = _syncJobService.CancelJob(jobId);
+
+            if (success)
+            {
+                TempData["SuccessMessage"] = "Sync job has been cancelled.";
+                
+                // Log the cancellation
+                var currentUsername = _authService.GetCurrentUserDisplayName(HttpContext);
+                if (!string.IsNullOrEmpty(currentUsername) && _accessLogService != null && job != null)
+                {
+                    await _accessLogService.LogAccessAsync(currentUsername, AccessLogType.SyncCancel,
+                        searchParameters: $"Cancelled sync job for account: {job.AccountName}",
+                        mailAccountId: job.MailAccountId);
+                }
+            }
+            else
+            {
+                TempData["ErrorMessage"] = "Could not cancel the sync job.";
+            }
+
+            return Redirect(returnUrl ?? Url.Action("Jobs"));
+        }
+
+        // POST: Emails/AcknowledgeSyncFailures
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> AcknowledgeSyncFailures(string jobId, string returnUrl = null)
+        {
+            if (_syncJobService == null)
+            {
+                TempData["ErrorMessage"] = "Sync job service is not available.";
+                return Redirect(returnUrl ?? Url.Action("Jobs"));
+            }
+
+            var job = _syncJobService.GetJob(jobId);
+            var success = _syncJobService.AcknowledgeJobFailures(jobId);
+
+            if (success)
+            {
+                TempData["SuccessMessage"] = _localizer["AcknowledgeFailuresSuccess"].Value;
+
+                var currentUsername = _authService.GetCurrentUserDisplayName(HttpContext);
+                if (!string.IsNullOrEmpty(currentUsername) && _accessLogService != null && job != null)
+                {
+                    await _accessLogService.LogAccessAsync(currentUsername, AccessLogType.SyncAcknowledgeFailures,
+                        searchParameters: $"Acknowledged {job.FailedEmails} failed emails for account: {job.AccountName}",
+                        mailAccountId: job.MailAccountId);
+                }
+            }
+            else
+            {
+                TempData["ErrorMessage"] = "Could not acknowledge the sync failures. The job may no longer be available or has no failed emails.";
+            }
+
+            return Redirect(returnUrl ?? Url.Action("Jobs"));
+        }
+
+        // Helper method to get all batch jobs from the service
+        private List<BatchRestoreJob> GetAllBatchJobsFromService()
+        {
+            var jobs = new List<BatchRestoreJob>();
+            
+            if (_batchRestoreService != null)
+            {
+                // Get all jobs including completed ones
+                jobs = _batchRestoreService.GetAllJobs();
+            }
+            
+            return jobs;
+        }
+
+        // GET: Emails/Jobs
+        [HttpGet]
+        [AdminRequired]
+        public IActionResult Jobs()
+        {
+            var batchJobs = new List<BatchRestoreJob>();
+            var syncJobs = new List<SyncJob>();
+            var mboxJobs = new List<MBoxImportJob>();
+            var exportJobs = new List<AccountExportJob>();
+            var selectedEmailsExportJobs = new List<SelectedEmailsExportJob>();
+            var emlImportJobs = new List<EmlImportJob>();
+
+            if (_batchRestoreService != null)
+            {
+                // Get all jobs including finished ones to keep them in the list
+                // We'll get all jobs from the service and sort them appropriately
+                var allBatchJobs = GetAllBatchJobsFromService();
+                batchJobs = allBatchJobs
+                    .OrderByDescending(j => j.Status == BatchRestoreJobStatus.Queued || j.Status == BatchRestoreJobStatus.Running)
+                    .ThenByDescending(j => j.Created)
+                    .Take(20) // Apply top 20 restriction
+                    .ToList();
+            }
+
+            if (_syncJobService != null)
+            {
+                // Get all jobs but prioritize running jobs at the top
+                var allSyncJobs = _syncJobService.GetAllJobs();
+                syncJobs = allSyncJobs
+                    .OrderByDescending(j => j.Status == SyncJobStatus.Running) // Running jobs first
+                    .ThenByDescending(j => j.Started) // Then by start time
+                    .Take(20) // Apply top 20 restriction
+                    .ToList();
+            }
+
+            // MBox Import Jobs hinzufügen
+            try
+            {
+                var mboxService = HttpContext.RequestServices.GetService<IMBoxImportService>();
+                if (mboxService != null)
+                {
+                    mboxJobs = mboxService.GetAllJobs()
+                        .OrderByDescending(j => j.Status == MBoxImportJobStatus.Running || j.Status == MBoxImportJobStatus.Queued)
+                        .ThenByDescending(j => j.Created)
+                        .Take(20) // Apply top 20 restriction
+                        .ToList();
+                }
+            }
+            catch
+            {
+                // Ignore if service not available
+            }
+
+            // Account Export Jobs hinzufügen
+            if (_exportService != null)
+            {
+                try
+                {
+                    exportJobs = _exportService.GetAllJobs()
+                        .OrderByDescending(j => j.Status == AccountExportJobStatus.Running || j.Status == AccountExportJobStatus.Queued)
+                        .ThenByDescending(j => j.Created)
+                        .Take(20) // Apply top 20 restriction
+                        .ToList();
+                }
+                catch
+                {
+                    // Ignore if service not available
+                }
+            }
+
+            // Selected Emails Export Jobs hinzufügen
+            try
+            {
+                var selectedEmailsExportService = HttpContext.RequestServices.GetService<ISelectedEmailsExportService>();
+                if (selectedEmailsExportService != null)
+                {
+                    selectedEmailsExportJobs = selectedEmailsExportService.GetAllJobs()
+                        .OrderByDescending(j => j.Status == SelectedEmailsExportJobStatus.Running || j.Status == SelectedEmailsExportJobStatus.Queued)
+                        .ThenByDescending(j => j.Created)
+                        .Take(20) // Apply top 20 restriction
+                        .ToList();
+                }
+            }
+            catch
+            {
+                // Ignore if service not available
+            }
+
+            // EML Import Jobs hinzufügen
+            try
+            {
+                var emlImportService = HttpContext.RequestServices.GetService<IEmlImportService>();
+                if (emlImportService != null)
+                {
+                    emlImportJobs = emlImportService.GetAllJobs()
+                        .OrderByDescending(j => j.Status == EmlImportJobStatus.Running || j.Status == EmlImportJobStatus.Queued)
+                        .ThenByDescending(j => j.Created)
+                        .Take(20) // Apply top 20 restriction consistent with other job types
+                        .ToList();
+                }
+            }
+            catch
+            {
+                // Ignore if service not available
+            }
+
+            ViewBag.BatchJobs = batchJobs;
+            ViewBag.SyncJobs = syncJobs;
+            ViewBag.MBoxJobs = mboxJobs;
+            ViewBag.ExportJobs = exportJobs;
+            ViewBag.SelectedEmailsExportJobs = selectedEmailsExportJobs;
+            ViewBag.EmlImportJobs = emlImportJobs;
+
+            return View(batchJobs);
+        }
+
+        // GET: Emails/SelectedEmailsExportStatus
+        [HttpGet]
+        public IActionResult SelectedEmailsExportStatus(string jobId)
+        {
+            _logger.LogDebug("SelectedEmailsExportStatus called with jobId: {JobId}", jobId ?? "null");
+
+            if (_selectedEmailsExportService == null)
+            {
+                _logger.LogWarning("Selected emails export service is not available");
+                TempData["ErrorMessage"] = "Selected emails export service is not available.";
+                return RedirectToAction("Index");
+            }
+
+            if (string.IsNullOrEmpty(jobId))
+            {
+                _logger.LogWarning("Empty or null jobId provided to SelectedEmailsExportStatus");
+                TempData["ErrorMessage"] = "Invalid job ID.";
+                return RedirectToAction("Index");
+            }
+
+            var job = _selectedEmailsExportService.GetJob(jobId);
+            if (job == null)
+            {
+                _logger.LogWarning("Job with ID {JobId} not found in SelectedEmailsExportService", jobId);
+                TempData["ErrorMessage"] = "Selected emails export job not found.";
+                return RedirectToAction("Index");
+            }
+
+            _logger.LogDebug("Successfully retrieved job {JobId} with status {Status}", jobId, job.Status);
+            return View(job);
+        }
+
+        // POST: Emails/CancelSelectedEmailsExport
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public IActionResult CancelSelectedEmailsExport(string jobId, string returnUrl = null)
+        {
+            if (_selectedEmailsExportService == null)
+            {
+                TempData["ErrorMessage"] = "Selected emails export service is not available.";
+                return Redirect(returnUrl ?? Url.Action("Index"));
+            }
+
+            if (string.IsNullOrEmpty(jobId))
+            {
+                TempData["ErrorMessage"] = "Invalid job ID.";
+                return Redirect(returnUrl ?? Url.Action("Index"));
+            }
+
+            var success = _selectedEmailsExportService.CancelJob(jobId);
+
+            if (success)
+            {
+                TempData["SuccessMessage"] = "Selected emails export job has been cancelled.";
+            }
+            else
+            {
+                TempData["ErrorMessage"] = "Could not cancel the selected emails export job.";
+            }
+
+            return Redirect(returnUrl ?? Url.Action("Jobs"));
+        }
+
+        // GET: Emails/DownloadSelectedEmailsExport
+        [HttpGet]
+        public IActionResult DownloadSelectedEmailsExport(string jobId)
+        {
+            if (_selectedEmailsExportService == null)
+            {
+                TempData["ErrorMessage"] = "Selected emails export service is not available.";
+                return RedirectToAction("Index");
+            }
+
+            if (string.IsNullOrEmpty(jobId))
+            {
+                TempData["ErrorMessage"] = "Invalid job ID.";
+                return RedirectToAction("Index");
+            }
+
+            var job = _selectedEmailsExportService.GetJob(jobId);
+            if (job == null)
+            {
+                TempData["ErrorMessage"] = "Selected emails export job not found.";
+                return RedirectToAction("Index");
+            }
+
+            // Check if job is completed
+            if (job.Status != SelectedEmailsExportJobStatus.Completed)
+            {
+                TempData["ErrorMessage"] = "Selected emails export job is not completed yet.";
+                return RedirectToAction("Index");
+            }
+
+            try
+            {
+                var fileResult = _selectedEmailsExportService.GetExportForDownload(jobId);
+                if (fileResult == null || string.IsNullOrEmpty(fileResult.FilePath) || !System.IO.File.Exists(fileResult.FilePath))
+                {
+                    TempData["ErrorMessage"] = "Export file not found.";
+                    return RedirectToAction("Index");
+                }
+
+                // Stream the file directly without loading it into memory
+                var fileStream = new FileStream(fileResult.FilePath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, FileOptions.Asynchronous | FileOptions.SequentialScan);
+
+                // Mark as downloaded (this will delete the file after download)
+                _selectedEmailsExportService.MarkAsDownloaded(jobId);
+
+                return File(fileStream, fileResult.ContentType, fileResult.FileName);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error downloading selected emails export file for job {JobId}", jobId);
+                TempData["ErrorMessage"] = "Error downloading export file.";
+                return RedirectToAction("Index");
+            }
+        }
+
+        // API endpoint for AJAX status updates
+        [HttpGet]
+        public JsonResult GetBatchRestoreStatus(string jobId)
+        {
+            if (_batchRestoreService == null)
+            {
+                return Json(new { error = "Batch restore service not available" });
+            }
+
+            if (string.IsNullOrEmpty(jobId))
+            {
+                return Json(new { error = "Invalid job ID" });
+            }
+
+            var job = _batchRestoreService.GetJob(jobId);
+            if (job == null)
+            {
+                return Json(new { error = "Job not found" });
+            }
+
+            return Json(new
+            {
+                jobId = job.JobId,
+                status = job.Status.ToString(),
+                processed = job.ProcessedCount,
+                total = job.EmailIds.Count,
+                success = job.SuccessCount,
+                failed = job.FailedCount,
+                progressPercent = job.EmailIds.Count > 0 ? (job.ProcessedCount * 100.0 / job.EmailIds.Count) : 0,
+                started = job.Started?.ToString("yyyy-MM-dd HH:mm:ss"),
+                completed = job.Completed?.ToString("yyyy-MM-dd HH:mm:ss"),
+                errorMessage = job.ErrorMessage
+            });
+        }
+
+        [HttpGet]
+        public async Task<JsonResult> GetFolders(int accountId)
+        {
+            _logger.LogInformation("GetFolders called with accountId: {AccountId}", accountId);
+
+            if (accountId <= 0)
+            {
+                _logger.LogWarning("Invalid accountId provided: {AccountId}", accountId);
+                return Json(new List<string>());
+            }
+
+            try
+            {
+                // Get the target account to check provider type
+                var targetAccount = await _context.MailAccounts.FindAsync(accountId);
+                if (targetAccount == null)
+                {
+                    _logger.LogWarning("Account {AccountId} not found", accountId);
+                    return Json(new List<string> { "INBOX" });
+                }
+
+                // Get folders from the mail server using appropriate service
+                List<string> folders;
+                
+                if (targetAccount.Provider == ProviderType.M365)
+                {
+                    _logger.LogInformation("Using Graph API service to get folders for M365 account {AccountId}", accountId);
+                    folders = await _graphEmailService.GetMailFoldersAsync(targetAccount);
+                }
+                else if (targetAccount.Provider == ProviderType.IMAP || targetAccount.Provider == ProviderType.MSA)
+                {
+                    _logger.LogInformation("Using Email service to get folders for {Provider} account {AccountId}", targetAccount.Provider, accountId);
+                    var tmpProvider = await _providerFactory.GetServiceForAccountAsync(accountId); folders = await tmpProvider.GetMailFoldersAsync(accountId);
+                }
+                else
+                {
+                    // For IMPORT accounts or unknown providers, return INBOX as default
+                    _logger.LogWarning("Account {AccountId} has provider type {Provider}, returning default INBOX",
+                        accountId, targetAccount.Provider);
+                    return Json(new List<string> { "INBOX" });
+                }
+
+                if (folders == null || !folders.Any())
+                {
+                    _logger.LogWarning("No folders found for account {AccountId}, returning default INBOX", accountId);
+                    return Json(new List<string> { "INBOX" });
+                }
+
+                _logger.LogInformation("Successfully retrieved {Count} folders for account {AccountId}",
+                    folders.Count, accountId);
+                return Json(folders);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Exception while retrieving folders for account {AccountId}", accountId);
+                return Json(new List<string> { "INBOX" });
+            }
+        }
+
+        // GET: Emails/GetFolderTree
+        [HttpGet]
+        public async Task<JsonResult> GetFolderTree(int? accountId)
+        {
+            var currentUsername = _authService?.GetCurrentUserDisplayName(HttpContext) ?? "Unknown";
+            _logger.LogInformation("GetFolderTree called by user {Username} for account {AccountId}", 
+                currentUsername, accountId);
+
+            try
+            {
+                // Get current user's allowed accounts
+                List<int> allowedAccountIds = null;
+                var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
+                var userService = HttpContext.RequestServices.GetService<IUserService>();
+                
+                if (authService != null && userService != null && !authService.IsCurrentUserAdmin(HttpContext))
+                {
+                    var username = authService.GetCurrentUserDisplayName(HttpContext);
+                    var user = await userService.GetUserByUsernameAsync(username);
+                    if (user != null)
+                    {
+                        var userAccounts = await userService.GetUserMailAccountsAsync(user.Id);
+                        allowedAccountIds = userAccounts.Select(a => a.Id).ToList();
+                        
+                        // Security: Log if user requests folder tree for an account they don't have access to
+                        if (accountId.HasValue && !allowedAccountIds.Contains(accountId.Value))
+                        {
+                            _logger.LogWarning("User {Username} attempted to access folder tree for unauthorized account {AccountId}", 
+                                username, accountId.Value);
+                        }
+                    }
+                }
+
+                // Get folder tree
+                var folderTree = await _emailCoreService.GetFolderTreeAsync(accountId, allowedAccountIds);
+
+                _logger.LogDebug("Returning {Count} folders for user {Username}", folderTree.Count, currentUsername);
+
+                return Json(folderTree);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Exception while retrieving folder tree for account {AccountId} by user {Username}", 
+                    accountId, currentUsername);
+                return Json(new List<FolderTreeNode>());
+            }
+        }
+
+        // GET: Emails/RawContent/5
+        [EmailAccessRequired]
+        public async Task<IActionResult> RawContent(int id, bool plainText = false)
+        {
+            var email = await _context.ArchivedEmails
+                .Include(e => e.Attachments)
+                    .ThenInclude(a => a.AttachmentContent)
+                .FirstOrDefaultAsync(e => e.Id == id);
+
+            if (email == null)
+            {
+                _logger.LogWarning("Email with ID {EmailId} not found", id);
+                return View("Details404");
+            }
+
+            // Use original body if available (preserves null bytes and truncation), with fallback to untruncated and regular body
+            // Priority: OriginalBody (bytes with nulls/truncation) > BodyUntruncated (legacy) > Body
+            var htmlBodyToDisplay = email.OriginalBodyHtml != null
+                ? System.Text.Encoding.UTF8.GetString(email.OriginalBodyHtml)
+                : (!string.IsNullOrEmpty(email.BodyUntruncatedHtml) 
+                    ? email.BodyUntruncatedHtml 
+                    : email.HtmlBody);
+            
+            var textBodyToDisplay = email.OriginalBodyText != null
+                ? System.Text.Encoding.UTF8.GetString(email.OriginalBodyText)
+                : (!string.IsNullOrEmpty(email.BodyUntruncatedText) 
+                    ? email.BodyUntruncatedText 
+                    : email.Body);
+
+            string html;
+
+            // If plain text is requested or if there's no HTML body
+            if (plainText || string.IsNullOrEmpty(htmlBodyToDisplay))
+            {
+                // Display plain text
+                html = $@"<!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset=""utf-8"">
+                    <meta name=""viewport"" content=""width=device-width, initial-scale=1.0"">
+                    <style>
+                        body {{ font-family: Arial, sans-serif; margin: 15px; background-color: #f8f9fa; }}
+                        pre {{ 
+                            white-space: pre-wrap; 
+                            word-wrap: break-word;
+                            background-color: white;
+                            padding: 20px;
+                            border: 1px solid #dee2e6;
+                            border-radius: 4px;
+                        }}
+                    </style>
+                </head>
+                <body>
+                    <pre>{HttpUtility.HtmlEncode(textBodyToDisplay ?? "[No content available]")}</pre>
+                </body>
+                </html>";
+            }
+            else
+            {
+                // Display HTML with external resource blocking if configured
+                html = ResolveInlineImagesInHtml(SanitizeHtml(htmlBodyToDisplay, _viewOptions.BlockExternalResources), email.Attachments);
+
+                // Fügen Sie die Basis-HTML-Struktur hinzu, wenn sie fehlt
+                if (!html.Contains("<!DOCTYPE") && !html.Contains("<html"))
+                {
+                    html = $@"<!DOCTYPE html>
+                    <html>
+                    <head>
+                        <meta charset=""utf-8"">
+                        <meta name=""viewport"" content=""width=device-width, initial-scale=1.0"">
+                        <base target=""_blank"">
+                        <style>
+                            body {{ font-family: Arial, sans-serif; margin: 15px; }}
+                            pre {{ white-space: pre-wrap; }}
+                        </style>
+                    </head>
+                    <body>
+                        {html}
+                    </body>
+                    </html>";
+                }
+            }
+
+            // Set proper content type with UTF-8 encoding to ensure correct character display
+            // SECURITY: strict CSP blocks any residual script execution even if the sanitizer
+            // is ever bypassed. Inline styles are allowed for email rendering fidelity.
+            // When BlockExternalResources is true (privacy mode), only inline/data:/cid: content
+            // is allowed. When false (default), external images, styles and fonts are also
+            // permitted, matching what SanitizeHtml preserves in that mode.
+            if (_viewOptions.BlockExternalResources)
+            {
+                Response.Headers["Content-Security-Policy"] = "default-src 'none'; img-src 'self' data: cid:; style-src 'unsafe-inline'; font-src 'self' data:;";
+            }
+            else
+            {
+                Response.Headers["Content-Security-Policy"] = "default-src 'none'; img-src 'self' data: cid: http: https:; style-src 'unsafe-inline' http: https:; font-src 'self' data: http: https:;";
+            }
+            Response.Headers["X-Content-Type-Options"] = "nosniff";
+            return Content(html, "text/html; charset=utf-8");
+        }
+
+        // Allowlist-based HTML sanitizer (replaces the previous regex approach which was
+        // trivially bypassable and led to stored XSS via archived email HTML bodies).
+        private static readonly HtmlSanitizer _htmlSanitizer = BuildSanitizer();
+
+        private static HtmlSanitizer BuildSanitizer()
+        {
+            var sanitizer = new HtmlSanitizer();
+
+            // Allow safe inline styling (kept for email rendering fidelity)
+            sanitizer.AllowedAttributes.Add("style");
+            sanitizer.AllowedAttributes.Add("align");
+            sanitizer.AllowedAttributes.Add("valign");
+            sanitizer.AllowedAttributes.Add("width");
+            sanitizer.AllowedAttributes.Add("height");
+            sanitizer.AllowedAttributes.Add("color");
+            sanitizer.AllowedAttributes.Add("face");
+            sanitizer.AllowedAttributes.Add("size");
+            sanitizer.AllowedAttributes.Add("target");
+            sanitizer.AllowedAttributes.Add("cellpadding");
+            sanitizer.AllowedAttributes.Add("cellspacing");
+            sanitizer.AllowedAttributes.Add("border");
+            sanitizer.AllowedAttributes.Add("colspan");
+            sanitizer.AllowedAttributes.Add("rowspan");
+            sanitizer.AllowedAttributes.Add("bgcolor");
+            sanitizer.AllowedAttributes.Add("background");
+            sanitizer.AllowedAttributes.Add("alt");
+            sanitizer.AllowedAttributes.Add("title");
+
+            // Allow cid: inline-image references and data:image/... URIs
+            sanitizer.AllowedSchemes.Add("cid");
+            // data: is allowed by default only for images; keep default behavior
+
+            // Allow <style> tags in addition to style attributes (email styling)
+            sanitizer.AllowedTags.Add("style");
+            sanitizer.AllowedTags.Add("font");
+            sanitizer.AllowedTags.Add("center");
+            sanitizer.AllowedTags.Add("hr");
+            sanitizer.AllowedTags.Add("u");
+
+            // Keep <base target="_blank"> capability: allow the base tag
+            sanitizer.AllowedTags.Add("base");
+            sanitizer.AllowedAttributes.Add("href"); // already allowed but explicit
+
+            // Never allow scripts, event handlers, javascript:/vbscript: URIs.
+            // HtmlSanitizer removes <script>, on* attributes, and dangerous URI schemes by default.
+
+            // Remove <form> to prevent javascript: action / cross-site POSTs from email body
+            sanitizer.AllowedTags.Remove("form");
+            sanitizer.AllowedTags.Remove("iframe");
+            sanitizer.AllowedTags.Remove("object");
+            sanitizer.AllowedTags.Remove("embed");
+            sanitizer.AllowedTags.Remove("base"); // we add our own <base> after sanitizing
+
+            return sanitizer;
+        }
+
+        // Hilfsmethode zur Bereinigung von HTML für die sichere Darstellung
+        private string SanitizeHtml(string html, bool blockExternalResources = false)
+        {
+            if (string.IsNullOrEmpty(html))
+                return string.Empty;
+
+            // Allowlist-based sanitization (removes scripts, on* handlers, javascript: URIs,
+            // <iframe>, <object>, <embed>, <form>, etc.) — robust against bypass vectors that
+            // defeated the previous regex approach.
+            html = _htmlSanitizer.Sanitize(html);
+
+            // Block external resources if configured
+            if (blockExternalResources)
+            {
+                // Block external images (except data: URIs and cid: references for inline images)
+                html = Regex.Replace(html,
+                    @"<img\s+([^>]*\s+)?src\s*=\s*([""'])(?!data:|cid:)https?://[^""']+\2",
+                    "<img $1src=$2$2",
+                    RegexOptions.IgnoreCase);
+
+                // Block external stylesheets
+                html = Regex.Replace(html,
+                    @"<link\s+([^>]*\s+)?href\s*=\s*([""'])https?://[^""']+\2[^>]*>",
+                    "",
+                    RegexOptions.IgnoreCase);
+
+                // Block external CSS imports in style tags
+                html = Regex.Replace(html,
+                    @"@import\s+url\s*\(\s*[""']?https?://[^)]+\)?",
+                    "",
+                    RegexOptions.IgnoreCase);
+
+                // Block external fonts
+                html = Regex.Replace(html,
+                    @"@font-face\s*\{[^}]*url\s*\(\s*[""']?https?://[^)]+\)[^}]*\}",
+                    "",
+                    RegexOptions.IgnoreCase);
+
+                // Block external background images in inline styles (but keep data: URIs)
+                html = Regex.Replace(html,
+                    @"(style\s*=\s*[""'][^""']*)(background(?:-image)?\s*:\s*url\s*\(\s*[""']?)(?!data:)https?://[^)]+\)",
+                    "$1none)",
+                    RegexOptions.IgnoreCase);
+            }
+
+            // Einfügen einer Base-URL für Bilder, die relativen Pfade verwenden
+            if (!html.Contains("<base "))
+            {
+                html = Regex.Replace(html, @"<head>", "<head><base target=\"_blank\">", RegexOptions.IgnoreCase);
+            }
+
+            return html;
+        }
+
+        // Hilfsmethode zur Auflösung von Inline-Bildern in HTML
+        private string ResolveInlineImagesInHtml(string htmlBody, ICollection<EmailAttachment> attachments)
+        {
+            if (string.IsNullOrEmpty(htmlBody) || attachments == null || !attachments.Any())
+                return htmlBody;
+
+            var resultHtml = htmlBody;
+
+            // Finde alle cid: Referenzen im HTML
+            var cidMatches = Regex.Matches(htmlBody, @"src\s*=\s*[""']cid:([^""']+)[""']", RegexOptions.IgnoreCase);
+
+            foreach (Match match in cidMatches)
+            {
+                var cid = match.Groups[1].Value;
+
+                // Finde den entsprechenden Attachment
+                var attachment = attachments.FirstOrDefault(a => 
+                    !string.IsNullOrEmpty(a.ContentId) && 
+                    (a.ContentId.Equals($"<{cid}>", StringComparison.OrdinalIgnoreCase) ||
+                     a.ContentId.Equals(cid, StringComparison.OrdinalIgnoreCase)));
+
+                // Wenn kein Attachment mit dem ContentId gefunden wird, versuche es mit dem Dateinamen
+                if (attachment == null)
+                {
+                    attachment = attachments.FirstOrDefault(a => 
+                        !string.IsNullOrEmpty(a.FileName) && 
+                        (a.FileName.Equals($"inline_{cid}", StringComparison.OrdinalIgnoreCase) ||
+                         a.FileName.StartsWith($"inline_{cid}.", StringComparison.OrdinalIgnoreCase) ||
+                         a.FileName.Contains($"_{cid}")));
+                }
+
+                if (attachment != null && attachment.Content != null && attachment.Content.Length > 0)
+                {
+                    try
+                    {
+                        // Erstelle eine data URL für das Inline-Bild
+                        var base64Content = Convert.ToBase64String(attachment.Content);
+                        var dataUrl = $"data:{attachment.ContentType ?? "image/png"};base64,{base64Content}";
+                        
+                        // Ersetze die cid: Referenz mit der data URL
+                        resultHtml = resultHtml.Replace(match.Groups[0].Value, $"src=\"{dataUrl}\"");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to resolve inline image with CID: {Cid}", cid);
+                    }
+                }
+                else
+                {
+                    _logger.LogWarning("Could not find attachment for CID: {Cid}", cid);
+                }
+            }
+
+            return resultHtml;
+        }
+
+        // POST: Emails/Delete
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [SelfManagerRequired]
+        [EmailAccessRequired]
+        public async Task<IActionResult> Delete(int id, string returnUrl = null)
+        {
+            _logger.LogInformation("Admin user requesting to delete email ID: {EmailId}", id);
+
+            if (!_deletionPolicy.DeletionAllowed)
+            {
+                _logger.LogWarning("Email deletion blocked by policy (DeletionPolicy:DeletionAllowed=false). Email ID: {EmailId}", id);
+                TempData["ErrorMessage"] = _localizer?["DeletionDisabledMessage"] ?? "Email deletion is disabled by configuration.";
+                return Redirect(returnUrl ?? Url.Action("Index"));
+            }
+
+            var email = await _context.ArchivedEmails
+                .Include(e => e.MailAccount)
+                .FirstOrDefaultAsync(e => e.Id == id);
+            
+            if (email == null)
+            {
+                _logger.LogWarning("Email with ID {EmailId} not found for deletion", id);
+                TempData["ErrorMessage"] = "Email not found.";
+                return Redirect(returnUrl ?? Url.Action("Index"));
+            }
+            
+            // Store email information for logging before deletion
+            var emailSubject = email.Subject;
+            var emailFrom = email.From;
+            var emailAccountId = email.MailAccountId;
+            
+            try
+            {
+                _context.ArchivedEmails.Remove(email);
+                await _context.SaveChangesAsync();
+                
+                _logger.LogInformation("Email with ID {EmailId} successfully deleted by admin", id);
+                
+                // Log the deletion action
+                if (_accessLogService != null && _serviceScopeFactory != null)
+                {
+                    var currentUsername = _authService?.GetCurrentUserDisplayName(HttpContext);
+                    if (!string.IsNullOrEmpty(currentUsername))
+                    {
+                        await _accessLogService.LogAccessAsync(currentUsername, AccessLogType.Deletion,
+                            emailId: id,
+                            emailSubject: emailSubject.Length > 255 ? emailSubject.Substring(0, 255) : emailSubject,
+                            emailFrom: emailFrom.Length > 255 ? emailFrom.Substring(0, 255) : emailFrom,
+                            mailAccountId: emailAccountId);
+                    }
+                }
+                
+                TempData["SuccessMessage"] = "Email successfully deleted.";
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error deleting email with ID {EmailId}", id);
+                TempData["ErrorMessage"] = "An error occurred while deleting the email.";
+            }
+            
+            return Redirect(returnUrl ?? Url.Action("Index"));
+        }
+        
+        // POST: Emails/DeleteSelected
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [SelfManagerRequired]
+        public async Task<IActionResult> DeleteSelected(List<int> ids, string returnUrl = null)
+        {
+            if (ids == null || !ids.Any())
+            {
+                TempData["ErrorMessage"] = "No emails selected for deletion.";
+                return Redirect(returnUrl ?? Url.Action("Index"));
+            }
+
+            if (!_deletionPolicy.DeletionAllowed)
+            {
+                _logger.LogWarning("Bulk email deletion blocked by policy (DeletionPolicy:DeletionAllowed=false). Requested count: {Count}", ids.Count);
+                TempData["ErrorMessage"] = _localizer?["DeletionDisabledMessage"] ?? "Email deletion is disabled by configuration.";
+                return Redirect(returnUrl ?? Url.Action("Index"));
+            }
+
+            _logger.LogInformation("Admin user requesting to delete {Count} emails", ids.Count);
+
+            // SECURITY: filter the requested ids to those the current user is authorized to
+            // access (account membership). Admins retain full access. Prevents IDOR where a
+            // SelfManager could delete emails from accounts they are not assigned to.
+            if (!(_authService?.IsCurrentUserAdmin(HttpContext) ?? false))
+            {
+                var userService = HttpContext.RequestServices.GetService<IUserService>();
+                var username = _authService?.GetCurrentUserDisplayName(HttpContext);
+                if (userService != null && !string.IsNullOrEmpty(username))
+                {
+                    var user = await userService.GetUserByUsernameAsync(username);
+                    if (user != null)
+                    {
+                        var userAccounts = await userService.GetUserMailAccountsAsync(user.Id);
+                        var allowedAccountIds = userAccounts.Select(a => a.Id).ToList();
+                        if (allowedAccountIds.Any())
+                        {
+                            ids = await _context.ArchivedEmails
+                                .Where(e => ids.Contains(e.Id) && allowedAccountIds.Contains(e.MailAccountId))
+                                .Select(e => e.Id)
+                                .ToListAsync();
+                        }
+                        else
+                        {
+                            ids = new List<int>();
+                        }
+                    }
+                    else
+                    {
+                        ids = new List<int>();
+                    }
+                }
+                else
+                {
+                    ids = new List<int>();
+                }
+
+                if (!ids.Any())
+                {
+                    TempData["ErrorMessage"] = "You do not have access to any of the selected emails.";
+                    return Redirect(returnUrl ?? Url.Action("Index"));
+                }
+            }
+            
+            // Check if we should use async deletion for large selections (threshold: 100 emails)
+            const int asyncThreshold = 100;
+            if (ids.Count >= asyncThreshold && _emailDeletionService != null)
+            {
+                _logger.LogInformation("Using async deletion for {Count} emails (threshold: {Threshold})", ids.Count, asyncThreshold);
+                
+                var currentUsername = _authService?.GetCurrentUserDisplayName(HttpContext);
+                var job = new EmailDeletionJob
+                {
+                    EmailIds = ids,
+                    UserId = currentUsername ?? "Anonymous"
+                };
+                
+                var jobId = _emailDeletionService.QueueJob(job);
+                TempData["SuccessMessage"] = $"Email deletion job started for {ids.Count:N0} emails. Job ID: {jobId}";
+                
+                return RedirectToAction("EmailDeletionStatus", new { jobId });
+            }
+            
+            // Synchronous deletion for smaller selections
+            _logger.LogInformation("Using synchronous deletion for {Count} emails", ids.Count);
+            
+            var deletedCount = 0;
+            var errorCount = 0;
+            
+            try
+            {
+                foreach (var id in ids)
+                {
+                    var email = await _context.ArchivedEmails
+                        .Include(e => e.MailAccount)
+                        .FirstOrDefaultAsync(e => e.Id == id);
+                    
+                    if (email == null)
+                    {
+                        _logger.LogWarning("Email with ID {EmailId} not found for deletion", id);
+                        errorCount++;
+                        continue;
+                    }
+                    
+                    // Store email information for logging before deletion
+                    var emailSubject = email.Subject;
+                    var emailFrom = email.From;
+                    var emailAccountId = email.MailAccountId;
+                    
+                    try
+                    {
+                        _context.ArchivedEmails.Remove(email);
+                        await _context.SaveChangesAsync();
+                        deletedCount++;
+                        
+                        _logger.LogInformation("Email with ID {EmailId} successfully deleted by admin", id);
+                        
+                        // Log the deletion action for each email
+                        if (_accessLogService != null && _serviceScopeFactory != null)
+                        {
+                            var currentUsername = _authService?.GetCurrentUserDisplayName(HttpContext);
+                            if (!string.IsNullOrEmpty(currentUsername))
+                            {
+                                await _accessLogService.LogAccessAsync(currentUsername, AccessLogType.Deletion,
+                                    emailId: id,
+                                    emailSubject: emailSubject.Length > 255 ? emailSubject.Substring(0, 255) : emailSubject,
+                                    emailFrom: emailFrom.Length > 255 ? emailFrom.Substring(0, 255) : emailFrom,
+                                    mailAccountId: emailAccountId);
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Error deleting email with ID {EmailId}", id);
+                        errorCount++;
+                    }
+                }
+                
+                if (deletedCount > 0)
+                {
+                    TempData["SuccessMessage"] = $"{deletedCount} email(s) successfully deleted.";
+                }
+                
+                if (errorCount > 0)
+                {
+                    TempData["ErrorMessage"] = $"{errorCount} email(s) could not be deleted. Please check the logs.";
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error deleting selected emails");
+                TempData["ErrorMessage"] = "An error occurred while deleting the emails.";
+            }
+            
+            return Redirect(returnUrl ?? Url.Action("Index"));
+        }
+        
+        // GET: Emails/EmailDeletionStatus
+        [HttpGet]
+        [SelfManagerRequired]
+        public IActionResult EmailDeletionStatus(string jobId)
+        {
+            if (_emailDeletionService == null)
+            {
+                TempData["ErrorMessage"] = "Email deletion service is not available.";
+                return RedirectToAction("Index");
+            }
+            
+            if (string.IsNullOrEmpty(jobId))
+            {
+                TempData["ErrorMessage"] = "Invalid job ID.";
+                return RedirectToAction("Index");
+            }
+            
+            var job = _emailDeletionService.GetJob(jobId);
+            if (job == null)
+            {
+                TempData["ErrorMessage"] = "Email deletion job not found.";
+                return RedirectToAction("Jobs");
+            }
+            
+            return View(job);
+        }
+        
+        // POST: Emails/CancelEmailDeletion
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [SelfManagerRequired]
+        public IActionResult CancelEmailDeletion(string jobId, string returnUrl = null)
+        {
+            if (_emailDeletionService == null)
+            {
+                TempData["ErrorMessage"] = "Email deletion service is not available.";
+                return Redirect(returnUrl ?? Url.Action("Index"));
+            }
+            
+            if (string.IsNullOrEmpty(jobId))
+            {
+                TempData["ErrorMessage"] = "Invalid job ID.";
+                return Redirect(returnUrl ?? Url.Action("Index"));
+            }
+            
+            var success = _emailDeletionService.CancelJob(jobId);
+            
+            if (success)
+            {
+                TempData["SuccessMessage"] = "Email deletion job has been cancelled.";
+            }
+            else
+            {
+                TempData["ErrorMessage"] = "Could not cancel the email deletion job.";
+            }
+            
+            return Redirect(returnUrl ?? Url.Action("Jobs"));
+        }
+        
+        // POST: Emails/ExportSelected
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ExportSelected(List<int> ids, string format = "EML", string returnUrl = null)
+        {
+            if (ids == null || !ids.Any())
+            {
+                TempData["ErrorMessage"] = "No emails selected for export.";
+                return Redirect(returnUrl ?? Url.Action("Index"));
+            }
+
+            _logger.LogInformation("ExportSelected called with {Count} emails in {Format} format", ids.Count, format);
+
+            // Check if the selected emails export service is available
+            if (_selectedEmailsExportService == null)
+            {
+                TempData["ErrorMessage"] = "Selected emails export is not available.";
+                return Redirect(returnUrl ?? Url.Action("Index"));
+            }
+
+            try
+            {
+                // Parse format parameter
+                AccountExportFormat exportFormat;
+                if (!Enum.TryParse<AccountExportFormat>(format, true, out exportFormat))
+                {
+                    exportFormat = AccountExportFormat.EML; // Default fallback
+                    _logger.LogWarning("Invalid export format '{Format}' provided, falling back to EML", format);
+                }
+
+                // Get current user's allowed accounts for filtering
+                List<int> allowedAccountIds = null;
+                var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
+                var userService = HttpContext.RequestServices.GetService<IUserService>();
+
+                if (authService != null && userService != null && !authService.IsCurrentUserAdmin(HttpContext))
+                {
+                    var username = authService.GetCurrentUserDisplayName(HttpContext);
+                    var user = await userService.GetUserByUsernameAsync(username);
+                    if (user != null)
+                    {
+                        var userAccounts = await userService.GetUserMailAccountsAsync(user.Id);
+                        allowedAccountIds = userAccounts.Select(a => a.Id).ToList();
+                    }
+                }
+
+                // Filter the email IDs based on user's allowed accounts
+                if (allowedAccountIds != null)
+                {
+                    var allowedEmailIds = await _context.ArchivedEmails
+                        .Where(e => ids.Contains(e.Id) && allowedAccountIds.Contains(e.MailAccountId))
+                        .Select(e => e.Id)
+                        .ToListAsync();
+
+                    ids = allowedEmailIds;
+                }
+
+                if (!ids.Any())
+                {
+                    TempData["ErrorMessage"] = "You do not have access to any of the selected emails.";
+                    return Redirect(returnUrl ?? Url.Action("Index"));
+                }
+
+                // Log the export action
+                var currentUsername = _authService?.GetCurrentUserDisplayName(HttpContext);
+                if (!string.IsNullOrEmpty(currentUsername))
+                {
+                    await _accessLogService.LogAccessAsync(currentUsername, AccessLogType.Download, 
+                        searchParameters: $"Started export of {ids.Count} selected emails in {exportFormat} format");
+                }
+
+                // Queue the export job with selected format
+                var userId = HttpContext.User.Identity?.Name ?? "Anonymous";
+                var jobId = _selectedEmailsExportService.QueueExport(ids, exportFormat, userId);
+
+                TempData["SuccessMessage"] = $"Export job started with {ids.Count:N0} emails in {exportFormat} format. Job ID: {jobId}";
+
+                return RedirectToAction("SelectedEmailsExportStatus", new { jobId });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to start selected emails export");
+                TempData["ErrorMessage"] = $"Failed to start export: {ex.Message}";
+                return Redirect(returnUrl ?? Url.Action("Index"));
+            }
+        }
+    }
+}

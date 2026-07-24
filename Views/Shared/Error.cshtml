@@ -1,0 +1,11 @@
+﻿@inject Microsoft.Extensions.Localization.IStringLocalizer<MailArchiver.SharedResource> Localizer
+@model ErrorViewModel
+@{ ViewData["Title"] = "Error"; }
+<h1 class="text-danger">@Localizer["ErrorTitle", "Error"]</h1>
+<h2 class="text-danger">@Localizer["ErrorProcessingRequest", "An error occurred while processing your request."]</h2>
+@if (Model.ShowRequestId)
+{<p><strong>@Localizer["RequestId"]</strong> <code>@Model.RequestId</code></p>}
+<h3>@Localizer["DevelopmentMode"]</h3>
+<p>@Localizer["DevelopmentModeDetail1"]</p>
+<p>@Localizer["DevelopmentModeDetail2"]</p>
+

@@ -1,0 +1,180 @@
+@using MailArchiver.Services
+@inject MailArchiver.Services.IAuthenticationService AuthService
+@inject Microsoft.Extensions.Localization.IStringLocalizer<MailArchiver.SharedResource> Localizer
+@{ var currentCulture = System.Globalization.CultureInfo.CurrentUICulture.Name; }
+<!DOCTYPE html>
+<html lang="@currentCulture">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+        (function() {
+            var t = localStorage.getItem('theme');
+            if (!t) t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+            if (t === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+        })();
+    </script>
+    <title>@ViewData["Title"] - 邮箱助手</title>
+    <link rel="stylesheet" href="~/lib/bootstrap/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="~/lib/bootstrap-icons/bootstrap-icons.css">
+    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/css/mailbox.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/css/mobile-tables.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/css/dark-mode.css" asp-append-version="true" />
+    <link rel="icon" type="image/svg" href="~/favicon.svg">
+    <link rel="manifest" href="~/manifest.json">
+    <!-- Apple touch icons for iOS home screen -->
+    <link rel="apple-touch-icon" href="~/icons/icon-152x152.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="~/icons/icon-192x192.png">
+    <link rel="apple-touch-icon" sizes="152x152" href="~/icons/icon-152x152.png">
+    <link rel="apple-touch-icon" sizes="120x120" href="~/icons/icon-128x128.png">
+    <meta name="apple-mobile-web-app-title" content="Mail Archiver">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
+</head>
+
+<body>
+    <header>
+        <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
+            <div class="container-fluid">
+                <a class="navbar-brand" asp-area="" asp-controller="MailAccounts" asp-action="Index">
+                    <i class="bi bi-envelope-check me-1"></i>邮箱助手
+                </a>
+                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target=".navbar-collapse"
+                    aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+                <div class="navbar-collapse collapse">
+                    <ul class="navbar-nav me-auto"></ul>
+                    <div class="d-flex align-items-center">
+                        @if (string.Equals(Environment.GetEnvironmentVariable("KOUZI_LOCAL_APP"), "1", StringComparison.Ordinal))
+                        {
+                            <a class="btn btn-outline-light btn-sm me-2" asp-controller="LocalMaintenance" asp-action="Index" title="本机数据" aria-label="本机数据">
+                                <i class="bi bi-gear" aria-hidden="true"></i>
+                            </a>
+                        }
+                        @await Html.PartialAsync("_UserInfo")
+                    </div>
+                </div>
+            </div>
+        </nav>
+    </header>
+    <div class="container-fluid body-content">
+        <main role="main" class="pb-3">
+            @if (TempData["SuccessMessage"] != null)
+            {
+                <div class="alert alert-success alert-dismissible fade show" role="alert">
+                    <i class="bi bi-check-circle-fill me-2"></i>@TempData["SuccessMessage"]
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>
+            }
+            @if (TempData["ErrorMessage"] != null)
+            {
+                <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                    <i class="bi bi-exclamation-triangle-fill me-2"></i>@TempData["ErrorMessage"]
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>
+            }
+            @RenderBody()
+        </main>
+    </div>
+
+    <script src="~/lib/jquery/jquery.min.js"></script>
+    <script src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="~/js/site.js" asp-append-version="true"></script>
+    <script>
+        // Speichere die Browser-Zeitzone im Local Storage
+        localStorage.setItem('timezone', Intl.DateTimeFormat().resolvedOptions().timeZone);
+
+        // Funktion zum Konvertieren von UTC-Zeiten zu lokaler Zeit
+        function convertUTCToLocal(utcDateString) {
+            if (!utcDateString) return utcDateString;
+
+            try {
+                // Parse UTC time - ensure it's treated as UTC
+                let utcDate;
+                if (utcDateString.includes('T')) {
+                    // ISO String Format - append Z if not present to ensure UTC parsing
+                    utcDate = new Date(utcDateString + (utcDateString.endsWith('Z') ? '' : 'Z'));
+                } else {
+                    // Legacy format - assume it's UTC
+                    utcDate = new Date(utcDateString + 'Z');
+                }
+
+                if (isNaN(utcDate.getTime())) {
+                    console.warn('Invalid date format:', utcDateString);
+                    return utcDateString; // Return original if parsing fails
+                }
+
+                // Get the culture from the HTML lang attribute
+                const cultureLang = document.documentElement.lang || 'de-DE';
+                
+                // Format in local timezone with culture-specific formatting
+                return utcDate.toLocaleString(cultureLang, {
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
+                });
+            } catch (e) {
+                console.error('Fehler bei der Datums-Konvertierung:', e, 'Ursprünglicher Wert:', utcDateString);
+                return utcDateString;
+            }
+        }
+
+        // Funktion zum Aktualisieren aller Zeitstempel auf der Seite
+        function updateAllTimestamps() {
+            // Sucht nach allen Elementen mit data-utc-time Attribut oder utc-timestamp Klasse
+            const timeElements = document.querySelectorAll('[data-utc-time], .utc-timestamp[data-utc-time]');
+            
+            timeElements.forEach(element => {
+                const utcTime = element.getAttribute('data-utc-time');
+                if (utcTime && utcTime !== '0001-01-01T00:00:00' && utcTime !== '') {
+                    const localTime = convertUTCToLocal(utcTime);
+                    element.textContent = localTime;
+                    
+                    // Add a data attribute to indicate conversion has been done
+                    element.setAttribute('data-converted', 'true');
+                }
+            });
+        }
+
+        // Führe die Konvertierung aus, wenn das Dokument geladen ist
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', updateAllTimestamps);
+        } else {
+            updateAllTimestamps();
+        }
+
+        // Unterstützung für dynamisch hinzugefügte Inhalte (z.B. bei AJAX-Aufrufen)
+        const observer = new MutationObserver(function (mutations) {
+            let shouldUpdate = false;
+            mutations.forEach(function (mutation) {
+                if (mutation.type === 'childList') {
+                    mutation.addedNodes.forEach(function (node) {
+                        if (node.nodeType === 1 &&
+                            (node.hasAttribute('data-utc-time') ||
+                                node.querySelectorAll && node.querySelectorAll('[data-utc-time]').length > 0)) {
+                            shouldUpdate = true;
+                        }
+                    });
+                }
+            });
+            if (shouldUpdate) {
+                setTimeout(updateAllTimestamps, 100); // Kleine Verzögerung für bessere Performance
+            }
+        });
+
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
+    </script>
+    @await RenderSectionAsync("Scripts", required: false)
+
+</body>
+
+</html>

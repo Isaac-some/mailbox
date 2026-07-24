@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\MailArchiver.csproj" />
+    <Compile Include="..\MailArchiver.Tests\Services\CsvImportHeaderPolicyTests.cs" Link="CsvImportHeaderPolicyTests.cs" />
+    <Compile Include="..\MailArchiver.Tests\Services\MailAccountNamePolicyTests.cs" Link="MailAccountNamePolicyTests.cs" />
+    <Compile Include="..\MailArchiver.Tests\Services\MailSyncSchedulePolicyTests.cs" Link="MailSyncSchedulePolicyTests.cs" />
+    <Compile Include="..\MailArchiver.Tests\Services\MailSyncTriggerTests.cs" Link="MailSyncTriggerTests.cs" />
+    <Compile Include="..\MailArchiver.Tests\Services\OnDemandMailSyncQueueTests.cs" Link="OnDemandMailSyncQueueTests.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+</Project>

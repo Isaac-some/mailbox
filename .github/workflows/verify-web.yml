@@ -1,0 +1,37 @@
+name: Verify Web Edition
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  browser-smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start the browser edition
+        run: |
+          mkdir -p secrets
+          openssl rand -base64 32 > secrets/credential_encryption_key
+          cat > .env <<'EOF'
+          POSTGRES_PASSWORD=github-actions-postgres-password
+          MAILARCHIVE_ADMIN_USERNAME=admin
+          MAILARCHIVE_ADMIN_PASSWORD=github-actions-admin-password
+          EOF
+          docker compose up -d --build
+      - name: Verify login page
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error http://127.0.0.1:5000/Auth/Login > /dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose logs
+          exit 1
+      - name: Stop services
+        if: always()
+        run: docker compose down --volumes

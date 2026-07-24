@@ -1,0 +1,173 @@
+@using MailArchiver.Models.ViewModels
+@inject MailArchiver.Services.IAuthenticationService AuthService
+@model IEnumerable<MailAccountViewModel>
+@{
+    ViewData["Title"] = "邮箱账号";
+    var isAdmin = AuthService.IsCurrentUserAdmin(Context);
+    var isSelfManager = AuthService.IsCurrentUserSelfManager(Context);
+    var canManage = isAdmin || isSelfManager;
+    var search = ViewBag.AccountSearch as string ?? string.Empty;
+    var currentPage = (int?)ViewBag.AccountPage ?? 1;
+    var pageSize = (int?)ViewBag.AccountPageSize ?? 50;
+    var total = (int?)ViewBag.AccountTotalCount ?? Model.Count();
+    var totalPages = (int?)ViewBag.AccountTotalPages ?? 1;
+    var rowNumber = (currentPage - 1) * pageSize;
+    ViewBag.IsAdmin = isAdmin;
+    ViewBag.CanExport = canManage;
+}
+
+<div class="account-page">
+    <header class="account-page__header">
+        <div>
+            <p class="account-page__eyebrow">KOUZI MAIL</p>
+            <h1>邮箱账号</h1>
+            <p class="account-page__summary">搜索账号，直接打开最近 1 个月的收件箱。</p>
+        </div>
+        <div class="account-page__actions">
+            @if (isAdmin)
+            {
+                <a asp-action="ImportCsv" class="btn btn-light btn-sm">
+                    <i class="bi bi-upload" aria-hidden="true"></i>
+                    导入账号
+                </a>
+                <form asp-action="SyncAll" method="post" class="d-inline" onsubmit="return confirm('将同步全部已启用邮箱。未同步过的邮箱会下载最近 30 天邮件，任务可能持续较长时间。确认继续吗？');">
+                    @Html.AntiForgeryToken()
+                    <button type="submit" class="btn btn-outline-light btn-sm" title="同步全部邮箱">
+                        <i class="bi bi-arrow-repeat" aria-hidden="true"></i>
+                        同步全部
+                    </button>
+                </form>
+            }
+            <a asp-action="Create" class="btn btn-primary btn-sm">
+                <i class="bi bi-plus-lg" aria-hidden="true"></i>
+                添加账号
+            </a>
+        </div>
+    </header>
+
+    <section class="account-toolbar" aria-label="账号搜索">
+        <form asp-action="Index" method="get" class="account-search">
+            <i class="bi bi-search" aria-hidden="true"></i>
+            <input type="search" name="q" value="@search" placeholder="搜索邮箱地址或名称" aria-label="搜索邮箱地址或名称" autocomplete="off" />
+            <button type="submit" class="btn btn-primary btn-sm">搜索</button>
+            @if (!string.IsNullOrWhiteSpace(search))
+            {
+                <a asp-action="Index" class="account-search__clear" aria-label="清除搜索" title="清除搜索">
+                    <i class="bi bi-x-lg" aria-hidden="true"></i>
+                </a>
+            }
+        </form>
+        <span class="account-toolbar__count">共 @total.ToString("N0") 个账号</span>
+    </section>
+
+    <section class="account-table-wrap">
+        <div class="table-responsive">
+            <table class="table account-table align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th scope="col" class="account-table__index">#</th>
+                        <th scope="col">邮箱地址</th>
+                        <th scope="col">状态</th>
+                        <th scope="col">最近同步</th>
+                        <th scope="col" class="text-end">操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var item in Model)
+                    {
+                        rowNumber++;
+                        <tr>
+                            <td class="account-table__index text-muted">@rowNumber</td>
+                            <td>
+                                <div class="account-address">@item.EmailAddress</div>
+                                <div class="account-name">@item.Name</div>
+                            </td>
+                            <td>
+                                @if (item.IsEnabled)
+                                {
+                                    <span class="status-badge status-badge--ok"><span aria-hidden="true"></span>正常</span>
+                                }
+                                else
+                                {
+                                    <span class="status-badge status-badge--off"><span aria-hidden="true"></span>已停用</span>
+                                }
+                            </td>
+                            <td class="account-last-sync">
+                                @if (item.LastSync > new DateTime(1970, 1, 1))
+                                {
+                                    <span class="utc-timestamp" data-utc-time="@item.LastSync.Value.ToString("yyyy-MM-ddTHH:mm:ss")">@item.LastSync.Value.ToString("yyyy-MM-dd HH:mm")</span>
+                                }
+                                else
+                                {
+                                    <span class="text-muted">尚未同步</span>
+                                }
+                            </td>
+                            <td>
+                                <div class="account-row-actions">
+                                    <a asp-controller="Emails" asp-action="Index" asp-route-SelectedAccountId="@item.Id"
+                                       class="btn btn-primary btn-sm account-view-btn">
+                                        <i class="bi bi-inbox" aria-hidden="true"></i>
+                                        查看
+                                    </a>
+                                    @if (item.Provider != ProviderType.IMPORT)
+                                    {
+                                        <form asp-action="Sync" asp-route-id="@item.Id" method="post">
+                                            @Html.AntiForgeryToken()
+                                            <button type="submit" class="btn btn-outline-secondary btn-sm account-icon-btn" title="刷新收件箱" aria-label="刷新收件箱">
+                                                <i class="bi bi-arrow-clockwise" aria-hidden="true"></i>
+                                            </button>
+                                        </form>
+                                    }
+                                    <a asp-action="Edit" asp-route-id="@item.Id" class="btn btn-outline-secondary btn-sm account-icon-btn" title="编辑账号" aria-label="编辑账号">
+                                        <i class="bi bi-three-dots" aria-hidden="true"></i>
+                                    </a>
+                                    <a asp-action="Delete" asp-route-id="@item.Id" class="btn btn-outline-danger btn-sm account-icon-btn" title="删除账号" aria-label="删除账号">
+                                        <i class="bi bi-trash3" aria-hidden="true"></i>
+                                    </a>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        @if (!Model.Any())
+        {
+            <div class="account-empty">
+                <i class="bi bi-inbox" aria-hidden="true"></i>
+                @if (string.IsNullOrWhiteSpace(search))
+                {
+                    <strong>还没有邮箱账号</strong>
+                    <span>添加账号后，就可以从这里直接查看收件箱。</span>
+                }
+                else
+                {
+                    <strong>没有匹配的账号</strong>
+                    <span>换一个邮箱地址或名称试试。</span>
+                }
+            </div>
+        }
+    </section>
+
+    @if (totalPages > 1)
+    {
+        <nav class="account-pagination" aria-label="账号分页">
+            @if (currentPage > 1)
+            {
+                <a asp-action="Index" asp-route-q="@search" asp-route-page="@(currentPage - 1)" asp-route-pageSize="@pageSize" class="btn btn-light btn-sm">
+                    <i class="bi bi-chevron-left" aria-hidden="true"></i>
+                    上一页
+                </a>
+            }
+            <span>第 @currentPage / @totalPages 页</span>
+            @if (currentPage < totalPages)
+            {
+                <a asp-action="Index" asp-route-q="@search" asp-route-page="@(currentPage + 1)" asp-route-pageSize="@pageSize" class="btn btn-light btn-sm">
+                    下一页
+                    <i class="bi bi-chevron-right" aria-hidden="true"></i>
+                </a>
+            }
+        </nav>
+    }
+</div>
