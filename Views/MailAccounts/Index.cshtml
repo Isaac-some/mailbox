@@ -32,7 +32,7 @@
                 </a>
                 <form asp-action="SyncAll" method="post" class="d-inline" onsubmit="return confirm('将同步全部已启用邮箱。未同步过的邮箱会下载最近 30 天邮件，任务可能持续较长时间。确认继续吗？');">
                     @Html.AntiForgeryToken()
-                    <button type="submit" class="btn btn-outline-light btn-sm" title="同步全部邮箱">
+                    <button type="submit" class="btn btn-outline-primary btn-sm" title="同步全部邮箱">
                         <i class="bi bi-arrow-repeat" aria-hidden="true"></i>
                         同步全部
                     </button>
