@@ -38,6 +38,19 @@ public class LocalAppPackagingPolicyTests
     }
 
     [Fact]
+    public void Local_account_entry_detects_provider_in_both_ui_and_server()
+    {
+        var page = ReadBundledFile("MailAccountsCreate.cshtml");
+        var controller = ReadBundledFile("MailAccountsController.cs");
+
+        Assert.Contains("输入邮箱地址后自动识别", page, StringComparison.Ordinal);
+        Assert.Contains("applyLocalProviderDetection()", page, StringComparison.Ordinal);
+        Assert.Contains("使用 OAuth（高级）", page, StringComparison.Ordinal);
+        Assert.Contains("_mailProviderRegistry.Detect(model.EmailAddress", controller, StringComparison.Ordinal);
+        Assert.Contains("model.Provider = mailProviderModule.Kind == MailProviderKind.Outlook", controller, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Every_synchronized_mailbox_provider_enforces_the_local_message_cap()
     {
         Assert.Contains(

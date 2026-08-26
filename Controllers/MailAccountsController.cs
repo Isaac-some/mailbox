@@ -288,7 +288,37 @@ namespace MailArchiver.Controllers
         public async Task<IActionResult> Create(CreateMailAccountViewModel model)
         {
             IMailProviderModule? mailProviderModule = null;
-            if (model.Provider == ProviderType.IMAP)
+            var isLocalApp = string.Equals(
+                Environment.GetEnvironmentVariable("KOUZI_LOCAL_APP"),
+                "1",
+                StringComparison.Ordinal);
+
+            if (isLocalApp)
+            {
+                // The desktop app has one account entry. Provider is derived on the
+                // server so a stale or manipulated hidden field can never select the
+                // wrong authorization and mail module.
+                ModelState.Clear();
+                try
+                {
+                    mailProviderModule = _mailProviderRegistry.Detect(model.EmailAddress ?? string.Empty);
+                    model.Provider = mailProviderModule.Kind == MailProviderKind.Outlook
+                        ? ProviderType.MSA
+                        : ProviderType.IMAP;
+                    var endpoint = mailProviderModule.GetIncomingEndpoint(new MailAccount { EmailAddress = model.EmailAddress! });
+                    model.ImapServer = endpoint.Host;
+                    model.ImapPort = endpoint.Port;
+                    model.UseSSL = endpoint.UseSsl;
+                    model.Username = model.EmailAddress!.Trim();
+                    model.Name = MailAccountNamePolicy.Derive(model.EmailAddress!);
+                    TryValidateModel(model);
+                }
+                catch (Exception ex) when (ex is NotSupportedException or InvalidOperationException)
+                {
+                    ModelState.AddModelError(nameof(model.EmailAddress), ex.Message);
+                }
+            }
+            else if (model.Provider == ProviderType.IMAP)
             {
                 try
                 {

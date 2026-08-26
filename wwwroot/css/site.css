@@ -279,6 +279,42 @@ body * {
   color: #555;
 }
 
+.provider-detection {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-height: 44px;
+  padding: 0.6rem 0.75rem;
+  color: var(--bs-body-color);
+  background: var(--bs-tertiary-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 6px;
+}
+
+.provider-detection__badge {
+  min-width: 4.5rem;
+  padding: 0.35rem 0.55rem;
+  border: 1px solid transparent;
+}
+
+.provider-detection__badge--pending {
+  color: #374151;
+  background: #e5e7eb;
+  border-color: #d1d5db;
+}
+
+.provider-detection__badge--recognized {
+  color: #155b37;
+  background: #d1f4e0;
+  border-color: #9eddbd;
+}
+
+.provider-detection__badge--unsupported {
+  color: #8b1d18;
+  background: #fde2e1;
+  border-color: #f4b8b5;
+}
+
 .btn {
   border-radius: 6px;
   padding: 0.5rem 1rem;

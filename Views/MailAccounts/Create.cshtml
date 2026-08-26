@@ -1,22 +1,24 @@
 @inject Microsoft.Extensions.Localization.IStringLocalizer<MailArchiver.SharedResource> Localizer
 @model MailArchiver.Models.ViewModels.CreateMailAccountViewModel
 @{
-    ViewData["Title"] = @Localizer["CreateNewEmailAccount"];
+    var isLocalApp = string.Equals(Environment.GetEnvironmentVariable("KOUZI_LOCAL_APP"), "1", StringComparison.Ordinal);
+    var pageTitle = isLocalApp ? "添加邮箱账号" : Localizer["CreateNewEmailAccount"].Value;
+    ViewData["Title"] = pageTitle;
     var visualProvider = Model.Provider == ProviderType.M365 && Model.ImportEntireTenant ? "M365Tenant"
         : Model.Provider == ProviderType.M365 ? "M365Single"
         : Model.Provider == ProviderType.MSA ? "MSA"
         : Model.Provider.ToString();
-    var imapSettingsDisplay = Model.Provider == ProviderType.IMAP ? "block" : "none";
+    var hasEnteredAddress = !string.IsNullOrWhiteSpace(Model.EmailAddress);
+    var imapSettingsDisplay = Model.Provider == ProviderType.IMAP && (!isLocalApp || hasEnteredAddress) ? "block" : "none";
     var microsoft365SettingsDisplay = Model.Provider == ProviderType.M365 ? "block" : "none";
-    var msaSettingsDisplay = Model.Provider == ProviderType.MSA ? "block" : "none";
+    var msaSettingsDisplay = Model.Provider == ProviderType.MSA && (!isLocalApp || hasEnteredAddress) ? "block" : "none";
     var emailDeletionSettingsDisplay = Model.Provider == ProviderType.IMPORT ? "none" : "block";
     var tenantImportControlsDisplay = Model.Provider == ProviderType.M365 && Model.ImportEntireTenant ? "block" : "none";
     var tenantImportSettingsDisplay = Model.Provider == ProviderType.M365 && Model.ImportEntireTenant ? "block" : "none";
-    var isLocalApp = string.Equals(Environment.GetEnvironmentVariable("KOUZI_LOCAL_APP"), "1", StringComparison.Ordinal);
 }
 
 <div class="container">
-    <h1>@Localizer["CreateNewEmailAccount"]</h1>
+    <h1>@pageTitle</h1>
 
     <div class="card">
         <div class="card-body">
@@ -26,13 +28,22 @@
                 @* General Section *@
                 <div class="form-section">
                     <div class="form-section-header">
-                        <i class="bi bi-card-heading me-1"></i> @Localizer["AccountName"]
+                        <i class="bi bi-envelope-plus me-1"></i> @(isLocalApp ? "邮箱账号" : Localizer["AccountName"].Value)
                     </div>
-                    <div class="mb-3" id="nameField">
-                        <label asp-for="Name" class="form-label">@Localizer["AccountName"]</label>
-                        <input asp-for="Name" class="form-control" autofocus />
-                        <span asp-validation-for="Name" class="text-danger"></span>
-                    </div>
+                    @if (isLocalApp)
+                    {
+                        <div id="nameField" class="d-none">
+                            <input type="hidden" asp-for="Name" />
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="mb-3" id="nameField">
+                            <label asp-for="Name" class="form-label">@Localizer["AccountName"]</label>
+                            <input asp-for="Name" class="form-control" autofocus />
+                            <span asp-validation-for="Name" class="text-danger"></span>
+                        </div>
+                    }
 
                     <div class="mb-3" id="emailAddressField">
                         <label asp-for="EmailAddress" class="form-label">@Localizer["EmailAddress"]</label>
@@ -41,8 +52,19 @@
                     </div>
 
                     <div class="mb-3">
-                        <label for="ProviderDisplay" class="form-label">@Localizer["Provider"]</label>
-                        <select id="ProviderDisplay" class="form-select">
+                        @if (isLocalApp)
+                        {
+                            <label class="form-label">邮箱类型</label>
+                            <div class="provider-detection" id="providerDetection" aria-live="polite">
+                                <span class="badge provider-detection__badge provider-detection__badge--pending" id="providerDetectionBadge">待识别</span>
+                                <span id="providerDetectionText">输入邮箱地址后自动识别</span>
+                            </div>
+                        }
+                        else
+                        {
+                            <label for="ProviderDisplay" class="form-label">@Localizer["Provider"]</label>
+                        }
+                        <select id="ProviderDisplay" class="form-select @(isLocalApp ? "d-none" : null)" aria-hidden="@(isLocalApp ? "true" : null)" tabindex="@(isLocalApp ? "-1" : null)">
                             <option value="IMAP" selected="@(visualProvider == "IMAP")">Gmail / Yahoo / GMX</option>
                             <option value="MSA" selected="@(visualProvider == "MSA")">Outlook 个人邮箱</option>
                             @if (!isLocalApp)
@@ -56,6 +78,8 @@
                         <input type="hidden" asp-for="ImportEntireTenant" id="ImportEntireTenant" disabled="disabled" />
                         <span asp-validation-for="Provider" class="text-danger"></span>
 
+                        @if (!isLocalApp)
+                        {
                         <noscript>
                             <style>
                                 #ProviderDisplay,
@@ -75,6 +99,7 @@
                                 <label asp-for="ImportEntireTenant" class="form-check-label">@Localizer["ImportFromTenant"]</label>
                             </div>
                         </noscript>
+                        }
                     </div>
                 </div>
 
@@ -82,7 +107,7 @@
                 <div id="imapSettings" style="display: @imapSettingsDisplay;">
                     <div class="form-section">
                         <div class="form-section-header">
-                            <i class="bi bi-envelope me-1"></i> Gmail / Yahoo / GMX 收发件授权
+                            <i class="bi bi-envelope me-1"></i> <span id="providerAuthHeading">邮箱收发件授权</span>
                         </div>
 
                         <div class="row" style="display: @(isLocalApp ? "none" : "flex");">
@@ -118,7 +143,12 @@
                             <span asp-validation-for="Password" class="text-danger"></span>
                         </div>
 
-                        <div class="alert alert-light border">密码和 OAuth 二选一。Gmail OAuth 填 Client ID、Refresh Token；Yahoo 还要填 Client Secret、Redirect URI；GMX 只支持上面的应用专用密码。</div>
+                        <details class="form-advanced mt-3" id="externalOAuthSettings">
+                            <summary class="form-advanced-summary">
+                                <i class="bi bi-key me-1"></i> 使用 OAuth（高级）
+                            </summary>
+                            <div class="form-advanced-body">
+                        <div class="form-text mb-3">Gmail 需要 Client ID 和 Refresh Token；Yahoo 还需要 Client Secret 和 Redirect URI。</div>
                         <div class="mb-3">
                             <label asp-for="ExternalOAuthClientId" class="form-label">OAuth Client ID</label>
                             <input asp-for="ExternalOAuthClientId" class="form-control" autocomplete="off" />
@@ -141,6 +171,8 @@
                             <label asp-for="ExternalOAuthRedirectUri" class="form-label">OAuth Redirect URI（Yahoo 必填）</label>
                             <input asp-for="ExternalOAuthRedirectUri" class="form-control" placeholder="常见值：oob" autocomplete="off" />
                         </div>
+                            </div>
+                        </details>
 
                         <div class="mb-3 form-check" style="display: @(isLocalApp ? "none" : "block");">
                             <input asp-for="UseSSL" class="form-check-input" />
@@ -153,7 +185,7 @@
                 <div id="msaSettings" style="display: @msaSettingsDisplay;">
                     <div class="form-section">
                         <div class="form-section-header">
-                            <i class="bi bi-microsoft me-1"></i> @Localizer["MsaSettingsHeading"]
+                            <i class="bi bi-microsoft me-1"></i> @(isLocalApp ? "Outlook 收发件授权" : Localizer["MsaSettingsHeading"].Value)
                         </div>
 
                         <div class="msa-info-banner d-flex align-items-center mb-3">
@@ -300,7 +332,7 @@
                 </div>
 
                 @* Advanced: Email Deletion (collapsible) *@
-                <div id="emailDeletionSettings" style="display: @emailDeletionSettingsDisplay;">
+                <div id="emailDeletionSettings" style="display: @(isLocalApp ? "none" : emailDeletionSettingsDisplay);">
                     <details class="form-advanced mt-3">
                         <summary class="form-advanced-summary">
                             <i class="bi bi-trash3 me-1"></i> @Localizer["EmailDeletion"]
@@ -345,7 +377,7 @@
 
                 <div class="mt-4 d-flex gap-2">
                     <button type="submit" class="btn btn-primary" id="saveBtn">
-                        <i class="bi bi-check-circle"></i> @Localizer["Save"]
+                        <i class="bi bi-check-circle"></i> @(isLocalApp ? "添加账号" : Localizer["Save"].Value)
                     </button>
                     <a asp-action="Index" class="btn btn-outline-secondary">@Localizer["BackToList"]</a>
                 </div>
@@ -373,6 +405,7 @@
             hidePassword: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Localizer["HidePassword"].Value))
         };
         document.addEventListener('DOMContentLoaded', function() {
+            const isLocalApp = @(isLocalApp ? "true" : "false");
             const createForm = document.getElementById('createMailAccountForm');
             const providerDisplaySelect = document.getElementById('ProviderDisplay');
             const providerInput = document.getElementById('Provider');
@@ -386,6 +419,11 @@
             const accountEnabledField = document.getElementById('accountEnabledField');
             const isEnabledInput = document.getElementById('IsEnabled');
             const emailAddressInput = document.getElementById('EmailAddress');
+            const providerDetection = document.getElementById('providerDetection');
+            const providerDetectionBadge = document.getElementById('providerDetectionBadge');
+            const providerDetectionText = document.getElementById('providerDetectionText');
+            const providerAuthHeading = document.getElementById('providerAuthHeading');
+            const externalOAuthSettings = document.getElementById('externalOAuthSettings');
             const existingAccountSuggestion = document.getElementById('existingAccountSuggestion');
             const existingAccountSelect = document.getElementById('existingAccountSelect');
             const copyCredentialsBtn = document.getElementById('copyCredentialsBtn');
@@ -411,9 +449,55 @@
             let allLoadedMailboxes = [];
 
             function setSectionEnabled(section, enabled) {
+                if (!section) return;
                 section.querySelectorAll('input, select, textarea, button').forEach(element => {
                     element.disabled = !enabled;
                 });
+            }
+
+            function detectLocalProvider(emailAddress) {
+                const separator = emailAddress.lastIndexOf(String.fromCharCode(64));
+                if (separator <= 0 || separator === emailAddress.length - 1) return null;
+                const domain = emailAddress.slice(separator + 1).trim().toLowerCase();
+                if (domain === 'gmail.com' || domain === 'googlemail.com') return { name: 'Gmail', value: 'IMAP', oauth: true };
+                if (domain.startsWith('yahoo.')) return { name: 'Yahoo', value: 'IMAP', oauth: true };
+                if (domain === 'gmx.com' || domain === 'gmx.net' || domain === 'gmx.de') return { name: 'GMX', value: 'IMAP', oauth: false };
+                if (domain === 'outlook.com' || domain === 'hotmail.com' || domain === 'live.com' || domain === 'msn.com') {
+                    return { name: 'Outlook', value: 'MSA', oauth: false };
+                }
+                return { name: null, value: null, oauth: false };
+            }
+
+            function applyLocalProviderDetection() {
+                if (!isLocalApp) return;
+                const detected = detectLocalProvider(emailAddressInput.value.trim());
+                const hasCompleteAddress = emailAddressInput.value.includes(String.fromCharCode(64));
+
+                if (!detected || !detected.name) {
+                    providerDetectionBadge.textContent = hasCompleteAddress ? '暂不支持' : '待识别';
+                    providerDetectionBadge.className = hasCompleteAddress
+                        ? 'badge provider-detection__badge provider-detection__badge--unsupported'
+                        : 'badge provider-detection__badge provider-detection__badge--pending';
+                    providerDetectionText.textContent = hasCompleteAddress
+                        ? '目前支持 Gmail、Yahoo、GMX 和 Outlook'
+                        : '输入邮箱地址后自动识别';
+                    imapSettings.style.display = 'none';
+                    if (msaSettings) msaSettings.style.display = 'none';
+                    setSectionEnabled(imapSettings, false);
+                    setSectionEnabled(msaSettings, false);
+                    saveBtn.disabled = true;
+                    return;
+                }
+
+                providerDisplaySelect.value = detected.value;
+                syncProviderFields();
+                toggleSettings(true);
+                providerDetectionBadge.textContent = detected.name;
+                providerDetectionBadge.className = 'badge provider-detection__badge provider-detection__badge--recognized';
+                providerDetectionText.textContent = `已识别，将使用 ${detected.name} 独立收发模块`;
+                if (providerAuthHeading) providerAuthHeading.textContent = `${detected.name} 收发件授权`;
+                if (externalOAuthSettings) externalOAuthSettings.style.display = detected.oauth ? '' : 'none';
+                saveBtn.disabled = false;
             }
 
             function syncProviderFields() {
@@ -450,7 +534,9 @@
                 }
 
                 emailAddressField.style.display = isTenantImport ? 'none' : 'block';
-                nameField.style.display = providerDisplaySelect.value === 'IMAP' ? 'none' : 'block';
+                if (nameField && !isLocalApp) {
+                    nameField.style.display = providerDisplaySelect.value === 'IMAP' ? 'none' : 'block';
+                }
                 tenantImportControls.style.display = isTenantImport ? 'block' : 'none';
                 tenantImportSettings.style.display = isTenantImport ? 'block' : 'none';
                 tenantMailboxSelection.style.display = isTenantImport ? tenantMailboxSelection.style.display : 'none';
@@ -471,9 +557,11 @@
                 imapSettings.style.display = isImap ? 'block' : 'none';
                 microsoft365Settings.style.display = isM365 ? 'block' : 'none';
                 if (msaSettings) msaSettings.style.display = isMsa ? 'block' : 'none';
-                emailDeletionSettings.style.display = (isImport || isMsa) ? 'block' : 'block';
+                emailDeletionSettings.style.display = isLocalApp ? 'none' : 'block';
                 setSectionEnabled(imapSettings, isImap);
                 setSectionEnabled(microsoft365Settings, isM365);
+                setSectionEnabled(msaSettings, isMsa);
+                setSectionEnabled(emailDeletionSettings, !isLocalApp);
 
                 if (!isM365) {
                     existingAccountSuggestion.style.display = 'none';
@@ -747,12 +835,18 @@
             // Initial check
             syncProviderFields();
             toggleSettings();
+            applyLocalProviderDetection();
 
             // Add event listeners
-            providerDisplaySelect.addEventListener('change', function() {
-                syncProviderFields();
-                toggleSettings();
-            });
+            if (!isLocalApp) {
+                providerDisplaySelect.addEventListener('change', function() {
+                    syncProviderFields();
+                    toggleSettings();
+                });
+            }
+
+            emailAddressInput.addEventListener('input', applyLocalProviderDetection);
+            emailAddressInput.addEventListener('change', applyLocalProviderDetection);
 
             importAllTenantMailboxesInput.addEventListener('change', function() {
                 tenantMailboxList.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {

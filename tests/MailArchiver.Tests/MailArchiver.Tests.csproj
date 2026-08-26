@@ -36,6 +36,7 @@
     <None Include="..\..\local-app\Info.plist" Link="Info.plist" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Views\MailAccounts\Delete.cshtml" Link="Delete.cshtml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Views\MailAccounts\Index.cshtml" Link="MailAccountsIndex.cshtml" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\Views\MailAccounts\Create.cshtml" Link="MailAccountsCreate.cshtml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Views\Emails\Index.cshtml" Link="EmailsIndex.cshtml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Views\LocalMaintenance\Index.cshtml" Link="LocalMaintenanceIndex.cshtml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Controllers\MailAccountsController.cs" Link="MailAccountsController.cs" CopyToOutputDirectory="PreserveNewest" />
