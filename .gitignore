@@ -24,8 +24,10 @@ Data/postgres/
 Data/data-protection-keys/
 Data/logs/
 
-# The desktop package is maintained and released separately.
-local-app/
+# Keep the macOS wrapper source in this repository. Generated packages stay ignored.
+local-app/build/
+local-app/.DS_Store
+local-app/AppIcon.png
 
 # Build-Ergebnisse
 [Dd]ebug/

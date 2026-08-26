@@ -64,12 +64,12 @@ public class LocalAppPackagingPolicyTests
     }
 
     [Fact]
-    public void LocalAppRelease_version_identifies_the_native_confirmation_fix()
+    public void LocalAppRelease_version_identifies_the_csv_download_fix()
     {
         var source = ReadBundledFile("Info.plist");
 
-        Assert.Contains("<string>1.0.9</string>", source, StringComparison.Ordinal);
-        Assert.Contains("<string>10</string>", source, StringComparison.Ordinal);
+        Assert.Contains("<string>1.0.10</string>", source, StringComparison.Ordinal);
+        Assert.Contains("<string>11</string>", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -111,6 +111,18 @@ public class LocalAppPackagingPolicyTests
         Assert.Contains("WKUIDelegate", source, StringComparison.Ordinal);
         Assert.Contains("webView.uiDelegate = self", source, StringComparison.Ordinal);
         Assert.Contains("runOpenPanelWith parameters", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NativeWrapper_downloads_attachment_responses_instead_of_rendering_them()
+    {
+        var source = ReadBundledFile("KouziMailAssistant.swift");
+
+        Assert.Contains("WKDownloadDelegate", source, StringComparison.Ordinal);
+        Assert.Contains("decidePolicyFor navigationResponse", source, StringComparison.Ordinal);
+        Assert.Contains(".download", source, StringComparison.Ordinal);
+        Assert.Contains("didBecome download: WKDownload", source, StringComparison.Ordinal);
+        Assert.Contains("decideDestinationUsing response", source, StringComparison.Ordinal);
     }
 
     [Fact]
