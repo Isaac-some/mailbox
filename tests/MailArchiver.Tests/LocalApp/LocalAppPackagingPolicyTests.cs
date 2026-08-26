@@ -68,8 +68,8 @@ public class LocalAppPackagingPolicyTests
     {
         var source = ReadBundledFile("Info.plist");
 
-        Assert.Contains("<string>1.0.11</string>", source, StringComparison.Ordinal);
-        Assert.Contains("<string>12</string>", source, StringComparison.Ordinal);
+        Assert.Contains("<string>1.0.13</string>", source, StringComparison.Ordinal);
+        Assert.Contains("<string>14</string>", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -77,8 +77,32 @@ public class LocalAppPackagingPolicyTests
     {
         var source = ReadBundledFile("KouziMailAssistant.Windows.csproj");
 
-        Assert.Contains("<Version>1.0.11</Version>", source, StringComparison.Ordinal);
-        Assert.Contains("<FileVersion>1.0.11.0</FileVersion>", source, StringComparison.Ordinal);
+        Assert.Contains("<Version>1.0.13</Version>", source, StringComparison.Ordinal);
+        Assert.Contains("<FileVersion>1.0.13.0</FileVersion>", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Single_mail_send_treats_cc_and_attachments_as_truly_optional()
+    {
+        var model = ReadBundledFile("ComposeMailViewModel.cs");
+        var controller = ReadBundledFile("OutboundMailController.cs");
+        var page = ReadBundledFile("OutboundMailIndex.cshtml");
+
+        Assert.Contains("string? Cc", model, StringComparison.Ordinal);
+        Assert.Contains("List<IFormFile>? Attachments", model, StringComparison.Ordinal);
+        Assert.Contains("model.Attachments?.Where", controller, StringComparison.Ordinal);
+        Assert.Contains("附件 <span class=\"text-muted\">（可选）</span>", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("发送时间", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Dmg_build_uses_the_app_version_in_its_only_output_name()
+    {
+        var source = ReadBundledFile("build-dmg.sh");
+
+        Assert.Contains("CFBundleShortVersionString", source, StringComparison.Ordinal);
+        Assert.Contains("AppleSilicon-v$APP_VERSION.dmg", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("AppleSilicon.dmg\"", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -97,6 +121,17 @@ public class LocalAppPackagingPolicyTests
         Assert.Contains("ParseAccountImportFileAsync(file, model)", controller, StringComparison.Ordinal);
         Assert.Contains("accept=\".csv,text/csv\"", outboundPage, StringComparison.Ordinal);
         Assert.DoesNotContain("multiple required", outboundPage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Outbound_tasks_offer_immediate_and_csv_scheduled_modes()
+    {
+        var page = ReadBundledFile("OutboundMailTasksIndex.cshtml");
+
+        Assert.Contains("点击即发（推荐）", page, StringComparison.Ordinal);
+        Assert.Contains("不检查 CSV 的时间列", page, StringComparison.Ordinal);
+        Assert.Contains("定时控制", page, StringComparison.Ordinal);
+        Assert.Contains("每一行都要填写有效时间", page, StringComparison.Ordinal);
     }
 
     [Fact]

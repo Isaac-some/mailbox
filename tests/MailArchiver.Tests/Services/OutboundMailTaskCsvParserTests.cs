@@ -1,3 +1,4 @@
+using MailArchiver.Models;
 using MailArchiver.Services;
 
 namespace MailArchiver.Tests.Services;
@@ -16,7 +17,8 @@ public class OutboundMailTaskCsvParserTests
         var result = OutboundMailTaskCsvParser.Parse(
             reader,
             new DateTime(2026, 8, 24, 1, 0, 0, DateTimeKind.Utc),
-            Shanghai);
+            Shanghai,
+            OutboundMailTaskTimingMode.UseCsvSchedule);
 
         var row = Assert.Single(result.Rows);
         Assert.Empty(result.Errors);
@@ -27,32 +29,92 @@ public class OutboundMailTaskCsvParserTests
     }
 
     [Fact]
-    public void Parse_uses_now_for_blank_time_and_accepts_english_aliases()
+    public void Parse_immediate_mode_uses_now_for_blank_time_and_accepts_english_aliases()
     {
         var now = new DateTime(2026, 8, 24, 7, 30, 0, DateTimeKind.Utc);
         using var reader = new StringReader(
             "scheduledAt,from,to,subject,body\n" +
             ",sender@outlook.com,target@gmx.com,Subject,Body\n");
 
-        var result = OutboundMailTaskCsvParser.Parse(reader, now, Shanghai);
+        var result = OutboundMailTaskCsvParser.Parse(
+            reader,
+            now,
+            Shanghai,
+            OutboundMailTaskTimingMode.SendImmediately);
 
         Assert.Equal(now, Assert.Single(result.Rows).ScheduledAtUtc);
         Assert.Empty(result.Errors);
     }
 
     [Fact]
-    public void Parse_rejects_missing_headers_before_reading_rows()
+    public void Parse_immediate_mode_accepts_a_csv_without_a_time_column()
+    {
+        var now = new DateTime(2026, 8, 24, 7, 30, 0, DateTimeKind.Utc);
+        using var reader = new StringReader(
+            "发件邮箱,收件邮箱,主题,正文\n" +
+            "sender@outlook.com,target@gmx.com,Subject,Body\n");
+
+        var result = OutboundMailTaskCsvParser.Parse(
+            reader,
+            now,
+            Shanghai,
+            OutboundMailTaskTimingMode.SendImmediately);
+
+        Assert.Equal(now, Assert.Single(result.Rows).ScheduledAtUtc);
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public void Parse_immediate_mode_ignores_an_invalid_time_value()
+    {
+        var now = new DateTime(2026, 8, 24, 7, 30, 0, DateTimeKind.Utc);
+        using var reader = new StringReader(
+            "时间,发件邮箱,收件邮箱,主题,正文\n" +
+            "not-a-time,sender@outlook.com,target@gmx.com,Subject,Body\n");
+
+        var result = OutboundMailTaskCsvParser.Parse(
+            reader,
+            now,
+            Shanghai,
+            OutboundMailTaskTimingMode.SendImmediately);
+
+        Assert.Equal(now, Assert.Single(result.Rows).ScheduledAtUtc);
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public void Parse_scheduled_mode_rejects_a_missing_time_header()
     {
         using var reader = new StringReader(
-            "发件邮箱,收件邮箱,主题\n" +
-            "sender@outlook.com,target@gmx.com,Subject\n");
+            "发件邮箱,收件邮箱,主题,正文\n" +
+            "sender@outlook.com,target@gmx.com,Subject,Body\n");
 
-        var result = OutboundMailTaskCsvParser.Parse(reader, DateTime.UtcNow, Shanghai);
+        var result = OutboundMailTaskCsvParser.Parse(
+            reader,
+            DateTime.UtcNow,
+            Shanghai,
+            OutboundMailTaskTimingMode.UseCsvSchedule);
 
         Assert.Empty(result.Rows);
         var error = Assert.Single(result.Errors);
         Assert.Contains("时间", error.Reason);
-        Assert.Contains("正文", error.Reason);
+    }
+
+    [Fact]
+    public void Parse_scheduled_mode_rejects_a_blank_time_value()
+    {
+        using var reader = new StringReader(
+            "时间,发件邮箱,收件邮箱,主题,正文\n" +
+            ",sender@outlook.com,target@gmx.com,Subject,Body\n");
+
+        var result = OutboundMailTaskCsvParser.Parse(
+            reader,
+            DateTime.UtcNow,
+            Shanghai,
+            OutboundMailTaskTimingMode.UseCsvSchedule);
+
+        Assert.Empty(result.Rows);
+        Assert.Contains("时间不能为空", Assert.Single(result.Errors).Reason);
     }
 
     [Theory]
@@ -65,7 +127,11 @@ public class OutboundMailTaskCsvParserTests
     {
         using var reader = new StringReader("时间,发件邮箱,收件邮箱,主题,正文\n" + row + "\n");
 
-        var result = OutboundMailTaskCsvParser.Parse(reader, DateTime.UtcNow, Shanghai);
+        var result = OutboundMailTaskCsvParser.Parse(
+            reader,
+            DateTime.UtcNow,
+            Shanghai,
+            OutboundMailTaskTimingMode.UseCsvSchedule);
 
         Assert.Empty(result.Rows);
         Assert.Contains(expectedReason, Assert.Single(result.Errors).Reason);

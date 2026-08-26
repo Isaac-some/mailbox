@@ -1,3 +1,4 @@
+@using MailArchiver.Models
 @model MailArchiver.ViewModels.OutboundMailTaskIndexViewModel
 @{
     ViewData["Title"] = "发件任务";
@@ -8,7 +9,7 @@
         <div>
             <p class="account-page__eyebrow">KOUZI MAIL</p>
             <h1>发件任务</h1>
-            <p class="account-page__summary">上传 CSV，让不同邮箱按各自时间发送不同主题和正文。</p>
+            <p class="account-page__summary">上传 CSV，可选择点击即发，也可按表格中的时间定时发送。</p>
         </div>
         <div class="d-flex gap-2 flex-wrap">
             <a asp-action="DownloadTemplate" class="btn btn-light btn-sm">
@@ -104,7 +105,7 @@
         <form asp-action="DownloadSenderCsv" method="post" id="senderDownloadForm" class="sender-builder__footer">
             @Html.AntiForgeryToken()
             <div id="selectedSenderInputs"></div>
-            <p class="small text-muted mb-0">下载后填写时间、收件邮箱、主题和正文，再在下方创建任务。</p>
+            <p class="small text-muted mb-0">下载后填写收件邮箱、主题和正文；选择定时控制时再填写时间。</p>
             <button type="submit" class="btn btn-primary" id="downloadSenderCsv" disabled>
                 <i class="bi bi-download" aria-hidden="true"></i> 下载已选邮箱 CSV
             </button>
@@ -116,12 +117,31 @@
             <h2 class="h5 mb-3">新建任务</h2>
             <form asp-action="Import" method="post" enctype="multipart/form-data" id="taskImportForm">
                 @Html.AntiForgeryToken()
+                <fieldset class="mb-3">
+                    <legend class="form-label mb-2">发送方式</legend>
+                    <div class="row g-2">
+                        <div class="col-md-6">
+                            <label class="border rounded-3 p-3 d-flex gap-2 h-100" for="timingModeImmediate">
+                                <input asp-for="TimingMode" class="form-check-input mt-1" type="radio"
+                                       id="timingModeImmediate" value="@OutboundMailTaskTimingMode.SendImmediately" />
+                                <span><strong class="d-block">点击即发（推荐）</strong><span class="small text-muted">创建任务后立即排队，不检查 CSV 的时间列。</span></span>
+                            </label>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="border rounded-3 p-3 d-flex gap-2 h-100" for="timingModeScheduled">
+                                <input asp-for="TimingMode" class="form-check-input mt-1" type="radio"
+                                       id="timingModeScheduled" value="@OutboundMailTaskTimingMode.UseCsvSchedule" />
+                                <span><strong class="d-block">定时控制</strong><span class="small text-muted">CSV 必须有时间列，且每一行都要填写有效时间。</span></span>
+                            </label>
+                        </div>
+                    </div>
+                </fieldset>
                 <div class="row g-3 align-items-end">
                     <div class="col-lg-8">
                         <label asp-for="CsvFile" class="form-label">发件 CSV</label>
                         <input asp-for="CsvFile" type="file" accept=".csv,text/csv" class="form-control" required />
                         <div class="form-text">
-                            必需列：时间、发件邮箱、收件邮箱、主题、正文。时间按 @Model.TimeZoneId 解释；留空表示立即发送。最多 5,000 行、5 MB。
+                            始终必需：发件邮箱、收件邮箱、主题、正文。定时控制还必须有时间列，时间按 @Model.TimeZoneId 解释。最多 5,000 行、5 MB。
                         </div>
                     </div>
                     <div class="col-lg-4">

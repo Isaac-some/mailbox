@@ -56,22 +56,28 @@ public sealed class OutboundMailTasksController : Controller
 
         var userId = RequireUserId();
         var errors = new List<OutboundMailTaskCsvErrorViewModel>();
+        if (!Enum.IsDefined(model.TimingMode))
+            errors.Add(new(1, "请选择有效的发送方式。"));
         if (model.CsvFile is null || model.CsvFile.Length == 0)
         {
             errors.Add(new(1, "请选择 CSV 文件。"));
-            return View("Index", await BuildIndexModelAsync(userId, cancellationToken, errors));
+            return View("Index", await BuildIndexModelAsync(userId, cancellationToken, errors, model.TimingMode));
         }
         if (model.CsvFile.Length > MaxFileBytes)
         {
             errors.Add(new(1, "CSV 文件不能超过 5 MB。"));
-            return View("Index", await BuildIndexModelAsync(userId, cancellationToken, errors));
+            return View("Index", await BuildIndexModelAsync(userId, cancellationToken, errors, model.TimingMode));
         }
 
         OutboundMailTaskCsvParseResult parsed;
         await using (var stream = model.CsvFile.OpenReadStream())
         using (var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true))
         {
-            parsed = OutboundMailTaskCsvParser.Parse(reader, DateTime.UtcNow, _displayTimeZone);
+            parsed = OutboundMailTaskCsvParser.Parse(
+                reader,
+                DateTime.UtcNow,
+                _displayTimeZone,
+                model.TimingMode);
         }
 
         errors.AddRange(parsed.Errors.Select(error => new OutboundMailTaskCsvErrorViewModel(error.LineNumber, error.Reason)));
@@ -97,7 +103,7 @@ public sealed class OutboundMailTasksController : Controller
         }
 
         if (errors.Count > 0)
-            return View("Index", await BuildIndexModelAsync(userId, cancellationToken, errors));
+            return View("Index", await BuildIndexModelAsync(userId, cancellationToken, errors, model.TimingMode));
 
         var task = new OutboundMailTask
         {
@@ -121,7 +127,9 @@ public sealed class OutboundMailTasksController : Controller
         _context.OutboundMailTasks.Add(task);
         await _context.SaveChangesAsync(cancellationToken);
 
-        TempData["SuccessMessage"] = $"发件任务已创建，共 {task.Items.Count} 封；系统会按 CSV 时间自动发送。";
+        TempData["SuccessMessage"] = model.TimingMode == OutboundMailTaskTimingMode.SendImmediately
+            ? $"发件任务已创建，共 {task.Items.Count} 封；已进入发送队列。"
+            : $"发件任务已创建，共 {task.Items.Count} 封；系统会按 CSV 时间自动发送。";
         return RedirectToAction(nameof(Details), new { id = task.Id });
     }
 
@@ -345,7 +353,8 @@ public sealed class OutboundMailTasksController : Controller
     private async Task<OutboundMailTaskIndexViewModel> BuildIndexModelAsync(
         int userId,
         CancellationToken cancellationToken,
-        List<OutboundMailTaskCsvErrorViewModel>? errors = null)
+        List<OutboundMailTaskCsvErrorViewModel>? errors = null,
+        OutboundMailTaskTimingMode timingMode = OutboundMailTaskTimingMode.SendImmediately)
     {
         var accounts = await GetManageableAccountsAsync(userId, cancellationToken);
         var tasks = await _context.OutboundMailTasks
@@ -359,6 +368,7 @@ public sealed class OutboundMailTasksController : Controller
         return new OutboundMailTaskIndexViewModel
         {
             TimeZoneId = _displayTimeZone.Id,
+            TimingMode = timingMode,
             ImportErrors = errors ?? [],
             SenderAccounts = accounts
                 .GroupBy(account => account.EmailAddress, StringComparer.OrdinalIgnoreCase)

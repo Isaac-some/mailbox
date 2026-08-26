@@ -92,7 +92,7 @@ public sealed class OutboundMailController : Controller
         }
 
         var attachments = new List<OutboundAttachment>();
-        foreach (var file in model.Attachments.Where(file => file.Length > 0))
+        foreach (var file in model.Attachments?.Where(file => file.Length > 0) ?? [])
         {
             await using var stream = new MemoryStream((int)file.Length);
             await file.CopyToAsync(stream, cancellationToken);
@@ -150,7 +150,7 @@ public sealed class OutboundMailController : Controller
 
     private void ValidateAttachments(ComposeMailViewModel model)
     {
-        var files = model.Attachments.Where(file => file.Length > 0).ToList();
+        var files = model.Attachments?.Where(file => file.Length > 0).ToList() ?? [];
         if (files.Count > _options.MaxAttachmentCount)
             ModelState.AddModelError(nameof(model.Attachments), $"附件最多 {_options.MaxAttachmentCount} 个。");
         if (files.Sum(file => file.Length) > _options.MaxTotalAttachmentBytes)

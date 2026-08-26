@@ -13,7 +13,7 @@ dotnet build --configuration Release
 如果服务端已由 SDK 容器交叉发布为 `osx-arm64`，可设置
 `SERVER_PUBLISH_DIR` 复用发布物；此时脚本只负责组装、签名和生成 DMG。
 
-DMG 输出到 `local-app/build/邮箱助手-AppleSilicon.dmg`。打包会内嵌 .NET 运行时，目标 Mac 无需安装 .NET 或 Docker。应用未使用 Developer ID 签名或 Apple 公证；首次打开需在 macOS 的“隐私与安全性”中手动允许。
+DMG 输出到 `local-app/build/邮箱助手-AppleSilicon-v<版本号>.dmg`。打包会内嵌 .NET 运行时，目标 Mac 无需安装 .NET 或 Docker。应用未使用 Developer ID 签名或 Apple 公证；首次打开需在 macOS 的“隐私与安全性”中手动允许。
 
 只构建本机测试 App、不生成 DMG：
 

@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Net.Mail;
+using MailArchiver.Models;
 using Microsoft.VisualBasic.FileIO;
 
 namespace MailArchiver.Services;
@@ -53,7 +54,8 @@ public static class OutboundMailTaskCsvParser
     public static OutboundMailTaskCsvParseResult Parse(
         TextReader reader,
         DateTime utcNow,
-        TimeZoneInfo localTimeZone)
+        TimeZoneInfo localTimeZone,
+        OutboundMailTaskTimingMode timingMode)
     {
         ArgumentNullException.ThrowIfNull(reader);
         ArgumentNullException.ThrowIfNull(localTimeZone);
@@ -81,7 +83,10 @@ public static class OutboundMailTaskCsvParser
         if (headers is null || headers.Length == 0)
             return new([], [new OutboundMailTaskCsvError(1, "CSV 不能为空。")] );
 
-        var index = CreateHeaderIndex(headers, errors);
+        var index = CreateHeaderIndex(
+            headers,
+            errors,
+            requireTime: timingMode == OutboundMailTaskTimingMode.UseCsvSchedule);
         if (errors.Count > 0)
             return new(rows, errors);
 
@@ -112,7 +117,9 @@ public static class OutboundMailTaskCsvParser
             var recipient = fields[index["recipient"]].Trim();
             var subject = fields[index["subject"]].Trim();
             var body = fields[index["body"]];
-            var time = fields[index["time"]].Trim();
+            var time = index.TryGetValue("time", out var timeIndex)
+                ? fields[timeIndex].Trim()
+                : string.Empty;
             var rowErrors = new List<string>();
 
             if (!IsValidEmail(sender))
@@ -126,8 +133,14 @@ public static class OutboundMailTaskCsvParser
             if (string.IsNullOrWhiteSpace(body))
                 rowErrors.Add("正文不能为空");
 
-            if (!TryParseScheduledAt(time, utcNow, localTimeZone, out var scheduledAtUtc))
-                rowErrors.Add("时间格式不正确，请使用 yyyy-MM-dd HH:mm:ss；留空表示立即发送");
+            var scheduledAtUtc = DateTime.SpecifyKind(utcNow, DateTimeKind.Utc);
+            if (timingMode == OutboundMailTaskTimingMode.UseCsvSchedule)
+            {
+                if (string.IsNullOrWhiteSpace(time))
+                    rowErrors.Add("定时控制时，时间不能为空");
+                else if (!TryParseScheduledAt(time, localTimeZone, out scheduledAtUtc))
+                    rowErrors.Add("时间格式不正确，请使用 yyyy-MM-dd HH:mm:ss");
+            }
 
             if (rowErrors.Count > 0)
             {
@@ -149,7 +162,8 @@ public static class OutboundMailTaskCsvParser
 
     private static Dictionary<string, int> CreateHeaderIndex(
         IReadOnlyList<string> headers,
-        ICollection<OutboundMailTaskCsvError> errors)
+        ICollection<OutboundMailTaskCsvError> errors,
+        bool requireTime)
     {
         var index = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         for (var i = 0; i < headers.Count; i++)
@@ -161,7 +175,10 @@ public static class OutboundMailTaskCsvParser
                 errors.Add(new OutboundMailTaskCsvError(1, $"表头“{headers[i]}”重复。"));
         }
 
-        var missing = new[] { "time", "sender", "recipient", "subject", "body" }
+        var requiredHeaders = requireTime
+            ? new[] { "time", "sender", "recipient", "subject", "body" }
+            : new[] { "sender", "recipient", "subject", "body" };
+        var missing = requiredHeaders
             .Where(required => !index.ContainsKey(required))
             .Select(required => required switch
             {
@@ -180,16 +197,9 @@ public static class OutboundMailTaskCsvParser
 
     private static bool TryParseScheduledAt(
         string value,
-        DateTime utcNow,
         TimeZoneInfo localTimeZone,
         out DateTime scheduledAtUtc)
     {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            scheduledAtUtc = DateTime.SpecifyKind(utcNow, DateTimeKind.Utc);
-            return true;
-        }
-
         if (DateTimeOffset.TryParse(
                 value,
                 CultureInfo.InvariantCulture,

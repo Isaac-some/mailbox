@@ -6,6 +6,7 @@ namespace MailArchiver.ViewModels;
 public sealed class OutboundMailTaskIndexViewModel
 {
     public IFormFile? CsvFile { get; set; }
+    public OutboundMailTaskTimingMode TimingMode { get; set; } = OutboundMailTaskTimingMode.SendImmediately;
     public List<OutboundMailTaskCsvErrorViewModel> ImportErrors { get; set; } = [];
     public List<OutboundSenderAccountViewModel> SenderAccounts { get; set; } = [];
     public List<OutboundMailTaskSummaryViewModel> Tasks { get; set; } = [];

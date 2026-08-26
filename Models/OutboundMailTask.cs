@@ -1,5 +1,11 @@
 namespace MailArchiver.Models;
 
+public enum OutboundMailTaskTimingMode
+{
+    SendImmediately,
+    UseCsvSchedule
+}
+
 public sealed class OutboundMailTask
 {
     public int Id { get; set; }
