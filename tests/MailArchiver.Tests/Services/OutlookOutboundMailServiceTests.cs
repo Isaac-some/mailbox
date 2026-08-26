@@ -1,5 +1,7 @@
 using MailArchiver.Models;
 using MailArchiver.Services;
+using MailArchiver.Services.MailProviders;
+using Microsoft.Extensions.Options;
 using MimeKit;
 
 namespace MailArchiver.Tests.Services;
@@ -13,7 +15,8 @@ public class OutboundMailServiceTests
         {
             Name = "Personal Outlook",
             EmailAddress = "sender@outlook.com",
-            Provider = ProviderType.MSA
+            Provider = ProviderType.MSA,
+            MailProviderKind = MailProviderKind.Outlook
         };
         var request = new OutboundMailMessage(
             ["one@example.com", "two@example.com"],
@@ -40,21 +43,27 @@ public class OutboundMailServiceTests
         {
             EmailAddress = "sender@yahoo.com",
             Provider = ProviderType.IMAP,
+            MailProviderKind = MailProviderKind.Yahoo,
             Password = "enc:v1:ciphertext"
         };
         var importedOutlook = new MailAccount
         {
             EmailAddress = "sender@outlook.com",
             Provider = ProviderType.MSA,
+            MailProviderKind = MailProviderKind.Outlook,
             OAuthRefreshToken = "refresh-token",
             OAuthGrantedScopes = null
         };
 
-        Assert.True(OutboundMailService.CanAttemptSend(yahoo));
-        Assert.True(OutboundMailService.CanAttemptSend(importedOutlook));
+        var yahooModule = new YahooMailProviderModule(null!, null!);
+        var outlookModule = new OutlookMailProviderModule(
+            null!, null!, Options.Create(new OutboundMailOptions()));
+
+        Assert.True(yahooModule.Inspect(yahoo).CanSend);
+        Assert.True(outlookModule.Inspect(importedOutlook).CanSend);
 
         importedOutlook.OAuthGrantedScopes = MsaOAuthScopePolicy.Imap;
-        Assert.False(OutboundMailService.CanAttemptSend(importedOutlook));
+        Assert.False(outlookModule.Inspect(importedOutlook).CanSend);
     }
 
     [Fact]
@@ -65,10 +74,14 @@ public class OutboundMailServiceTests
         var yahooWithoutSecret = OAuthAccount("sender@yahoo.com", clientSecret: null);
         var gmx = OAuthAccount("sender@gmx.com", clientSecret: "secret");
 
-        Assert.True(OutboundMailService.CanAttemptSend(gmail));
-        Assert.True(OutboundMailService.CanAttemptSend(yahoo));
-        Assert.False(OutboundMailService.CanAttemptSend(yahooWithoutSecret));
-        Assert.False(OutboundMailService.CanAttemptSend(gmx));
+        var gmailModule = new GmailMailProviderModule(null!, null!);
+        var yahooModule = new YahooMailProviderModule(null!, null!);
+        var gmxModule = new GmxMailProviderModule(null!, null!);
+
+        Assert.True(gmailModule.Inspect(gmail).CanSend);
+        Assert.True(yahooModule.Inspect(yahoo).CanSend);
+        Assert.False(yahooModule.Inspect(yahooWithoutSecret).CanSend);
+        Assert.False(gmxModule.Inspect(gmx).CanSend);
     }
 
     private static MailAccount OAuthAccount(string email, string? clientSecret)
@@ -76,6 +89,11 @@ public class OutboundMailServiceTests
         {
             EmailAddress = email,
             Provider = ProviderType.IMAP,
+            MailProviderKind = email.Contains("gmail", StringComparison.OrdinalIgnoreCase)
+                ? MailProviderKind.Gmail
+                : email.Contains("yahoo", StringComparison.OrdinalIgnoreCase)
+                    ? MailProviderKind.Yahoo
+                    : MailProviderKind.Gmx,
             ClientId = "client-id",
             ClientSecret = clientSecret,
             OAuthRefreshToken = "refresh-token",

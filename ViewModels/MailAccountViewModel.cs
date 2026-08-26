@@ -60,6 +60,8 @@ namespace MailArchiver.Models.ViewModels
         
         [Display(Name = "Provider")]
         public ProviderType Provider { get; set; } = ProviderType.IMAP;
+        public MailProviderKind? MailProviderKind { get; set; }
+        public string ProviderLabel { get; set; } = string.Empty;
         
         [Display(Name = "Client ID")]
         [ConditionalRequired(nameof(Provider), ProviderType.M365, ErrorMessage = "Client ID is required for M365 accounts")]
@@ -94,7 +96,9 @@ namespace MailArchiver.Models.ViewModels
         // Read-only: indicates whether MSA account is already authorized
         public bool MsaIsAuthorized { get; set; }
         public bool MsaCanSend { get; set; }
+        public bool CanReceive { get; set; }
         public bool CanSend { get; set; }
+        public string? RequiredAction { get; set; }
         public DateTime? MsaTokenExpiry { get; set; }
 
         // For UI display of available folders

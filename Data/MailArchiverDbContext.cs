@@ -257,6 +257,11 @@ namespace MailArchiver.Data
                 .HasMaxLength(10);
 
             modelBuilder.Entity<MailAccount>()
+                .Property(e => e.MailProviderKind)
+                .HasConversion<string>()
+                .HasMaxLength(16);
+
+            modelBuilder.Entity<MailAccount>()
                 .Property(e => e.GroupName)
                 .HasColumnType("text")
                 .HasDefaultValue(string.Empty);

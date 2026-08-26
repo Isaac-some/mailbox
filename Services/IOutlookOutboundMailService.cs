@@ -15,6 +15,8 @@ public sealed record OutboundMailResult(bool SentCopySaved, string MessageId);
 
 public interface IOutboundMailService
 {
+    bool CanSend(MailAccount account);
+
     Task<OutboundMailResult> SendAsync(
         MailAccount account,
         OutboundMailMessage message,

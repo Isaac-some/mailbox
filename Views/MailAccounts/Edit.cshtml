@@ -26,21 +26,33 @@
                     </div>
                     <div class="mb-3">
                         <label asp-for="EmailAddress" class="form-label">@Localizer["EmailAddress"]</label>
-                        <input asp-for="EmailAddress" class="form-control" type="email" />
+                        <input asp-for="EmailAddress" class="form-control" type="email" readonly="@(Model.MailProviderKind.HasValue ? "readonly" : null)" />
+                        @if (Model.MailProviderKind.HasValue)
+                        {
+                            <div class="form-text">邮箱地址决定后台收发模块，如需更换请新建账号。</div>
+                        }
                         <span asp-validation-for="EmailAddress" class="text-danger"></span>
                     </div>
 
                     <div class="mb-3">
                         <label asp-for="Provider" class="form-label">@Localizer["Provider"]</label>
-                        <select asp-for="Provider" class="form-select">
-                            <option value="@ProviderType.IMAP">Gmail / Yahoo / GMX</option>
-                            <option value="@ProviderType.MSA">Outlook 个人邮箱</option>
-                            @if (!isLocalApp)
-                            {
-                                <option value="@ProviderType.M365">Microsoft 365 (Exchange Online)</option>
-                                <option value="@ProviderType.IMPORT">仅导入</option>
-                            }
-                        </select>
+                        @if (Model.MailProviderKind.HasValue)
+                        {
+                            <input type="hidden" asp-for="Provider" />
+                            <input class="form-control" value="@Model.ProviderLabel" readonly />
+                        }
+                        else
+                        {
+                            <select asp-for="Provider" class="form-select">
+                                <option value="@ProviderType.IMAP">Gmail / Yahoo / GMX</option>
+                                <option value="@ProviderType.MSA">Outlook 个人邮箱</option>
+                                @if (!isLocalApp)
+                                {
+                                    <option value="@ProviderType.M365">Microsoft 365 (Exchange Online)</option>
+                                    <option value="@ProviderType.IMPORT">仅导入</option>
+                                }
+                            </select>
+                        }
                         <span asp-validation-for="Provider" class="text-danger"></span>
                     </div>
                 </div>

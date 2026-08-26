@@ -1,9 +1,9 @@
 using MailArchiver.Models;
 using MailArchiver.Services;
+using MailArchiver.Services.MailProviders;
 using MailKit.Net.Imap;
 using MailKit.Security;
 using Microsoft.Extensions.Options;
-using System.Net;
 using System.Net.Security;
 using System.Security.Cryptography.X509Certificates;
 
@@ -19,24 +19,18 @@ namespace MailArchiver.Services.Providers.Imap
         private readonly ILogger<ImapConnectionFactory> _logger;
         private readonly MailSyncOptions _mailSyncOptions;
         private readonly BatchOperationOptions _batchOptions;
-        private readonly IMsaTokenManager _msaTokenManager;
-        private readonly IExternalOAuthTokenManager _externalOAuthTokenManager;
-        private readonly ICredentialEncryptionService _credentialEncryptionService;
+        private readonly IMailProviderRegistry _mailProviderRegistry;
 
         public ImapConnectionFactory(
             ILogger<ImapConnectionFactory> logger,
             IOptions<MailSyncOptions> mailSyncOptions,
             IOptions<BatchOperationOptions> batchOptions,
-            IMsaTokenManager msaTokenManager,
-            IExternalOAuthTokenManager externalOAuthTokenManager,
-            ICredentialEncryptionService credentialEncryptionService)
+            IMailProviderRegistry mailProviderRegistry)
         {
             _logger = logger;
             _mailSyncOptions = mailSyncOptions.Value;
             _batchOptions = batchOptions.Value;
-            _msaTokenManager = msaTokenManager;
-            _externalOAuthTokenManager = externalOAuthTokenManager;
-            _credentialEncryptionService = credentialEncryptionService;
+            _mailProviderRegistry = mailProviderRegistry;
         }
 
         /// <summary>
@@ -103,89 +97,22 @@ namespace MailArchiver.Services.Providers.Imap
         /// </summary>
         public async Task AuthenticateClientAsync(ImapClient client, MailAccount account)
         {
-            client.AuthenticationMechanisms.Remove("GSSAPI");
-            client.AuthenticationMechanisms.Remove("NEGOTIATE");
-
-            if (account.Provider == ProviderType.MSA)
-            {
-                await AuthenticateMsaAsync(client, account);
-                return;
-            }
-
-            if (ExternalOAuthProviderPolicy.HasUsableCredentials(account))
-            {
-                await AuthenticateExternalOAuthAsync(client, account);
-                return;
-            }
-
-            var username = GetAuthenticationUsername(account);
-            var password = _credentialEncryptionService.Decrypt(account.Password
-                ?? throw new InvalidOperationException($"Account '{account.Name}' has no encrypted IMAP credential."));
-
-            if (client.AuthenticationMechanisms.Contains("PLAIN"))
-            {
-                try
-                {
-                    _logger.LogDebug("Attempting SASL PLAIN authentication for account {AccountName}", account.Name);
-                    var credentials = new NetworkCredential(username, password);
-                    var saslPlain = new SaslMechanismPlain(credentials);
-                    await client.AuthenticateAsync(saslPlain);
-                    _logger.LogDebug("SASL PLAIN authentication successful for account {AccountName}", account.Name);
-                    return;
-                }
-                catch (MailKit.Security.AuthenticationException ex)
-                {
-                    _logger.LogInformation("SASL PLAIN authentication failed for account {AccountName}, trying fallback: {Message}",
-                        account.Name, ex.Message);
-                }
-            }
-            else
-            {
-                _logger.LogInformation("SASL PLAIN not available for account {AccountName}, using fallback authentication", account.Name);
-            }
-
-            _logger.LogDebug("Using auto-negotiated authentication for account {AccountName}", account.Name);
-            await client.AuthenticateAsync(username, password);
+            var module = _mailProviderRegistry.For(account);
+            await module.AuthenticateIncomingAsync(client, account);
         }
 
-        private async Task AuthenticateMsaAsync(ImapClient client, MailAccount account)
+        public async Task ConnectAccountAsync(ImapClient client, MailAccount account)
         {
-            if (string.IsNullOrEmpty(account.OAuthRefreshToken))
-                throw new InvalidOperationException($"MSA account '{account.Name}' has no OAuth refresh token. Please authorize the account first.");
-
-            var token = await _msaTokenManager.GetAccessTokenAsync(account);
-            _logger.LogDebug("Authenticating MSA account {AccountName} via XOAUTH2 as {Username}", account.Name, token.Username);
-            try
-            {
-                await client.AuthenticateAsync(new SaslMechanismOAuth2(token.Username, token.AccessToken));
-            }
-            catch (AuthenticationException ex)
-            {
-                _logger.LogWarning("XOAUTH2 authentication failed for MSA account {AccountName} ({Message}). Forcing token refresh and retrying once.",
-                    account.Name, ex.Message);
-                token = await _msaTokenManager.GetAccessTokenAsync(account, forceRefresh: true);
-                await client.AuthenticateAsync(new SaslMechanismOAuth2(token.Username, token.AccessToken));
-                _logger.LogInformation("XOAUTH2 retry after forced token refresh succeeded for MSA account {AccountName}", account.Name);
-            }
-        }
-
-        private async Task AuthenticateExternalOAuthAsync(ImapClient client, MailAccount account)
-        {
-            var token = await _externalOAuthTokenManager.GetAccessTokenAsync(account);
-            _logger.LogDebug("Authenticating account {AccountName} via XOAUTH2 as {Username}",
-                account.Name, token.Username);
-            try
-            {
-                await client.AuthenticateAsync(new SaslMechanismOAuth2(token.Username, token.AccessToken));
-            }
-            catch (AuthenticationException ex)
-            {
-                _logger.LogWarning(
-                    "XOAUTH2 authentication failed for account {AccountName} ({Message}). Forcing token refresh and retrying once.",
-                    account.Name, ex.Message);
-                token = await _externalOAuthTokenManager.GetAccessTokenAsync(account, forceRefresh: true);
-                await client.AuthenticateAsync(new SaslMechanismOAuth2(token.Username, token.AccessToken));
-            }
+            var module = _mailProviderRegistry.For(account);
+            var endpoint = module.GetIncomingEndpoint(account);
+            client.ServerCertificateValidationCallback = ServerCertificateValidationCallback;
+            await ConnectWithFallbackAsync(
+                client,
+                endpoint.Host,
+                endpoint.Port,
+                endpoint.UseSsl,
+                account.Name);
+            await module.AuthenticateIncomingAsync(client, account);
         }
 
         /// <summary>
@@ -208,9 +135,7 @@ namespace MailArchiver.Services.Providers.Imap
                 }
 
                 _logger.LogInformation("Reconnecting to IMAP server for account {AccountName}", account.Name);
-                await ConnectWithFallbackAsync(client, account.ImapServer, account.ImapPort ?? 993, account.UseSSL, account.Name);
-                client.ServerCertificateValidationCallback = ServerCertificateValidationCallback;
-                await AuthenticateClientAsync(client, account);
+                await ConnectAccountAsync(client, account);
                 _logger.LogInformation("Successfully reconnected to IMAP server for account {AccountName}", account.Name);
             }
             catch (Exception ex)

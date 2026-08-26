@@ -3,6 +3,7 @@ using MailArchiver.Models;
 using MailArchiver.Models.ViewModels;
 using MailArchiver.ViewModels;
 using MailArchiver.Services;
+using MailArchiver.Services.MailProviders;
 using MailArchiver.Services.Providers;
 using MailArchiver.Utilities;
 using Microsoft.AspNetCore.Mvc;
@@ -42,6 +43,7 @@ namespace MailArchiver.Controllers
     private readonly CsvImportOptions _csvImportOptions;
     private readonly ICredentialEncryptionService _credentialEncryptionService;
     private readonly IOnDemandMailSyncQueue _onDemandSyncQueue;
+    private readonly IMailProviderRegistry _mailProviderRegistry;
 
     public MailAccountsController(
         MailArchiverDbContext context,
@@ -65,7 +67,8 @@ namespace MailArchiver.Controllers
         IAccountStorageService accountStorageService,
         IOptions<CsvImportOptions> csvImportOptions,
         ICredentialEncryptionService credentialEncryptionService,
-        IOnDemandMailSyncQueue onDemandSyncQueue)
+        IOnDemandMailSyncQueue onDemandSyncQueue,
+        IMailProviderRegistry mailProviderRegistry)
     {
         _context = context;
         _emailCoreService = emailCoreService;
@@ -89,6 +92,7 @@ namespace MailArchiver.Controllers
         _csvImportOptions = csvImportOptions.Value;
         _credentialEncryptionService = credentialEncryptionService;
         _onDemandSyncQueue = onDemandSyncQueue;
+        _mailProviderRegistry = mailProviderRegistry;
     }
 
         private async Task<bool> HasAccessToAccountAsync(int accountId)
@@ -146,12 +150,31 @@ namespace MailArchiver.Controllers
             var totalPages = Math.Max(1, (int)Math.Ceiling(totalCount / (double)pageSize));
             page = Math.Clamp(page, 1, totalPages);
 
-            var accounts = await mailAccountsQuery
+            var accountRows = await mailAccountsQuery
+                .AsNoTracking()
                 .OrderBy(a => a.Name)
                 .ThenBy(a => a.Id)
                 .Skip((page - 1) * pageSize)
                 .Take(pageSize)
-                .Select(a => new MailAccountViewModel
+                .Select(a => new
+                {
+                    Account = a,
+                    ArchivedEmailCount = a.ArchivedEmails.Count()
+                })
+                .ToListAsync();
+
+            var accounts = accountRows.Select(row =>
+            {
+                var a = row.Account;
+                MailAccountCapabilities? capabilities = null;
+                IMailProviderModule? module = null;
+                if (a.MailProviderKind is not null)
+                {
+                    module = _mailProviderRegistry.For(a);
+                    capabilities = module.Inspect(a);
+                }
+
+                return new MailAccountViewModel
                 {
                     Id = a.Id,
                     Name = a.Name,
@@ -165,20 +188,16 @@ namespace MailArchiver.Controllers
                     LastSync = a.LastSync,
                     DeleteAfterDays = a.DeleteAfterDays,
                     Provider = a.Provider,
-                    MsaIsAuthorized = a.Provider == ProviderType.MSA && !string.IsNullOrEmpty(a.OAuthRefreshToken),
-                    MsaCanSend = a.Provider == ProviderType.MSA && a.OAuthRefreshToken != null &&
-                        a.OAuthGrantedScopes != null && a.OAuthGrantedScopes.Contains(MsaOAuthScopePolicy.Smtp),
-                    CanSend = (a.Provider == ProviderType.MSA && a.OAuthRefreshToken != null &&
-                            (a.OAuthGrantedScopes == null || a.OAuthGrantedScopes.Contains(MsaOAuthScopePolicy.Smtp))) ||
-                        (a.Provider == ProviderType.IMAP &&
-                            (a.Password != null ||
-                             (a.ClientId != null && a.OAuthRefreshToken != null &&
-                              ((a.EmailAddress.ToLower().EndsWith("@gmail.com") ||
-                                a.EmailAddress.ToLower().EndsWith("@googlemail.com")) ||
-                               (a.EmailAddress.ToLower().Contains("@yahoo.") && a.ClientSecret != null && a.OAuthRedirectUri != null))))),
-                    ArchivedEmailCount = a.ArchivedEmails.Count()
-                })
-                .ToListAsync();
+                    MailProviderKind = a.MailProviderKind,
+                    ProviderLabel = module?.DisplayName ?? a.Provider.ToString(),
+                    MsaIsAuthorized = a.MailProviderKind == MailProviderKind.Outlook && capabilities?.CanReceive == true,
+                    MsaCanSend = a.MailProviderKind == MailProviderKind.Outlook && capabilities?.CanSend == true,
+                    CanReceive = capabilities?.CanReceive == true,
+                    CanSend = capabilities?.CanSend == true,
+                    RequiredAction = capabilities?.RequiredAction,
+                    ArchivedEmailCount = row.ArchivedEmailCount
+                };
+            }).ToList();
 
             _logger.LogInformation("Returning {Count} accounts for user {Username}", accounts.Count, currentUsername);
 
@@ -228,6 +247,10 @@ namespace MailArchiver.Controllers
                 IsEnabled = account.IsEnabled,
                 DeleteAfterDays = account.DeleteAfterDays,
                 Provider = account.Provider,
+                MailProviderKind = account.MailProviderKind,
+                ProviderLabel = account.MailProviderKind is null
+                    ? account.Provider.ToString()
+                    : _mailProviderRegistry.For(account).DisplayName,
                 ClientId = account.ClientId,
                 TenantId = account.TenantId,
                 ExcludedFolders = account.ExcludedFolders,
@@ -264,18 +287,18 @@ namespace MailArchiver.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> Create(CreateMailAccountViewModel model)
         {
+            IMailProviderModule? mailProviderModule = null;
             if (model.Provider == ProviderType.IMAP)
             {
-                if (!SupportedMailProviderPolicy.TryResolve(model.EmailAddress, out var preset))
+                try
                 {
-                    ModelState.AddModelError(nameof(model.EmailAddress), "IMAP 收件目前仅支持 Gmail、Yahoo 和 GMX 邮箱。");
-                }
-                else
-                {
-                    // Never trust server, port, TLS or username posted by the browser.
-                    model.ImapServer = preset.ImapServer;
-                    model.ImapPort = preset.ImapPort;
-                    model.UseSSL = preset.UseSsl;
+                    mailProviderModule = _mailProviderRegistry.Detect(model.EmailAddress ?? string.Empty);
+                    if (mailProviderModule.Kind == MailProviderKind.Outlook)
+                        throw new NotSupportedException("Outlook 请使用 Outlook 个人邮箱授权方式。");
+                    var endpoint = mailProviderModule.GetIncomingEndpoint(new MailAccount { EmailAddress = model.EmailAddress! });
+                    model.ImapServer = endpoint.Host;
+                    model.ImapPort = endpoint.Port;
+                    model.UseSSL = endpoint.UseSsl;
                     model.Username = model.EmailAddress!.Trim();
                     model.Name = MailAccountNamePolicy.Derive(model.EmailAddress!);
                     ModelState.Remove(nameof(model.Name));
@@ -283,12 +306,18 @@ namespace MailArchiver.Controllers
                     ModelState.Remove(nameof(model.ImapPort));
                     ModelState.Remove(nameof(model.Username));
                 }
+                catch (Exception ex) when (ex is NotSupportedException or InvalidOperationException)
+                {
+                    ModelState.AddModelError(nameof(model.EmailAddress), ex.Message);
+                }
             }
             else if (model.Provider == ProviderType.MSA)
             {
-                model.ImapServer = "outlook.office365.com";
-                model.ImapPort = 993;
-                model.UseSSL = true;
+                mailProviderModule = _mailProviderRegistry.For(MailProviderKind.Outlook);
+                var endpoint = mailProviderModule.GetIncomingEndpoint(new MailAccount { EmailAddress = model.EmailAddress ?? string.Empty });
+                model.ImapServer = endpoint.Host;
+                model.ImapPort = endpoint.Port;
+                model.UseSSL = endpoint.UseSsl;
                 model.Username = model.EmailAddress?.Trim();
                 model.Name = MailAccountNamePolicy.Derive(model.EmailAddress ?? string.Empty);
                 ModelState.Remove(nameof(model.Name));
@@ -359,6 +388,7 @@ namespace MailArchiver.Controllers
                     FullSyncIntervalHours = model.FullSyncIntervalHours,
                     LastSync = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)
                 };
+                mailProviderModule!.PrepareAccount(account);
 
                 // Validate local retention policy
                 if (account.LocalRetentionDays.HasValue && !account.DeleteAfterDays.HasValue)
@@ -728,6 +758,10 @@ namespace MailArchiver.Controllers
                 SyncIntervalMinutes = account.SyncIntervalMinutes,
                 FullSyncIntervalHours = account.FullSyncIntervalHours,
                 Provider = account.Provider,
+                MailProviderKind = account.MailProviderKind,
+                ProviderLabel = account.MailProviderKind is null
+                    ? account.Provider.ToString()
+                    : _mailProviderRegistry.For(account.MailProviderKind.Value).DisplayName,
                 ClientId = account.Provider == ProviderType.M365 ? account.ClientId : null,
                 ClientSecret = account.Provider == ProviderType.M365 ? account.ClientSecret : null,
                 ExternalOAuthClientId = account.Provider == ProviderType.IMAP ? account.ClientId : null,
@@ -803,6 +837,38 @@ namespace MailArchiver.Controllers
             if (!await HasAccessToAccountAsync(id))
             {
                 return NotFound();
+            }
+
+            var persistedAccount = await _context.MailAccounts
+                .AsNoTracking()
+                .SingleOrDefaultAsync(account => account.Id == id);
+            if (persistedAccount == null)
+            {
+                return NotFound();
+            }
+
+            if (persistedAccount.MailProviderKind is not null)
+            {
+                model.MailProviderKind = persistedAccount.MailProviderKind;
+                model.ProviderLabel = _mailProviderRegistry
+                    .For(persistedAccount.MailProviderKind.Value)
+                    .DisplayName;
+
+                if (model.Provider != persistedAccount.Provider)
+                {
+                    ModelState.AddModelError(nameof(model.Provider), "邮箱服务商创建后不能更改，请新建邮箱账号。");
+                }
+
+                if (!string.Equals(model.EmailAddress?.Trim(), persistedAccount.EmailAddress,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    ModelState.AddModelError(nameof(model.EmailAddress), "邮箱地址创建后不能更改，请新建邮箱账号。");
+                }
+
+                // Never trust posted identity fields. They select the provider module and
+                // own the account's authorization and archived-mail boundary.
+                model.Provider = persistedAccount.Provider;
+                model.EmailAddress = persistedAccount.EmailAddress;
             }
 
             if (model.Provider == ProviderType.IMAP)
@@ -992,6 +1058,11 @@ namespace MailArchiver.Controllers
                     account.LocalRetentionDays = null;
                     account.SyncIntervalMinutes = model.SyncIntervalMinutes;
                     account.FullSyncIntervalHours = model.FullSyncIntervalHours;
+
+                    if (account.MailProviderKind is not null)
+                    {
+                        _mailProviderRegistry.For(account.MailProviderKind.Value).PrepareAccount(account);
+                    }
 
                     // Validate local retention policy
                     if (account.LocalRetentionDays.HasValue && !account.DeleteAfterDays.HasValue)
@@ -3299,15 +3370,22 @@ namespace MailArchiver.Controllers
                         continue;
                     }
 
-                    ImapProviderPreset? preset = null;
-                    if (row.Provider == ProviderType.IMAP &&
-                        !SupportedMailProviderPolicy.TryResolve(row.Email, out preset))
+                    IMailProviderModule rowModule;
+                    try
+                    {
+                        rowModule = row.Provider == ProviderType.MSA
+                            ? _mailProviderRegistry.For(MailProviderKind.Outlook)
+                            : _mailProviderRegistry.Detect(row.Email);
+                        if (row.Provider == ProviderType.IMAP && rowModule.Kind == MailProviderKind.Outlook)
+                            throw new NotSupportedException("Outlook 请上传四列 Tab 分隔的 TXT。");
+                    }
+                    catch (Exception ex) when (ex is NotSupportedException or InvalidOperationException)
                     {
                         result.FailedRows.Add(new CsvImportFailedRow
                         {
                             LineNumber = row.LineNumber,
                             Email = row.Email,
-                            Reason = "仅支持 Gmail、Yahoo 和 GMX；Outlook 请上传四列 Tab 分隔的 TXT。"
+                            Reason = ex.Message
                         });
                         result.FailedCount++;
                         continue;
@@ -3326,8 +3404,8 @@ namespace MailArchiver.Controllers
                             Name = MailAccountNamePolicy.Derive(row.Email),
                             EmailAddress = row.Email!.Trim(),
                             GroupName = string.Empty,
-                            ImapServer = preset!.ImapServer,
-                            ImapPort = preset.ImapPort,
+                            ImapServer = null,
+                            ImapPort = null,
                             Username = row.Email.Trim(),
                             Password = string.IsNullOrWhiteSpace(row.Password)
                                 ? null
@@ -3337,7 +3415,7 @@ namespace MailArchiver.Controllers
                             OAuthRefreshToken = row.OAuthRefreshToken,
                             OAuthGrantedScopes = row.OAuthGrantedScopes,
                             OAuthRedirectUri = row.OAuthRedirectUri,
-                            UseSSL = preset.UseSsl,
+                            UseSSL = true,
                             IsEnabled = model.IsEnabled,
                             Provider = ProviderType.IMAP,
                             ExcludedFolders = string.Empty,
@@ -3345,6 +3423,8 @@ namespace MailArchiver.Controllers
                             LocalRetentionDays = null,
                             LastSync = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)
                         };
+
+                    rowModule.PrepareAccount(account);
 
                     accountsToCreate.Add(account);
                     result.CreatedRows.Add(new CsvImportCreatedRow

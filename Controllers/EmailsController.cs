@@ -1067,7 +1067,7 @@ namespace MailArchiver.Controllers
                 {
                     folders = await _graphEmailService.GetMailFoldersAsync(targetAccount);
                 }
-                else if (targetAccount.Provider == ProviderType.IMAP)
+                else if (targetAccount.Provider == ProviderType.IMAP || targetAccount.Provider == ProviderType.MSA)
                 {
                     var provider = await _providerFactory.GetServiceForAccountAsync(accountId);
                     folders = await provider.GetMailFoldersAsync(accountId);

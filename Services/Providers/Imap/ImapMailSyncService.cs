@@ -67,16 +67,6 @@ namespace MailArchiver.Services.Providers.Imap
         {
             _logger.LogInformation("Starting IMAP sync for account: {AccountName}", account.Name);
 
-            if (!SupportedMailProviderPolicy.TryResolve(account.EmailAddress, out var preset) ||
-                !string.Equals(account.ImapServer, preset.ImapServer, StringComparison.OrdinalIgnoreCase) ||
-                account.ImapPort != preset.ImapPort || account.UseSSL != preset.UseSsl)
-            {
-                var reason = "Account does not match an approved Gmail/Yahoo/GMX IMAP preset.";
-                _logger.LogError("Sync blocked for account {AccountName}: {Reason}", account.Name, reason);
-                if (jobId != null) _syncJobService.CompleteJob(jobId, false, reason);
-                return;
-            }
-
             // Check bandwidth limit before starting sync
             if (_bandwidthOptions.Enabled)
             {
@@ -121,8 +111,7 @@ namespace MailArchiver.Services.Providers.Imap
 
             try
             {
-                await _connectionFactory.ConnectWithFallbackAsync(client, account.ImapServer, account.ImapPort ?? 993, account.UseSSL, account.Name);
-                await _connectionFactory.AuthenticateClientAsync(client, account);
+                await _connectionFactory.ConnectAccountAsync(client, account);
                 _logger.LogInformation("Connected to IMAP server for {AccountName}", account.Name);
 
                 var allFolders = await GetFoldersToSyncAsync(client, account.Name);
@@ -283,10 +272,8 @@ namespace MailArchiver.Services.Providers.Imap
                 _logger.LogDebug("Connecting to {Server}:{Port}, SSL: {UseSSL}",
                     account.ImapServer, account.ImapPort, account.UseSSL);
 
-                await _connectionFactory.ConnectWithFallbackAsync(client, account.ImapServer, account.ImapPort ?? 993, account.UseSSL, account.Name);
+                await _connectionFactory.ConnectAccountAsync(client, account);
                 _logger.LogDebug("Connection established, authenticating using {Provider} authentication", account.Provider);
-
-                await _connectionFactory.AuthenticateClientAsync(client, account);
                 _logger.LogInformation("Authentication successful for {Email}", account.EmailAddress);
 
                 try

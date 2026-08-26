@@ -1,4 +1,5 @@
 using MailArchiver.Models;
+using MailArchiver.Services.MailProviders;
 
 namespace MailArchiver.Services;
 
@@ -8,6 +9,12 @@ public interface IExternalOAuthTokenManager
 {
     Task<ExternalOAuthAccessToken> GetAccessTokenAsync(
         MailAccount account,
+        bool forceRefresh = false,
+        CancellationToken cancellationToken = default);
+
+    Task<ExternalOAuthAccessToken> GetAccessTokenAsync(
+        MailAccount account,
+        ExternalOAuthSettings provider,
         bool forceRefresh = false,
         CancellationToken cancellationToken = default);
 }

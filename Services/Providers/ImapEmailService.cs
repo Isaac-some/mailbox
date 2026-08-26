@@ -58,8 +58,7 @@ namespace MailArchiver.Services.Providers
                 client.Timeout = 30000;
                 client.ServerCertificateValidationCallback = _connectionFactory.ServerCertificateValidationCallback;
 
-                await _connectionFactory.ConnectWithFallbackAsync(client, account.ImapServer, account.ImapPort ?? 993, account.UseSSL, account.Name);
-                await _connectionFactory.AuthenticateClientAsync(client, account);
+                await _connectionFactory.ConnectAccountAsync(client, account);
 
                 var folders = await _folderService.GetAllFoldersAsync(client, account.Name);
                 var folderNames = folders.Select(f => f.FullName).ToList();

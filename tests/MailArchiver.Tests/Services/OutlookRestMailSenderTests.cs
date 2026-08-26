@@ -2,6 +2,7 @@ using System.Net;
 using System.Text.Json;
 using MailArchiver.Models;
 using MailArchiver.Services;
+using MailArchiver.Services.MailProviders;
 using MailKit.Security;
 using MimeKit;
 
@@ -38,11 +39,11 @@ public class OutlookRestMailSenderTests
     [InlineData("535 5.7.139 Authentication unsuccessful")]
     [InlineData("SmtpClientAuthentication is disabled for the Mailbox")]
     public void Smtp_disabled_detection_only_matches_the_explicit_server_response(string message)
-        => Assert.True(OutboundMailService.IsSmtpClientAuthenticationDisabled(new AuthenticationException(message)));
+        => Assert.True(OutlookMailProviderModule.IsSmtpClientAuthenticationDisabled(new AuthenticationException(message)));
 
     [Fact]
     public void Smtp_disabled_detection_does_not_hide_other_authentication_failures()
-        => Assert.False(OutboundMailService.IsSmtpClientAuthenticationDisabled(
+        => Assert.False(OutlookMailProviderModule.IsSmtpClientAuthenticationDisabled(
             new AuthenticationException("535 5.7.3 Authentication unsuccessful")));
 
     private sealed class SingleClientFactory(HttpClient client) : IHttpClientFactory

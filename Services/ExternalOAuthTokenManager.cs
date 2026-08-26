@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using MailArchiver.Data;
 using MailArchiver.Models;
+using MailArchiver.Services.MailProviders;
 using Microsoft.EntityFrameworkCore;
 
 namespace MailArchiver.Services;
@@ -32,11 +33,24 @@ public sealed class ExternalOAuthTokenManager : IExternalOAuthTokenManager
         if (account.Provider != ProviderType.IMAP ||
             !ExternalOAuthProviderPolicy.TryResolve(account.EmailAddress, out var provider))
             throw new InvalidOperationException("只有 Gmail 和 Yahoo 账号支持此 OAuth 令牌流程。");
-        if (!ExternalOAuthProviderPolicy.HasUsableCredentials(account))
+        return await GetAccessTokenAsync(account, new ExternalOAuthSettings(
+            provider.Provider,
+            provider.TokenEndpoint,
+            provider.RequiresClientSecret,
+            provider.RequiresRedirectUri), forceRefresh, cancellationToken);
+    }
+
+    public async Task<ExternalOAuthAccessToken> GetAccessTokenAsync(
+        MailAccount account,
+        ExternalOAuthSettings provider,
+        bool forceRefresh = false,
+        CancellationToken cancellationToken = default)
+    {
+        if (!HasUsableCredentials(account, provider))
             throw new InvalidOperationException(
                 provider.RequiresClientSecret
-                    ? $"{provider.Provider} OAuth 缺少 Client ID、Client Secret、Refresh Token 或 Redirect URI。"
-                    : $"{provider.Provider} OAuth 缺少 Client ID 或 Refresh Token。");
+                    ? $"{provider.ProviderName} OAuth 缺少 Client ID、Client Secret、Refresh Token 或 Redirect URI。"
+                    : $"{provider.ProviderName} OAuth 缺少 Client ID 或 Refresh Token。");
 
         var accountLock = AccountLocks.GetOrAdd(account.Id, _ => new SemaphoreSlim(1, 1));
         await accountLock.WaitAsync(cancellationToken);
@@ -53,7 +67,7 @@ public sealed class ExternalOAuthTokenManager : IExternalOAuthTokenManager
             if (needsRefresh)
             {
                 _logger.LogInformation("Refreshing {Provider} OAuth token for account {AccountId}",
-                    provider.Provider, tracked.Id);
+                    provider.ProviderName, tracked.Id);
                 var body = new Dictionary<string, string>
                 {
                     ["grant_type"] = "refresh_token",
@@ -74,15 +88,15 @@ public sealed class ExternalOAuthTokenManager : IExternalOAuthTokenManager
                 if (!response.IsSuccessStatusCode)
                 {
                     _logger.LogWarning("{Provider} OAuth refresh failed for account {AccountId}: HTTP {Status}",
-                        provider.Provider, tracked.Id, (int)response.StatusCode);
+                        provider.ProviderName, tracked.Id, (int)response.StatusCode);
                     throw new InvalidOperationException(
-                        $"{provider.Provider} OAuth 刷新失败（HTTP {(int)response.StatusCode}），请检查 Client ID、Client Secret 和 Refresh Token。");
+                        $"{provider.ProviderName} OAuth 刷新失败（HTTP {(int)response.StatusCode}），请检查 Client ID、Client Secret 和 Refresh Token。");
                 }
 
                 using var document = JsonDocument.Parse(json);
                 var root = document.RootElement;
                 tracked.OAuthAccessToken = root.GetProperty("access_token").GetString()
-                    ?? throw new InvalidOperationException($"{provider.Provider} 没有返回 access token。");
+                    ?? throw new InvalidOperationException($"{provider.ProviderName} 没有返回 access token。");
                 var expiresIn = root.TryGetProperty("expires_in", out var expiry)
                     ? expiry.GetInt32()
                     : 3600;
@@ -101,13 +115,19 @@ public sealed class ExternalOAuthTokenManager : IExternalOAuthTokenManager
             return new ExternalOAuthAccessToken(
                 tracked.Username ?? tracked.EmailAddress,
                 tracked.OAuthAccessToken
-                    ?? throw new InvalidOperationException($"{provider.Provider} 没有可用的 access token。"));
+                    ?? throw new InvalidOperationException($"{provider.ProviderName} 没有可用的 access token。"));
         }
         finally
         {
             accountLock.Release();
         }
     }
+
+    public static bool HasUsableCredentials(MailAccount account, ExternalOAuthSettings provider)
+        => !string.IsNullOrWhiteSpace(account.ClientId)
+            && !string.IsNullOrWhiteSpace(account.OAuthRefreshToken)
+            && (!provider.RequiresClientSecret || !string.IsNullOrWhiteSpace(account.ClientSecret))
+            && (!provider.RequiresRedirectUri || !string.IsNullOrWhiteSpace(account.OAuthRedirectUri));
 
     private static void CopyTokenFields(MailAccount source, MailAccount destination)
     {

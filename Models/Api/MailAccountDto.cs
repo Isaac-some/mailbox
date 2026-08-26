@@ -6,6 +6,7 @@ public class MailAccountDto
     public string Name { get; set; } = string.Empty;
     public string EmailAddress { get; set; } = string.Empty;
     public string Provider { get; set; } = string.Empty;
+    public string? MailProvider { get; set; }
     public bool IsEnabled { get; set; }
     public DateTime LastSync { get; set; }
 
@@ -17,6 +18,7 @@ public class MailAccountDto
             Name = a.Name,
             EmailAddress = a.EmailAddress,
             Provider = a.Provider.ToString(),
+            MailProvider = a.MailProviderKind?.ToString(),
             IsEnabled = a.IsEnabled,
             LastSync = a.LastSync
         };

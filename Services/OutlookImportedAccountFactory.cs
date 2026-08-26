@@ -17,6 +17,7 @@ public static class OutlookImportedAccountFactory
             UseSSL = true,
             IsEnabled = isEnabled,
             Provider = ProviderType.MSA,
+            MailProviderKind = MailProviderKind.Outlook,
             ClientId = imported.ClientId,
             OAuthRefreshToken = imported.RefreshToken,
             OAuthGrantedScopes = null,

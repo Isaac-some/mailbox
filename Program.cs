@@ -183,6 +183,11 @@ builder.Services.Configure<MsaOAuthOptions>(builder.Configuration.GetSection(Msa
 builder.Services.AddScoped<MailArchiver.Services.IMsaOAuthService, MailArchiver.Services.MsaOAuthService>();
 builder.Services.AddScoped<MailArchiver.Services.IMsaTokenManager, MailArchiver.Services.MsaTokenManager>();
 builder.Services.AddScoped<MailArchiver.Services.IExternalOAuthTokenManager, MailArchiver.Services.ExternalOAuthTokenManager>();
+builder.Services.AddScoped<MailArchiver.Services.MailProviders.IMailProviderModule, MailArchiver.Services.MailProviders.GmailMailProviderModule>();
+builder.Services.AddScoped<MailArchiver.Services.MailProviders.IMailProviderModule, MailArchiver.Services.MailProviders.YahooMailProviderModule>();
+builder.Services.AddScoped<MailArchiver.Services.MailProviders.IMailProviderModule, MailArchiver.Services.MailProviders.GmxMailProviderModule>();
+builder.Services.AddScoped<MailArchiver.Services.MailProviders.IMailProviderModule, MailArchiver.Services.MailProviders.OutlookMailProviderModule>();
+builder.Services.AddScoped<MailArchiver.Services.MailProviders.IMailProviderRegistry, MailArchiver.Services.MailProviders.MailProviderRegistry>();
 builder.Services.Configure<OutboundMailOptions>(builder.Configuration.GetSection(OutboundMailOptions.SectionName));
 builder.Services.AddScoped<MailArchiver.Services.IOutlookRestMailSender, MailArchiver.Services.OutlookRestMailSender>();
 builder.Services.AddScoped<MailArchiver.Services.IOutboundMailService, MailArchiver.Services.OutboundMailService>();

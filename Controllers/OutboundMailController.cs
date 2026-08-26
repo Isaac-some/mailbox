@@ -82,7 +82,7 @@ public sealed class OutboundMailController : Controller
 
         if (account is null)
             ModelState.AddModelError(nameof(model.AccountId), "发件账号不存在、已停用或无权使用。");
-        else if (!OutboundMailService.CanAttemptSend(account))
+        else if (!_outboundMail.CanSend(account))
             ModelState.AddModelError(nameof(model.AccountId), "该账号没有可用的发件凭据。");
 
         if (!ModelState.IsValid)
@@ -172,7 +172,7 @@ public sealed class OutboundMailController : Controller
             : new List<MailAccount>();
 
         model.SendingAccounts = accounts
-            .Where(OutboundMailService.CanAttemptSend)
+            .Where(_outboundMail.CanSend)
             .Select(account => new SelectListItem(account.EmailAddress, account.Id.ToString()))
             .ToList();
         model.MaxAttachmentCount = _options.MaxAttachmentCount;

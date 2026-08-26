@@ -135,6 +135,7 @@ public class OutboundMailTaskWorkerTests
     {
         public List<OutboundMailMessage> Messages { get; } = [];
         public Exception? Failure { get; init; }
+        public bool CanSend(MailAccount account) => true;
 
         public Task<OutboundMailResult> SendAsync(
             MailAccount account,

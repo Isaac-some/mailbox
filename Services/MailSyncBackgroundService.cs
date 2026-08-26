@@ -94,7 +94,8 @@ namespace MailArchiver.Services
                         var dbContext = initScope.ServiceProvider.GetRequiredService<MailArchiverDbContext>();
 
                         var accountsForSync = await dbContext.MailAccounts
-                            .Where(a => a.IsEnabled && a.Provider == ProviderType.IMAP)
+                            .Where(a => a.IsEnabled &&
+                                (a.Provider == ProviderType.IMAP || a.Provider == ProviderType.MSA))
                             .ToListAsync(stoppingToken);
 
                         _logger.LogInformation($"Found {accountsForSync.Count} enabled accounts to sync");
@@ -116,7 +117,8 @@ namespace MailArchiver.Services
 
                         accounts = await dbContext.MailAccounts
                             .AsNoTracking()
-                            .Where(a => a.IsEnabled && a.Provider == ProviderType.IMAP)
+                            .Where(a => a.IsEnabled &&
+                                (a.Provider == ProviderType.IMAP || a.Provider == ProviderType.MSA))
                             .ToListAsync(stoppingToken);
                     } // initScope disposed here
 

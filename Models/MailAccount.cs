@@ -27,6 +27,10 @@ public class MailAccount
     
     // Provider field for account type
     public ProviderType Provider { get; set; } = ProviderType.IMAP;
+
+    // Explicit consumer mail provider identity. Provider remains the legacy
+    // transport/import discriminator used by M365 and import-only accounts.
+    public MailProviderKind? MailProviderKind { get; set; }
     
     // Microsoft 365 OAuth2 fields (M365 and MSA)
     public string? ClientId { get; set; }

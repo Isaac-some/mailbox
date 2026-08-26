@@ -74,6 +74,10 @@ namespace MailArchiver.Migrations
                     b.Property<int?>("LocalRetentionDays")
                         .HasColumnType("integer");
 
+                    b.Property<string>("MailProviderKind")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasColumnType("text");

@@ -19,6 +19,20 @@ public static class LocalDatabaseSchemaUpgrade
         {
             await EnsureNullableTextColumnAsync(connection, "MailAccounts", "OAuthGrantedScopes", cancellationToken);
             await EnsureNullableTextColumnAsync(connection, "MailAccounts", "OAuthRedirectUri", cancellationToken);
+            await EnsureNullableTextColumnAsync(connection, "MailAccounts", "MailProviderKind", cancellationToken);
+            if (await HasColumnAsync(connection, "MailAccounts", "Provider", cancellationToken))
+            {
+                await ExecuteAsync(connection, @"
+                UPDATE ""MailAccounts""
+                SET ""MailProviderKind"" = CASE
+                    WHEN ""Provider"" = 'MSA' THEN 'Outlook'
+                    WHEN ""Provider"" = 'IMAP' AND (LOWER(""EmailAddress"") LIKE '%@gmail.com' OR LOWER(""EmailAddress"") LIKE '%@googlemail.com') THEN 'Gmail'
+                    WHEN ""Provider"" = 'IMAP' AND LOWER(""EmailAddress"") LIKE '%@yahoo.%' THEN 'Yahoo'
+                    WHEN ""Provider"" = 'IMAP' AND (LOWER(""EmailAddress"") LIKE '%@gmx.com' OR LOWER(""EmailAddress"") LIKE '%@gmx.net' OR LOWER(""EmailAddress"") LIKE '%@gmx.de') THEN 'Gmx'
+                    ELSE ""MailProviderKind""
+                END
+                WHERE ""MailProviderKind"" IS NULL;", cancellationToken);
+            }
 
             await ExecuteAsync(connection, @"
                 CREATE TABLE IF NOT EXISTS ""OutboundMailTasks"" (
@@ -86,26 +100,29 @@ public static class LocalDatabaseSchemaUpgrade
         string column,
         CancellationToken cancellationToken)
     {
-        var hasColumn = false;
-        await using (var command = connection.CreateCommand())
-        {
-            command.CommandText = $"PRAGMA table_info(\"{table}\");";
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-            while (await reader.ReadAsync(cancellationToken))
-            {
-                if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase))
-                {
-                    hasColumn = true;
-                    break;
-                }
-            }
-        }
-
-        if (hasColumn)
+        if (await HasColumnAsync(connection, table, column, cancellationToken))
             return;
 
         await using var alter = connection.CreateCommand();
         alter.CommandText = $"ALTER TABLE \"{table}\" ADD COLUMN \"{column}\" TEXT NULL;";
         await alter.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task<bool> HasColumnAsync(
+        System.Data.Common.DbConnection connection,
+        string table,
+        string column,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"PRAGMA table_info(\"{table}\");";
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
     }
 }

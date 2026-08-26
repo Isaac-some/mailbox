@@ -16,14 +16,14 @@
         ProviderType.IMPORT => "bg-secondary",
         _ => "bg-secondary"
     };
-    var providerBadgeText = Model.Provider switch
-    {
-        ProviderType.IMAP => "IMAP",
-        ProviderType.M365 => "Microsoft 365",
-        ProviderType.MSA => Localizer["MsaBadge"].Value,
-        ProviderType.IMPORT => "仅导入",
-        _ => Model.Provider.ToString()
-    };
+    var providerBadgeText = !string.IsNullOrWhiteSpace(Model.ProviderLabel)
+        ? Model.ProviderLabel
+        : Model.Provider switch
+        {
+            ProviderType.M365 => "Microsoft 365",
+            ProviderType.IMPORT => "仅导入",
+            _ => Model.Provider.ToString()
+        };
 
     var hasConnectionDetails = Model.Provider == ProviderType.IMAP
         || Model.Provider == ProviderType.M365

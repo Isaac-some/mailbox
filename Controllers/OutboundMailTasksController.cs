@@ -18,17 +18,20 @@ public sealed class OutboundMailTasksController : Controller
 
     private readonly MailArchiverDbContext _context;
     private readonly IAuthenticationService _authentication;
+    private readonly IOutboundMailService _outboundMail;
     private readonly OutboundMailOptions _outboundOptions;
     private readonly TimeZoneInfo _displayTimeZone;
 
     public OutboundMailTasksController(
         MailArchiverDbContext context,
         IAuthenticationService authentication,
+        IOutboundMailService outboundMail,
         IOptions<OutboundMailOptions> outboundOptions,
         IOptions<TimeZoneOptions> timeZoneOptions)
     {
         _context = context;
         _authentication = authentication;
+        _outboundMail = outboundMail;
         _outboundOptions = outboundOptions.Value;
         _displayTimeZone = ResolveTimeZone(timeZoneOptions.Value.DisplayTimeZoneId);
     }
@@ -79,7 +82,7 @@ public sealed class OutboundMailTasksController : Controller
 
         var accounts = await GetManageableAccountsAsync(userId, cancellationToken);
         var accountByEmail = accounts
-            .Where(account => account.IsEnabled && OutboundMailService.CanAttemptSend(account))
+            .Where(account => account.IsEnabled && _outboundMail.CanSend(account))
             .GroupBy(account => account.EmailAddress, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
 
@@ -178,7 +181,7 @@ public sealed class OutboundMailTasksController : Controller
             TempData["ErrorMessage"] = "只有明确失败且未确认发出的邮件可以重试。";
             return RedirectToAction(nameof(Details), new { id = item.OutboundMailTaskId });
         }
-        if (!item.MailAccount.IsEnabled || !OutboundMailService.CanAttemptSend(item.MailAccount))
+        if (!item.MailAccount.IsEnabled || !_outboundMail.CanSend(item.MailAccount))
         {
             TempData["ErrorMessage"] = "发件账号当前不可用，请先修复账号授权。";
             return RedirectToAction(nameof(Details), new { id = item.OutboundMailTaskId });
@@ -282,7 +285,7 @@ public sealed class OutboundMailTasksController : Controller
             }
 
             var available = candidates.FirstOrDefault(account =>
-                account.IsEnabled && OutboundMailService.CanAttemptSend(account));
+                account.IsEnabled && _outboundMail.CanSend(account));
             if (available is null)
             {
                 unavailableEmails.Add(email);
@@ -326,7 +329,7 @@ public sealed class OutboundMailTasksController : Controller
             .Where(account => selectedIds.Contains(account.Id))
             .ToListAsync(cancellationToken);
         var availableAccounts = accounts
-            .Where(account => account.IsEnabled && OutboundMailService.CanAttemptSend(account))
+            .Where(account => account.IsEnabled && _outboundMail.CanSend(account))
             .ToList();
         if (availableAccounts.Count != selectedIds.Count)
             return BadRequest("账号列表或发件状态已经变化，请刷新页面后重新选择。");
@@ -362,7 +365,7 @@ public sealed class OutboundMailTasksController : Controller
                 .Select(group =>
                 {
                     var selected = group.FirstOrDefault(account =>
-                            account.IsEnabled && OutboundMailService.CanAttemptSend(account))
+                            account.IsEnabled && _outboundMail.CanSend(account))
                         ?? group.OrderBy(account => account.Id).First();
                     return new OutboundSenderAccountViewModel
                     {
@@ -370,7 +373,7 @@ public sealed class OutboundMailTasksController : Controller
                         Name = selected.Name,
                         EmailAddress = selected.EmailAddress,
                         IsEnabled = selected.IsEnabled,
-                        CanSend = selected.IsEnabled && OutboundMailService.CanAttemptSend(selected)
+                        CanSend = selected.IsEnabled && _outboundMail.CanSend(selected)
                     };
                 })
                 .OrderBy(account => account.EmailAddress, StringComparer.OrdinalIgnoreCase)
