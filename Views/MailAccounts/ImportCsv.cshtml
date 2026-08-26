@@ -44,14 +44,15 @@
 
                 <div class="form-section">
                     <div class="form-section-header">
-                        <i class="bi bi-file-earmark-arrow-up me-1"></i> @Localizer["CsvFile"]
+                        <i class="bi bi-file-earmark-arrow-up me-1"></i> 账号文件
                     </div>
 
                     <div class="mb-3">
-                        <label asp-for="CsvFile" class="form-label">@Localizer["CsvFile"]</label>
-                        <input asp-for="CsvFile" type="file" class="form-control" accept=".csv,.txt,text/csv,text/plain" id="csvFileInput">
-                        <div class="form-text">@Localizer["CsvFileHelp"]</div>
-                        <span asp-validation-for="CsvFile" class="text-danger"></span>
+                        <label asp-for="AccountFiles" class="form-label">选择 TXT / CSV 文件</label>
+                        <input asp-for="AccountFiles" type="file" class="form-control"
+                               accept=".csv,.txt,text/csv,text/plain" id="accountFileInput" multiple required>
+                        <div class="form-text">可一次选择最多 20 个 TXT / CSV 文件；每个文件最多 10 MB，所有文件合计最多 5,000 行。</div>
+                        <span asp-validation-for="AccountFiles" class="text-danger"></span>
                     </div>
                 </div>
 

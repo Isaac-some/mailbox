@@ -64,12 +64,39 @@ public class LocalAppPackagingPolicyTests
     }
 
     [Fact]
-    public void LocalAppRelease_version_identifies_the_csv_download_fix()
+    public void LocalAppRelease_version_identifies_the_multiple_account_file_import()
     {
         var source = ReadBundledFile("Info.plist");
 
-        Assert.Contains("<string>1.0.10</string>", source, StringComparison.Ordinal);
-        Assert.Contains("<string>11</string>", source, StringComparison.Ordinal);
+        Assert.Contains("<string>1.0.11</string>", source, StringComparison.Ordinal);
+        Assert.Contains("<string>12</string>", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WindowsRelease_matches_the_macOS_feature_version()
+    {
+        var source = ReadBundledFile("KouziMailAssistant.Windows.csproj");
+
+        Assert.Contains("<Version>1.0.11</Version>", source, StringComparison.Ordinal);
+        Assert.Contains("<FileVersion>1.0.11.0</FileVersion>", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Account_import_accepts_multiple_txt_and_csv_files_without_changing_outbound_tasks()
+    {
+        var page = ReadBundledFile("MailAccountsImportCsv.cshtml");
+        var model = ReadBundledFile("BulkImportImapViewModel.cs");
+        var controller = ReadBundledFile("MailAccountsController.cs");
+        var outboundPage = ReadBundledFile("OutboundMailTasksIndex.cshtml");
+
+        Assert.Contains("asp-for=\"AccountFiles\"", page, StringComparison.Ordinal);
+        Assert.Contains("accept=\".csv,.txt,text/csv,text/plain\"", page, StringComparison.Ordinal);
+        Assert.Contains("multiple required", page, StringComparison.Ordinal);
+        Assert.Contains("List<IFormFile> AccountFiles", model, StringComparison.Ordinal);
+        Assert.Contains("foreach (var file in accountFiles)", controller, StringComparison.Ordinal);
+        Assert.Contains("ParseAccountImportFileAsync(file, model)", controller, StringComparison.Ordinal);
+        Assert.Contains("accept=\".csv,text/csv\"", outboundPage, StringComparison.Ordinal);
+        Assert.DoesNotContain("multiple required", outboundPage, StringComparison.Ordinal);
     }
 
     [Fact]

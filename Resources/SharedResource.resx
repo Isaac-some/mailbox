@@ -2917,13 +2917,13 @@
   </data>
   <!-- CSV Bulk IMAP Import -->
 <data name="ImportCsvBulk" xml:space="preserve">
-    <value>CSV批量导入</value>
+    <value>批量导入账号</value>
   </data>
 <data name="CsvImportTitle" xml:space="preserve">
-    <value>从 CSV 导入 IMAP 邮箱</value>
+    <value>批量导入邮箱账号</value>
   </data>
 <data name="CsvImportInformation" xml:space="preserve">
-    <value>通过 CSV 文件一次导入多个 IMAP 邮箱。</value>
+    <value>一次选择一个或多个 TXT / CSV 文件导入邮箱账号。</value>
   </data>
 <data name="CsvImportFormatHelp" xml:space="preserve">
     <value>列：电子邮件（必填）、密码（必填）、名称（可选）、用户名（可选）、imap_server（可选）、imap_port（可选）、use_ssl（可选）</value>
@@ -2944,10 +2944,10 @@
     <value>上传和设置</value>
   </data>
 <data name="CsvFile" xml:space="preserve">
-    <value>CSV 文件</value>
+    <value>账号文件</value>
   </data>
 <data name="CsvFileHelp" xml:space="preserve">
-    <value>带有标题行的 UTF-8 编码 CSV 文件。必填列：电子邮件、密码。</value>
+    <value>支持一次选择多个 UTF-8 编码的 TXT / CSV 文件。</value>
   </data>
 <data name="CommonServerSettings" xml:space="preserve">
     <value>常用服务器设置</value>
@@ -2980,13 +2980,13 @@
     <value>帐户已启用</value>
   </data>
 <data name="CsvImportSubmit" xml:space="preserve">
-    <value>进口</value>
+    <value>导入账号</value>
   </data>
 <data name="CsvImportResult" xml:space="preserve">
     <value>导入结果</value>
   </data>
 <data name="CsvImportAgain" xml:space="preserve">
-    <value>导入另一个 CSV</value>
+    <value>继续导入账号文件</value>
   </data>
 <data name="CsvImportResultSummary" xml:space="preserve">
     <value>{0} 已创建，{1} 已跳过，{2} 失败</value>
@@ -3013,16 +3013,16 @@
     <value>线</value>
   </data>
 <data name="CsvImportNoFile" xml:space="preserve">
-    <value>请选择 CSV 文件。</value>
+    <value>请至少选择一个 TXT 或 CSV 文件。</value>
   </data>
 <data name="CsvImportFileTooLarge" xml:space="preserve">
     <value>文件太大：{0} MB，最大为 {1} MB。</value>
   </data>
 <data name="CsvImportNoValidRows" xml:space="preserve">
-    <value>在 CSV 文件中找不到有效的邮箱。</value>
+    <value>所选文件中找不到有效的邮箱。</value>
   </data>
 <data name="CsvImportTooManyRows" xml:space="preserve">
-    <value>CSV 文件包含 {0} 行，最多为 {1}。</value>
+    <value>所选文件合计包含 {0} 行，最多为 {1}。</value>
   </data>
 <data name="CsvImportMissingServer" xml:space="preserve">
     <value>未提供 IMAP 服务器（行中和表单中均未提供）。</value>

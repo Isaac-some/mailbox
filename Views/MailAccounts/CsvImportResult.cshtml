@@ -121,6 +121,7 @@
                     <table class="table table-striped table-hover table-sm mb-0">
                         <thead class="table-dark">
                             <tr>
+                                <th>文件</th>
                                 <th style="width: 80px;">@Localizer["CsvImportRowNumber"]</th>
                                 <th>@Localizer["CsvImportEmail"]</th>
                                 <th>@Localizer["CsvImportReason"]</th>
@@ -130,6 +131,7 @@
                             @foreach (var row in Model.FailedRows)
                             {
                                 <tr>
+                                    <td>@(string.IsNullOrEmpty(row.FileName) ? "-" : row.FileName)</td>
                                     <td>@(row.LineNumber > 0 ? row.LineNumber.ToString() : "-")</td>
                                     <td>@(string.IsNullOrEmpty(row.Email) ? "-" : row.Email)</td>
                                     <td>@row.Reason</td>

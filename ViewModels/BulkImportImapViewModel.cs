@@ -7,9 +7,8 @@ namespace MailArchiver.Models.ViewModels
 {
     public class BulkImportImapViewModel : IValidatableObject
     {
-        [Required]
-        [Display(Name = "CSV file")]
-        public IFormFile? CsvFile { get; set; }
+        [Display(Name = "Account files")]
+        public List<IFormFile> AccountFiles { get; set; } = [];
 
         [Display(Name = "IMAP server")]
         public string? ImapServer { get; set; }

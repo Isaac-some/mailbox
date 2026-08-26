@@ -21,6 +21,7 @@ namespace MailArchiver.Controllers
     [SelfManagerRequired]
     public class MailAccountsController : Controller
     {
+    private const int MaxAccountImportFiles = 20;
     private readonly MailArchiverDbContext _context;
     private readonly MailArchiver.Services.Core.EmailCoreService _emailCoreService;
     private readonly MailArchiver.Services.Factories.ProviderEmailServiceFactory _providerFactory;
@@ -3156,17 +3157,30 @@ namespace MailArchiver.Controllers
                 return Forbid();
             }
 
-            if (model.CsvFile == null || model.CsvFile.Length == 0)
-            {
-                ModelState.AddModelError("CsvFile", _localizer["CsvImportNoFile"].Value);
-            }
+            var accountFiles = model.AccountFiles ?? [];
+            if (accountFiles.Count == 0)
+                ModelState.AddModelError(nameof(model.AccountFiles), "请至少选择一个 TXT 或 CSV 文件。");
+            if (accountFiles.Count > MaxAccountImportFiles)
+                ModelState.AddModelError(nameof(model.AccountFiles), $"一次最多选择 {MaxAccountImportFiles} 个文件。");
 
-            if (model.CsvFile != null && model.CsvFile.Length > _csvImportOptions.MaxFileSizeBytes)
+            foreach (var file in accountFiles)
             {
-                ModelState.AddModelError("CsvFile",
-                    _localizer["CsvImportFileTooLarge",
-                        Math.Round(model.CsvFile.Length / 1_000_000.0, 1),
-                        Math.Round(_csvImportOptions.MaxFileSizeBytes / 1_000_000.0, 1)].Value);
+                var safeFileName = Path.GetFileName(file.FileName);
+                var extension = Path.GetExtension(safeFileName);
+                if (!extension.Equals(".csv", StringComparison.OrdinalIgnoreCase) &&
+                    !extension.Equals(".txt", StringComparison.OrdinalIgnoreCase))
+                {
+                    ModelState.AddModelError(nameof(model.AccountFiles), $"{safeFileName}：仅支持 TXT 和 CSV 文件。");
+                }
+                if (file.Length == 0)
+                    ModelState.AddModelError(nameof(model.AccountFiles), $"{safeFileName}：文件为空。");
+                else if (file.Length > _csvImportOptions.MaxFileSizeBytes)
+                {
+                    ModelState.AddModelError(nameof(model.AccountFiles),
+                        $"{safeFileName}：" + _localizer["CsvImportFileTooLarge",
+                            Math.Round(file.Length / 1_000_000.0, 1),
+                            Math.Round(_csvImportOptions.MaxFileSizeBytes / 1_000_000.0, 1)].Value);
+                }
             }
 
             if (!ModelState.IsValid)
@@ -3181,122 +3195,11 @@ namespace MailArchiver.Controllers
                 var rows = new List<CsvParsedRow>();
                 var failedRows = new List<CsvImportFailedRow>();
 
-                string uploadedText;
-                using (var stream = model.CsvFile.OpenReadStream())
-                using (var reader = new StreamReader(stream, detectEncodingFromByteOrderMarks: true))
+                foreach (var file in accountFiles)
                 {
-                    uploadedText = await reader.ReadToEndAsync();
-                }
-
-                var firstNonEmptyLine = uploadedText
-                    .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
-                    .FirstOrDefault(line => !string.IsNullOrWhiteSpace(line));
-
-                if (OutlookAccountTextParser.LooksLikeFormat(firstNonEmptyLine))
-                {
-                    using var outlookReader = new StringReader(uploadedText);
-                    var parsed = OutlookAccountTextParser.Parse(outlookReader);
-                    rows.AddRange(parsed.Accounts.Select(account => new CsvParsedRow
-                    {
-                        LineNumber = account.LineNumber,
-                        Email = account.Email,
-                        Provider = ProviderType.MSA,
-                        ClientId = account.ClientId,
-                        OAuthRefreshToken = account.RefreshToken
-                    }));
-                    failedRows.AddRange(parsed.Errors.Select(error => new CsvImportFailedRow
-                    {
-                        LineNumber = error.LineNumber,
-                        Email = string.Empty,
-                        Reason = error.Reason
-                    }));
-                }
-                else if (firstNonEmptyLine?.Contains('\t') == true &&
-                    !firstNonEmptyLine.Split('\t')[0].Trim().Equals("邮箱", StringComparison.OrdinalIgnoreCase) &&
-                    !firstNonEmptyLine.Split('\t')[0].Trim().Equals("email", StringComparison.OrdinalIgnoreCase))
-                {
-                    using var externalReader = new StringReader(uploadedText);
-                    var parsed = ExternalMailAccountTextParser.Parse(externalReader);
-                    rows.AddRange(parsed.Accounts.Select(account => new CsvParsedRow
-                    {
-                        LineNumber = account.LineNumber,
-                        Email = account.Email,
-                        Provider = ProviderType.IMAP,
-                        Password = account.AppPassword ?? string.Empty,
-                        ClientId = account.ClientId,
-                        ClientSecret = account.ClientSecret,
-                        OAuthRefreshToken = account.RefreshToken,
-                        OAuthRedirectUri = account.RedirectUri
-                    }));
-                    failedRows.AddRange(parsed.Errors.Select(error => new CsvImportFailedRow
-                    {
-                        LineNumber = error.LineNumber,
-                        Email = string.Empty,
-                        Reason = error.Reason
-                    }));
-                }
-                else
-                {
-                    int lineNumber = 0;
-                    string[]? headers = null;
-                    var headerIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-
-                    using (var csvReader = new StringReader(uploadedText))
-                    using (var parser = new Microsoft.VisualBasic.FileIO.TextFieldParser(csvReader))
-                    {
-                        parser.SetDelimiters(firstNonEmptyLine?.Contains('\t') == true ? "\t" : ",");
-                        parser.HasFieldsEnclosedInQuotes = true;
-
-                        while (!parser.EndOfData)
-                        {
-                            lineNumber++;
-                            string[]? fields;
-
-                            try
-                            {
-                                fields = parser.ReadFields();
-                            }
-                            catch (Microsoft.VisualBasic.FileIO.MalformedLineException ex)
-                            {
-                                failedRows.Add(new CsvImportFailedRow
-                                {
-                                    LineNumber = lineNumber,
-                                    Email = string.Empty,
-                                    Reason = _localizer["CsvImportMalformedLine"].Value
-                                });
-                                _logger.LogWarning(ex, "Malformed CSV line {LineNumber}", lineNumber);
-                                continue;
-                            }
-
-                            if (fields == null) continue;
-
-                            if (lineNumber == 1)
-                            {
-                                var trimmed = fields.Select(f => f?.Trim() ?? string.Empty).ToArray();
-                                if (trimmed.Any(h => h.Length > 0))
-                                {
-                                    headers = trimmed;
-                                    if (!CsvImportHeaderPolicy.TryCreateCanonicalIndex(headers, out headerIndex))
-                                    {
-                                        failedRows.Add(new CsvImportFailedRow
-                                        {
-                                            LineNumber = lineNumber,
-                                            Email = string.Empty,
-                                            Reason = "CSV 必须包含邮箱，以及应用专用密码；或 Client ID、Refresh Token（Yahoo 还需 Client Secret）。"
-                                        });
-                                        break;
-                                    }
-                                    continue;
-                                }
-                            }
-
-                            var row = ParseCsvRow(fields, headerIndex, model, lineNumber, failedRows, _localizer);
-                            if (row != null)
-                            {
-                                rows.Add(row);
-                            }
-                        }
-                    }
+                    var parsedFile = await ParseAccountImportFileAsync(file, model);
+                    rows.AddRange(parsedFile.Rows);
+                    failedRows.AddRange(parsedFile.FailedRows);
                 }
 
                 result.FailedRows.AddRange(failedRows);
@@ -3391,6 +3294,7 @@ namespace MailArchiver.Controllers
                         {
                             result.FailedRows.Add(new CsvImportFailedRow
                             {
+                                FileName = row.SourceFileName,
                                 LineNumber = row.LineNumber,
                                 Email = row.Email,
                                 Reason = _localizer["CsvImportAlreadyExists"].Value
@@ -3413,6 +3317,7 @@ namespace MailArchiver.Controllers
                     {
                         result.FailedRows.Add(new CsvImportFailedRow
                         {
+                            FileName = row.SourceFileName,
                             LineNumber = row.LineNumber,
                             Email = row.Email,
                             Reason = ex.Message
@@ -3507,6 +3412,139 @@ namespace MailArchiver.Controllers
                 return View(model);
             }
         }
+
+        private async Task<AccountImportFileParseResult> ParseAccountImportFileAsync(
+            IFormFile file,
+            BulkImportImapViewModel model)
+        {
+            var fileName = Path.GetFileName(file.FileName);
+            var rows = new List<CsvParsedRow>();
+            var failedRows = new List<CsvImportFailedRow>();
+
+            string uploadedText;
+            using (var stream = file.OpenReadStream())
+            using (var reader = new StreamReader(stream, detectEncodingFromByteOrderMarks: true))
+            {
+                uploadedText = await reader.ReadToEndAsync();
+            }
+
+            var firstNonEmptyLine = uploadedText
+                .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+                .FirstOrDefault(line => !string.IsNullOrWhiteSpace(line));
+
+            if (OutlookAccountTextParser.LooksLikeFormat(firstNonEmptyLine))
+            {
+                using var outlookReader = new StringReader(uploadedText);
+                var parsed = OutlookAccountTextParser.Parse(outlookReader);
+                rows.AddRange(parsed.Accounts.Select(account => new CsvParsedRow
+                {
+                    LineNumber = account.LineNumber,
+                    Email = account.Email,
+                    Provider = ProviderType.MSA,
+                    ClientId = account.ClientId,
+                    OAuthRefreshToken = account.RefreshToken
+                }));
+                failedRows.AddRange(parsed.Errors.Select(error => new CsvImportFailedRow
+                {
+                    LineNumber = error.LineNumber,
+                    Email = string.Empty,
+                    Reason = error.Reason
+                }));
+            }
+            else if (firstNonEmptyLine?.Contains('\t') == true &&
+                !firstNonEmptyLine.Split('\t')[0].Trim().Equals("邮箱", StringComparison.OrdinalIgnoreCase) &&
+                !firstNonEmptyLine.Split('\t')[0].Trim().Equals("email", StringComparison.OrdinalIgnoreCase))
+            {
+                using var externalReader = new StringReader(uploadedText);
+                var parsed = ExternalMailAccountTextParser.Parse(externalReader);
+                rows.AddRange(parsed.Accounts.Select(account => new CsvParsedRow
+                {
+                    LineNumber = account.LineNumber,
+                    Email = account.Email,
+                    Provider = ProviderType.IMAP,
+                    Password = account.AppPassword ?? string.Empty,
+                    ClientId = account.ClientId,
+                    ClientSecret = account.ClientSecret,
+                    OAuthRefreshToken = account.RefreshToken,
+                    OAuthRedirectUri = account.RedirectUri
+                }));
+                failedRows.AddRange(parsed.Errors.Select(error => new CsvImportFailedRow
+                {
+                    LineNumber = error.LineNumber,
+                    Email = string.Empty,
+                    Reason = error.Reason
+                }));
+            }
+            else
+            {
+                var lineNumber = 0;
+                var headerIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+                using var csvReader = new StringReader(uploadedText);
+                using var parser = new Microsoft.VisualBasic.FileIO.TextFieldParser(csvReader);
+                parser.SetDelimiters(firstNonEmptyLine?.Contains('\t') == true ? "\t" : ",");
+                parser.HasFieldsEnclosedInQuotes = true;
+
+                while (!parser.EndOfData)
+                {
+                    lineNumber++;
+                    string[]? fields;
+
+                    try
+                    {
+                        fields = parser.ReadFields();
+                    }
+                    catch (Microsoft.VisualBasic.FileIO.MalformedLineException exception)
+                    {
+                        failedRows.Add(new CsvImportFailedRow
+                        {
+                            LineNumber = lineNumber,
+                            Email = string.Empty,
+                            Reason = _localizer["CsvImportMalformedLine"].Value
+                        });
+                        _logger.LogWarning(exception, "Malformed account import line {LineNumber} in {FileName}", lineNumber, fileName);
+                        continue;
+                    }
+
+                    if (fields is null)
+                        continue;
+
+                    if (lineNumber == 1)
+                    {
+                        var headers = fields.Select(field => field?.Trim() ?? string.Empty).ToArray();
+                        if (headers.Any(header => header.Length > 0))
+                        {
+                            if (!CsvImportHeaderPolicy.TryCreateCanonicalIndex(headers, out headerIndex))
+                            {
+                                failedRows.Add(new CsvImportFailedRow
+                                {
+                                    LineNumber = lineNumber,
+                                    Email = string.Empty,
+                                    Reason = "文件必须包含邮箱，以及应用专用密码；或 Client ID、Refresh Token（Yahoo 还需 Client Secret）。"
+                                });
+                                break;
+                            }
+                            continue;
+                        }
+                    }
+
+                    var row = ParseCsvRow(fields, headerIndex, model, lineNumber, failedRows, _localizer);
+                    if (row is not null)
+                        rows.Add(row);
+                }
+            }
+
+            foreach (var row in rows)
+                row.SourceFileName = fileName;
+            foreach (var failure in failedRows)
+                failure.FileName = fileName;
+
+            return new AccountImportFileParseResult(rows, failedRows);
+        }
+
+        private sealed record AccountImportFileParseResult(
+            List<CsvParsedRow> Rows,
+            List<CsvImportFailedRow> FailedRows);
 
         // GET: MailAccounts/DownloadExampleCsv
         [HttpGet]

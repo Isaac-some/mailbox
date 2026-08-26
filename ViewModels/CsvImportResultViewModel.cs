@@ -25,6 +25,7 @@ namespace MailArchiver.Models.ViewModels
 
     public class CsvImportFailedRow
     {
+        public string FileName { get; set; } = string.Empty;
         public int LineNumber { get; set; }
         public string Email { get; set; } = string.Empty;
         public string Reason { get; set; } = string.Empty;
@@ -32,6 +33,7 @@ namespace MailArchiver.Models.ViewModels
 
     internal class CsvParsedRow
     {
+        public string SourceFileName { get; set; } = string.Empty;
         public int LineNumber { get; set; }
         public string Email { get; set; } = string.Empty;
         public string Password { get; set; } = string.Empty;
