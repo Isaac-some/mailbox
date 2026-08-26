@@ -115,7 +115,7 @@ public class EmailsApiController : ApiControllerBase
             .Include(e => e.Attachments)
             .FirstOrDefaultAsync(e => e.Id == id);
 
-        if (email == null || (allowed != null && !allowed.Contains(email.MailAccountId)))
+        if (email == null || !allowed.Contains(email.MailAccountId))
         {
             return NotFound();
         }
@@ -144,7 +144,7 @@ public class EmailsApiController : ApiControllerBase
             .Include(a => a.ArchivedEmail)
             .FirstOrDefaultAsync(a => a.Id == attachmentId && a.ArchivedEmailId == id);
 
-        if (att == null || (allowed != null && !allowed.Contains(att.ArchivedEmail.MailAccountId)))
+        if (att == null || !allowed.Contains(att.ArchivedEmail.MailAccountId))
         {
             return NotFound();
         }

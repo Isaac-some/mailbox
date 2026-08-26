@@ -29,25 +29,7 @@ namespace MailArchiver.Controllers
             // Set default page size to 50
             pageSize = 50;
 
-            // Get logs based on user role with date filtering
-            List<AccessLog> logs;
-            if (isAdmin)
-            {
-                // For admin users, check if a specific username was requested for filtering
-                if (!string.IsNullOrEmpty(username))
-                {
-                    logs = await _accessLogService.GetLogsForUserAsync(username, fromDate, toDate);
-                }
-                else
-                {
-                    logs = await _accessLogService.GetLogsForAdminAsync(fromDate, toDate); // Get all logs for admin
-                }
-            }
-            else
-            {
-                // For non-admin users, they can only see their own logs regardless of the username parameter
-                logs = await _accessLogService.GetLogsForUserAsync(currentUsername, fromDate, toDate); // Get only user's logs
-            }
+            var logs = await _accessLogService.GetLogsForUserAsync(currentUsername, fromDate, toDate);
 
             // Filter by type if specified
             if (type.HasValue)
@@ -62,20 +44,10 @@ namespace MailArchiver.Controllers
             var totalPages = (int)Math.Ceiling((double)totalLogs / pageSize);
             var paginatedLogs = logs.Skip((page - 1) * pageSize).Take(pageSize).ToList();
 
-            // For admin users, get all usernames for the filter dropdown
-            if (isAdmin)
-            {
-                var allUsers = await _context.Users
-                    .OrderBy(u => u.Username)
-                    .Select(u => u.Username)
-                    .ToListAsync();
-                ViewBag.AllUsers = allUsers;
-            }
-
             ViewBag.CurrentPage = page;
             ViewBag.TotalPages = totalPages;
             ViewBag.PageSize = pageSize;
-            ViewBag.IsAdmin = isAdmin;
+            ViewBag.IsAdmin = false;
             ViewBag.FromDate = fromDate;
             ViewBag.ToDate = toDate;
             ViewBag.UsernameFilter = username;

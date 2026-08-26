@@ -32,7 +32,8 @@ namespace MailArchiver.Services.Providers
             _serviceProvider = serviceProvider;
             _logger = logger;
             _batchOptions = batchOptions.Value;
-            _uploadsPath = Path.Combine(environment.ContentRootPath, "uploads", "eml");
+            var writableRoot = LocalAppStoragePathPolicy.ResolveWritableRoot(environment.ContentRootPath);
+            _uploadsPath = Path.Combine(writableRoot, "uploads", "eml");
             Directory.CreateDirectory(_uploadsPath);
             _cleanupTimer = new Timer(_ => CleanupOldJobs(), null, TimeSpan.FromHours(24), TimeSpan.FromHours(24));
         }

@@ -71,7 +71,7 @@ namespace MailArchiver.Services.Providers.Imap
                 !string.Equals(account.ImapServer, preset.ImapServer, StringComparison.OrdinalIgnoreCase) ||
                 account.ImapPort != preset.ImapPort || account.UseSSL != preset.UseSsl)
             {
-                var reason = "Account does not match an approved Yahoo/GMX IMAP preset.";
+                var reason = "Account does not match an approved Gmail/Yahoo/GMX IMAP preset.";
                 _logger.LogError("Sync blocked for account {AccountName}: {Reason}", account.Name, reason);
                 if (jobId != null) _syncJobService.CompleteJob(jobId, false, reason);
                 return;
@@ -125,9 +125,7 @@ namespace MailArchiver.Services.Providers.Imap
                 await _connectionFactory.AuthenticateClientAsync(client, account);
                 _logger.LogInformation("Connected to IMAP server for {AccountName}", account.Name);
 
-                var allFolders = _mailSyncOptions.SyncInboxOnly
-                    ? new List<IMailFolder> { client.Inbox }
-                    : await _folderService.GetAllFoldersAsync(client, account.Name);
+                var allFolders = await GetFoldersToSyncAsync(client, account.Name);
 
                 if (jobId != null)
                 {
@@ -232,6 +230,8 @@ namespace MailArchiver.Services.Providers.Imap
                         trackedAccount.LastSync = DateTime.UtcNow;
                         await _context.SaveChangesAsync();
                     }
+
+                    deletedEmails = await _coreService.EnforceLocalEmailLimitAsync(account.Id);
 
                     if (_bandwidthOptions.Enabled)
                     {
@@ -432,6 +432,35 @@ namespace MailArchiver.Services.Providers.Imap
             }
 
             return false;
+        }
+
+        private async Task<List<IMailFolder>> GetFoldersToSyncAsync(ImapClient client, string accountName)
+        {
+            var discoveredFolders = await _folderService.GetAllFoldersAsync(client, accountName);
+            if (!_mailSyncOptions.SyncInboxOnly)
+                return discoveredFolders;
+
+            var incomingFolders = discoveredFolders
+                .Where(folder => IncomingMailFolderPolicy.ShouldSync(
+                    folder.Name,
+                    folder.FullName,
+                    folder.Attributes))
+                .ToList();
+
+            if (!incomingFolders.Any(folder =>
+                    folder.Attributes.HasFlag(FolderAttributes.Inbox) ||
+                    string.Equals(folder.FullName, "INBOX", StringComparison.OrdinalIgnoreCase)))
+            {
+                incomingFolders.Insert(0, client.Inbox);
+            }
+
+            return incomingFolders
+                .GroupBy(folder => folder.FullName, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .OrderByDescending(folder =>
+                    folder.Attributes.HasFlag(FolderAttributes.Inbox) ||
+                    string.Equals(folder.FullName, "INBOX", StringComparison.OrdinalIgnoreCase))
+                .ToList();
         }
 
         /// <summary>
@@ -678,6 +707,8 @@ namespace MailArchiver.Services.Providers.Imap
                             }
                         }
                     }
+
+                    uids = await IncludeRecentInboxCandidatesAsync(folder, account.Id, uids);
 
                     _logger.LogInformation("Found {Count} messages to process in folder {FolderName} for account: {AccountName}",
                         uids.Count, folder.FullName, account.Name);
@@ -958,6 +989,63 @@ namespace MailArchiver.Services.Providers.Imap
             return result;
         }
 
+        private async Task<IList<UniqueId>> IncludeRecentInboxCandidatesAsync(
+            IMailFolder folder,
+            int accountId,
+            IList<UniqueId> searchedUids)
+        {
+            var isInbox = folder.Attributes.HasFlag(FolderAttributes.Inbox)
+                || string.Equals(folder.FullName, "INBOX", StringComparison.OrdinalIgnoreCase);
+            if (!isInbox || folder.Count <= 0)
+                return searchedUids;
+
+            try
+            {
+                var probeCount = Math.Max(
+                    1,
+                    Math.Max(_mailSyncOptions.MaxStoredEmailsPerAccount, _batchOptions.BatchSize));
+                var startIndex = Math.Max(0, folder.Count - probeCount);
+                var summaries = await folder.FetchAsync(
+                    startIndex,
+                    -1,
+                    MessageSummaryItems.UniqueId | MessageSummaryItems.Envelope);
+
+                var summaryMessageIds = summaries
+                    .Select(summary => MailContentHelper.CleanText(summary.Envelope?.MessageId))
+                    .Where(messageId => !string.IsNullOrWhiteSpace(messageId))
+                    .Distinct(StringComparer.Ordinal)
+                    .ToList();
+                var archivedMessageIds = summaryMessageIds.Count == 0
+                    ? new HashSet<string>(StringComparer.Ordinal)
+                    : (await _context.ArchivedEmails
+                        .AsNoTracking()
+                        .Where(email =>
+                            email.MailAccountId == accountId
+                            && summaryMessageIds.Contains(email.MessageId))
+                        .Select(email => email.MessageId)
+                        .ToListAsync())
+                        .ToHashSet(StringComparer.Ordinal);
+
+                var candidates = searchedUids.ToHashSet();
+                foreach (var summary in summaries)
+                {
+                    var messageId = MailContentHelper.CleanText(summary.Envelope?.MessageId);
+                    if (string.IsNullOrWhiteSpace(messageId) || !archivedMessageIds.Contains(messageId))
+                        candidates.Add(summary.UniqueId);
+                }
+
+                return candidates.OrderBy(uid => uid.Id).ToList();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Could not probe recent INBOX messages for account {AccountId}; using server search results only",
+                    accountId);
+                return searchedUids;
+            }
+        }
+
         private async Task<IList<UniqueId>> FilterUidsByDateAsync(
             IMailFolder folder,
             IList<UniqueId> uids,
@@ -973,8 +1061,8 @@ namespace MailArchiver.Services.Providers.Imap
             return summaries
                 .Where(summary =>
                 {
-                    var date = summary.Envelope?.Date?.UtcDateTime
-                        ?? summary.InternalDate?.UtcDateTime;
+                    var date = summary.InternalDate?.UtcDateTime
+                        ?? summary.Envelope?.Date?.UtcDateTime;
                     return date.HasValue && date.Value >= cutoff;
                 })
                 .Select(summary => summary.UniqueId)

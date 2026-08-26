@@ -24,17 +24,13 @@
         </section>
 
         <section class="border-top pt-4">
-            <h2 class="h5 text-danger">恢复出厂设置</h2>
-            <p class="text-muted">删除这台 Mac 上的所有账号、邮件、附件和本机访问授权；应用随后会重新启动。</p>
-            <form asp-action="FactoryReset" method="post" onsubmit="return confirm('恢复出厂设置不可撤销，确定继续吗？');">
+            <h2 class="h5 text-danger">清空本机所有数据</h2>
+            <p class="text-muted">删除这台 Mac 上的账号、邮件、附件、登录状态和本机密钥；应用随后会重新启动。</p>
+            <form asp-action="FactoryReset" method="post" onsubmit="return confirm('确定清空这台 Mac 上的所有邮箱数据吗？此操作不可撤销。');">
                 @Html.AntiForgeryToken()
-                <label for="factory-reset-confirmation" class="form-label">输入 RESET 以确认</label>
-                <div class="input-group" style="max-width: 320px;">
-                    <input id="factory-reset-confirmation" name="confirmation" class="form-control" autocomplete="off" required />
-                    <button type="submit" class="btn btn-danger" aria-label="恢复出厂设置" title="恢复出厂设置">
-                        <i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i>
-                    </button>
-                </div>
+                <button type="submit" class="btn btn-danger">
+                    <i class="bi bi-trash3 me-1" aria-hidden="true"></i>清空本机所有数据
+                </button>
             </form>
         </section>
     </div>

@@ -11,12 +11,15 @@ namespace MailArchiver.Data
         public DbSet<AttachmentContent> AttachmentContents { get; set; }
         public DbSet<User> Users { get; set; }
         public DbSet<UserMailAccount> UserMailAccounts { get; set; }
+        public DbSet<RegistrationCode> RegistrationCodes { get; set; }
         public DbSet<AccessLog> AccessLogs { get; set; }
         public DbSet<BandwidthUsage> BandwidthUsages { get; set; }
         public DbSet<SyncCheckpoint> SyncCheckpoints { get; set; }
         public DbSet<AccountStorageCache> AccountStorageCaches { get; set; }
         public DbSet<AccountStorageBackfillState> AccountStorageBackfillStates { get; set; }
         public DbSet<ApiKey> ApiKeys { get; set; }
+        public DbSet<OutboundMailTask> OutboundMailTasks { get; set; }
+        public DbSet<OutboundMailTaskItem> OutboundMailTaskItems { get; set; }
 
         public MailArchiverDbContext(DbContextOptions<MailArchiverDbContext> options)
             : base(options)
@@ -233,6 +236,18 @@ namespace MailArchiver.Data
                 .WithMany(ma => ma.UserMailAccounts)
                 .HasForeignKey(uma => uma.MailAccountId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<RegistrationCode>()
+                .HasIndex(code => code.CodeHash)
+                .IsUnique();
+
+            modelBuilder.Entity<RegistrationCode>()
+                .Property(code => code.CodeHash)
+                .HasMaxLength(64);
+
+            modelBuilder.Entity<RegistrationCode>()
+                .Property(code => code.CodePrefix)
+                .HasMaxLength(10);
                 
                 
             // Configure Provider enum as string
@@ -245,6 +260,56 @@ namespace MailArchiver.Data
                 .Property(e => e.GroupName)
                 .HasColumnType("text")
                 .HasDefaultValue(string.Empty);
+
+            modelBuilder.Entity<OutboundMailTask>()
+                .Property(task => task.Name)
+                .HasColumnType("text");
+
+            modelBuilder.Entity<OutboundMailTask>()
+                .HasOne(task => task.CreatedByUser)
+                .WithMany()
+                .HasForeignKey(task => task.CreatedByUserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<OutboundMailTaskItem>()
+                .Property(item => item.Status)
+                .HasConversion<string>()
+                .HasMaxLength(32);
+
+            modelBuilder.Entity<OutboundMailTaskItem>()
+                .Property(item => item.Recipient)
+                .HasColumnType("text");
+
+            modelBuilder.Entity<OutboundMailTaskItem>()
+                .Property(item => item.Subject)
+                .HasColumnType("text");
+
+            modelBuilder.Entity<OutboundMailTaskItem>()
+                .Property(item => item.Body)
+                .HasColumnType("text");
+
+            modelBuilder.Entity<OutboundMailTaskItem>()
+                .Property(item => item.MessageId)
+                .HasColumnType("text");
+
+            modelBuilder.Entity<OutboundMailTaskItem>()
+                .Property(item => item.ErrorMessage)
+                .HasColumnType("text");
+
+            modelBuilder.Entity<OutboundMailTaskItem>()
+                .HasOne(item => item.OutboundMailTask)
+                .WithMany(task => task.Items)
+                .HasForeignKey(item => item.OutboundMailTaskId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<OutboundMailTaskItem>()
+                .HasOne(item => item.MailAccount)
+                .WithMany()
+                .HasForeignKey(item => item.MailAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<OutboundMailTaskItem>()
+                .HasIndex(item => new { item.Status, item.ScheduledAtUtc });
                 
             // AccessLog entity configuration
             modelBuilder.Entity<AccessLog>()

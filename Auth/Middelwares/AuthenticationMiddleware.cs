@@ -63,7 +63,7 @@ namespace MailArchiver.Auth.Middlewares
             }
 
             // Skip authentication for certain paths
-            var skipPaths = new[] { "/auth/login", "/auth/logout", "/auth/blocked", "/oidc-signin-completed", "/twofactor/", "/css/", "/js/", "/images/", "/favicon" };
+            var skipPaths = new[] { "/auth/login", "/auth/register", "/auth/logout", "/auth/blocked", "/oidc-signin-completed", "/twofactor/", "/css/", "/js/", "/images/", "/favicon" };
 
             var shouldSkip = skipPaths.Any(skipPath => path.StartsWith(skipPath));
 

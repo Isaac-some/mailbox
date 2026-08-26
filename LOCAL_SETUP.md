@@ -3,22 +3,20 @@
 进入目录：
 
 ```sh
-cd "/Users/zhaoxiaohandexinwanju/Documents/蔻姿邮箱助手/mail-archiver-main"
+cd /path/to/Kouzi/mail-archiver-main
 ```
 
 1. 安装并启动 Docker Desktop。
-2. 执行 `sh scripts/setup-local.sh`。它会在可用空间不少于 100 GiB 时生成本机密钥和管理员密码；不会在终端打印密码。
+2. 执行 `sh scripts/setup-local.sh`。它会生成本机数据库密码和邮箱凭据加密密钥。
 3. 执行 `docker compose up -d --build`。
 4. 在浏览器访问 `http://127.0.0.1:5000`。
 
 服务只绑定本机回环地址。自动同步默认开启：后台每 30 秒检查一次，到期账号默认每 6 小时同步一次，并在 6 小时内分散账号任务，避免大量账号同时连接 IMAP。打开收件箱后可点击“刷新邮件”立即同步当前账号。默认只同步 INBOX 中最近 30 天的邮件；认证失败、限流或同步水位未推进时退避 5 分钟再试。
 
-管理员账号、数据库密码以及同步参数都在 `.env` 控制。复制 `.env.example` 为 `.env` 后修改：
+本机免登录模式的数据库密码和同步参数由 `.env` 控制：
 
 ```env
 POSTGRES_PASSWORD=...
-MAILARCHIVE_ADMIN_USERNAME=admin
-MAILARCHIVE_ADMIN_PASSWORD=...
 MAILARCHIVE_SYNC_INTERVAL_SECONDS=21600
 MAILARCHIVE_SYNC_LOOKBACK_DAYS=30
 MAILARCHIVE_SYNC_INBOX_ONLY=true

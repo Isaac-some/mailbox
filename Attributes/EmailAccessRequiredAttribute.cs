@@ -21,14 +21,7 @@ namespace MailArchiver.Attributes
                 return;
             }
             
-            // For admin users, allow access
-            if (authService.IsCurrentUserAdmin(context.HttpContext))
-            {
-                await next();
-                return;
-            }
-            
-            // For regular users, check if they have access to the email's account
+            // Every user, including administrators, may access only owned accounts.
             var userService = context.HttpContext.RequestServices.GetService<IUserService>();
             var dbContext = context.HttpContext.RequestServices.GetService<MailArchiverDbContext>();
             

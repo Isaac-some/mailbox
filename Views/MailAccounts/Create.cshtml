@@ -12,6 +12,7 @@
     var emailDeletionSettingsDisplay = Model.Provider == ProviderType.IMPORT ? "none" : "block";
     var tenantImportControlsDisplay = Model.Provider == ProviderType.M365 && Model.ImportEntireTenant ? "block" : "none";
     var tenantImportSettingsDisplay = Model.Provider == ProviderType.M365 && Model.ImportEntireTenant ? "block" : "none";
+    var isLocalApp = string.Equals(Environment.GetEnvironmentVariable("KOUZI_LOCAL_APP"), "1", StringComparison.Ordinal);
 }
 
 <div class="container">
@@ -42,11 +43,14 @@
                     <div class="mb-3">
                         <label for="ProviderDisplay" class="form-label">@Localizer["Provider"]</label>
                         <select id="ProviderDisplay" class="form-select">
-                            <option value="IMAP" selected="@(visualProvider == "IMAP")">IMAP</option>
-                            <option value="M365Single" selected="@(visualProvider == "M365Single")">@Localizer["ProviderM365Single"]</option>
-                            <option value="M365Tenant" selected="@(visualProvider == "M365Tenant")">@Localizer["ProviderM365Tenant"]</option>
-                            <option value="MSA" selected="@(visualProvider == "MSA")">@Localizer["MsaProviderLabel"]</option>
-                            <option value="IMPORT" selected="@(visualProvider == "IMPORT")">仅导入</option>
+                            <option value="IMAP" selected="@(visualProvider == "IMAP")">Gmail / Yahoo / GMX</option>
+                            <option value="MSA" selected="@(visualProvider == "MSA")">Outlook 个人邮箱</option>
+                            @if (!isLocalApp)
+                            {
+                                <option value="M365Single" selected="@(visualProvider == "M365Single")">@Localizer["ProviderM365Single"]</option>
+                                <option value="M365Tenant" selected="@(visualProvider == "M365Tenant")">@Localizer["ProviderM365Tenant"]</option>
+                                <option value="IMPORT" selected="@(visualProvider == "IMPORT")">仅导入</option>
+                            }
                         </select>
                         <input type="hidden" asp-for="Provider" id="Provider" disabled="disabled" />
                         <input type="hidden" asp-for="ImportEntireTenant" id="ImportEntireTenant" disabled="disabled" />
@@ -61,9 +65,8 @@
                             </style>
                             <label asp-for="Provider" class="form-label">@Localizer["Provider"]</label>
                             <select asp-for="Provider" class="form-select">
-                                <option value="IMAP" selected="@(Model.Provider == ProviderType.IMAP)">IMAP</option>
-                                <option value="M365" selected="@(Model.Provider == ProviderType.M365)">Microsoft 365</option>
-                                <option value="IMPORT" selected="@(Model.Provider == ProviderType.IMPORT)">仅导入</option>
+                                <option value="IMAP" selected="@(Model.Provider == ProviderType.IMAP)">Gmail / Yahoo / GMX</option>
+                                <option value="MSA" selected="@(Model.Provider == ProviderType.MSA)">Outlook 个人邮箱</option>
                             </select>
                             <span asp-validation-for="Provider" class="text-danger"></span>
 
@@ -79,10 +82,10 @@
                 <div id="imapSettings" style="display: @imapSettingsDisplay;">
                     <div class="form-section">
                         <div class="form-section-header">
-                            <i class="bi bi-envelope me-1"></i> IMAP Settings
+                            <i class="bi bi-envelope me-1"></i> Gmail / Yahoo / GMX 收发件授权
                         </div>
 
-                        <div class="row">
+                        <div class="row" style="display: @(isLocalApp ? "none" : "flex");">
                             <div class="col-md-8 mb-3">
                                 <label asp-for="ImapServer" class="form-label">@Localizer["IMAPServer"]</label>
                                 <input asp-for="ImapServer" class="form-control" />
@@ -98,14 +101,14 @@
 
                         <h4 class="mt-4">@Localizer["Authentication"]</h4>
 
-                        <div class="mb-3">
+                        <div class="mb-3" style="display: @(isLocalApp ? "none" : "block");">
                             <label asp-for="Username" class="form-label">@Localizer["Username"]</label>
                             <input asp-for="Username" class="form-control" />
                             <span asp-validation-for="Username" class="text-danger"></span>
                         </div>
 
                         <div class="mb-3">
-                            <label asp-for="Password" class="form-label">@Localizer["Password"]</label>
+                            <label asp-for="Password" class="form-label">邮箱授权码 / 应用专用密码</label>
                             <div class="input-group">
                                 <input asp-for="Password" class="form-control" type="password" id="PasswordInput" />
                                 <button type="button" class="btn btn-outline-secondary password-toggle" data-target="PasswordInput" aria-label="@Localizer["ShowPassword"]">
@@ -115,7 +118,31 @@
                             <span asp-validation-for="Password" class="text-danger"></span>
                         </div>
 
-                        <div class="mb-3 form-check">
+                        <div class="alert alert-light border">密码和 OAuth 二选一。Gmail OAuth 填 Client ID、Refresh Token；Yahoo 还要填 Client Secret、Redirect URI；GMX 只支持上面的应用专用密码。</div>
+                        <div class="mb-3">
+                            <label asp-for="ExternalOAuthClientId" class="form-label">OAuth Client ID</label>
+                            <input asp-for="ExternalOAuthClientId" class="form-control" autocomplete="off" />
+                        </div>
+                        <div class="mb-3">
+                            <label asp-for="ExternalOAuthClientSecret" class="form-label">OAuth Client Secret（Yahoo 必填）</label>
+                            <div class="input-group">
+                                <input asp-for="ExternalOAuthClientSecret" class="form-control" type="password" id="ExternalClientSecretInput" autocomplete="off" />
+                                <button type="button" class="btn btn-outline-secondary password-toggle" data-target="ExternalClientSecretInput" aria-label="@Localizer["ShowPassword"]"><i class="bi bi-eye"></i></button>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label asp-for="OAuthRefreshToken" class="form-label">OAuth Refresh Token</label>
+                            <div class="input-group">
+                                <input asp-for="OAuthRefreshToken" class="form-control" type="password" id="ExternalRefreshTokenInput" autocomplete="off" />
+                                <button type="button" class="btn btn-outline-secondary password-toggle" data-target="ExternalRefreshTokenInput" aria-label="@Localizer["ShowPassword"]"><i class="bi bi-eye"></i></button>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label asp-for="ExternalOAuthRedirectUri" class="form-label">OAuth Redirect URI（Yahoo 必填）</label>
+                            <input asp-for="ExternalOAuthRedirectUri" class="form-control" placeholder="常见值：oob" autocomplete="off" />
+                        </div>
+
+                        <div class="mb-3 form-check" style="display: @(isLocalApp ? "none" : "block");">
                             <input asp-for="UseSSL" class="form-check-input" />
                             <label asp-for="UseSSL" class="form-check-label">@Localizer["UseSSL"]</label>
                         </div>

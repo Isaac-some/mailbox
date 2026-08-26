@@ -17,8 +17,10 @@ namespace MailArchiver.Models
         public int? FullSyncIntervalHours { get; set; }
         // Upper bound for the first sync window. Zero disables the bound.
         public int LookbackDays { get; set; } = 30;
-        // The lightweight mailbox UI only needs received mail. Avoid discovering
-        // and scanning every remote folder for every account unless explicitly enabled.
+        // Keep the desktop archive bounded. Zero disables the count cap.
+        public int MaxStoredEmailsPerAccount { get; set; } = 30;
+        // The lightweight mailbox UI only needs received mail. When enabled, sync
+        // INBOX plus provider junk folders, but skip sent, drafts, trash, and archives.
         public bool SyncInboxOnly { get; set; } = true;
         public int TimeoutMinutes { get; set; } = 60;
         public int ConnectionTimeoutSeconds { get; set; } = 180;

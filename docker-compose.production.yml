@@ -1,0 +1,63 @@
+name: kouzi-mail-assistant
+
+services:
+  mailarchive-app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5000:5000"
+    environment:
+      ConnectionStrings__DefaultConnection: "Host=postgres;Database=MailArchiver;Username=mailuser;Password=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}"
+      Authentication__Enabled: "true"
+      Authentication__Username: "${MAILARCHIVE_ADMIN_USERNAME:-admin}"
+      Authentication__Password: "${MAILARCHIVE_ADMIN_PASSWORD:?set MAILARCHIVE_ADMIN_PASSWORD}"
+      Authentication__CookieSameSite: "Lax"
+      DataProtection__KeyPath: "/app/DataProtection-Keys"
+      TimeZone__DisplayTimeZoneId: "${MAILARCHIVE_TIME_ZONE:-Asia/Shanghai}"
+      MailSync__Enabled: "true"
+      MailSync__IntervalSeconds: "${MAILARCHIVE_SYNC_INTERVAL_SECONDS:-21600}"
+      MailSync__LookbackDays: "${MAILARCHIVE_SYNC_LOOKBACK_DAYS:-30}"
+      MailSync__SyncInboxOnly: "${MAILARCHIVE_SYNC_INBOX_ONLY:-true}"
+      MailSync__MaxConcurrentSyncs: "${MAILARCHIVE_SYNC_MAX_CONCURRENT:-4}"
+      MailSync__StartupStaggerSeconds: "${MAILARCHIVE_SYNC_STARTUP_STAGGER_SECONDS:-21600}"
+      CredentialEncryption__KeyFilePath: "/run/secrets/credential_encryption_key"
+    volumes:
+      - app_logs:/app/logs
+      - data_protection_keys:/app/DataProtection-Keys
+    secrets:
+      - credential_encryption_key
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - backend
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: MailArchiver
+      POSTGRES_USER: mailuser
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mailuser -d MailArchiver"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - backend
+
+volumes:
+  postgres_data:
+  data_protection_keys:
+  app_logs:
+
+networks:
+  backend:
+
+secrets:
+  credential_encryption_key:
+    file: ./secrets/credential_encryption_key

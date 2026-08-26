@@ -22,7 +22,8 @@ internal static class ServiceFactory
         new(ctx,
             NullLogger<EmailCoreService>.Instance,
             new DateTimeHelper(Options.Create(new TimeZoneOptions { DisplayTimeZoneId = "Europe/Berlin" })),
-            Options.Create(new BatchOperationOptions()));
+            Options.Create(new BatchOperationOptions()),
+            Options.Create(new MailSyncOptions()));
 
     public static BandwidthService CreateBandwidthService(MailArchiverDbContext ctx, BandwidthTrackingOptions? options = null) =>
         new(ctx,

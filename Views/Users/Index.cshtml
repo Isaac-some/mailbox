@@ -95,7 +95,6 @@
                                     <div class="d-flex justify-content-center align-items-center gap-1">
                                         <a asp-action="Details" asp-route-id="@item.Id" class="btn btn-info btn-sm d-flex align-items-center"><i class="bi bi-eye"></i><span class="ms-1">@Localizer["Details"]</span></a>
                                         <a asp-action="Edit" asp-route-id="@item.Id" class="btn btn-warning btn-sm d-flex align-items-center"><i class="bi bi-pencil"></i><span class="ms-1">@Localizer["Edit"]</span></a>
-                                        <a asp-action="AssignAccounts" asp-route-id="@item.Id" class="btn btn-primary btn-sm d-flex align-items-center"><i class="bi bi-envelope"></i><span class="ms-1">@Localizer["Assign"]</span></a>
                                         <form asp-action="ToggleActive" asp-route-id="@item.Id" method="post" class="d-inline">@Html.AntiForgeryToken()<button type="submit" class="btn @(item.IsActive ? "btn-outline-warning" : "btn-outline-success") btn-sm d-flex align-items-center"><i class="bi bi-@(item.IsActive ? "slash-circle" : "check-circle")"></i><span class="ms-1">@(item.IsActive ? Localizer["Disable"] : Localizer["Enable"])</span></button></form>
                                         <button type="button" class="btn btn-danger btn-sm d-flex align-items-center" data-bs-toggle="modal" data-bs-target="#deleteUserModal-@item.Id"><i class="bi bi-trash"></i><span class="ms-1">@Localizer["Delete"]</span></button>
                                     </div>
@@ -329,7 +328,6 @@
                             <div class="col-6"><a asp-action="Edit" asp-route-id="@item.Id" class="btn btn-outline-warning btn-sm w-100"><i class="bi bi-pencil"></i> @Localizer["Edit"]</a></div>
                         </div>
                         <div class="row g-2">
-                            <div class="col-6"><a asp-action="AssignAccounts" asp-route-id="@item.Id" class="btn btn-outline-primary btn-sm w-100"><i class="bi bi-envelope"></i> @Localizer["Assign"]</a></div>
                             <div class="col-6"><form asp-action="ToggleActive" asp-route-id="@item.Id" method="post" class="w-100">@Html.AntiForgeryToken()<button type="submit" class="btn btn-outline-@(item.IsActive ? "warning" : "success") btn-sm w-100"><i class="bi bi-@(item.IsActive ? "slash-circle" : "check-circle")"></i> @(item.IsActive ? Localizer["Disable"] : Localizer["Enable"])</button></form></div>
                         </div>
                         <div class="row"><div class="col-12"><button type="button" class="btn btn-outline-danger btn-sm w-100" data-bs-toggle="modal" data-bs-target="#deleteUserModal-@item.Id"><i class="bi bi-trash"></i> @Localizer["Delete"]</button></div></div>

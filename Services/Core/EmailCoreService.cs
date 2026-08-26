@@ -23,17 +23,20 @@ namespace MailArchiver.Services.Core
         private readonly ILogger<EmailCoreService> _logger;
         private readonly DateTimeHelper _dateTimeHelper;
         private readonly BatchOperationOptions _batchOptions;
+        private readonly MailSyncOptions _mailSyncOptions;
 
         public EmailCoreService(
             MailArchiverDbContext context,
             ILogger<EmailCoreService> logger,
             DateTimeHelper dateTimeHelper,
-            IOptions<BatchOperationOptions> batchOptions)
+            IOptions<BatchOperationOptions> batchOptions,
+            IOptions<MailSyncOptions> mailSyncOptions)
         {
             _context = context;
             _logger = logger;
             _dateTimeHelper = dateTimeHelper;
             _batchOptions = batchOptions.Value;
+            _mailSyncOptions = mailSyncOptions.Value;
         }
 
         #region Search Methods
@@ -58,14 +61,43 @@ namespace MailArchiver.Services.Core
             if (take > 1000) take = 1000;
             if (skip < 0) skip = 0;
 
+            if (!_context.Database.IsNpgsql())
+            {
+                return await SearchEmailsEFAsync(
+                    searchTerm,
+                    fromDate,
+                    toDate,
+                    accountId,
+                    folderName,
+                    isOutgoing,
+                    skip,
+                    take,
+                    allowedAccountIds,
+                    sortBy,
+                    sortOrder,
+                    useReceivedDateForRange);
+            }
+
             try
             {
                 return await SearchEmailsOptimizedAsync(searchTerm, fromDate, toDate, accountId, folderName, isOutgoing, skip, take, allowedAccountIds, sortBy, sortOrder, useReceivedDateForRange);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Optimized search failed, falling back to Entity Framework search");
-                return await SearchEmailsEFAsync(searchTerm, fromDate, toDate, accountId, folderName, isOutgoing, skip, take, allowedAccountIds, useReceivedDateForRange);
+                _logger.LogError(ex, "Optimized search failed, falling back to provider-neutral Entity Framework search");
+                return await SearchEmailsEFAsync(
+                    searchTerm,
+                    fromDate,
+                    toDate,
+                    accountId,
+                    folderName,
+                    isOutgoing,
+                    skip,
+                    take,
+                    allowedAccountIds,
+                    sortBy,
+                    sortOrder,
+                    useReceivedDateForRange);
             }
         }
 
@@ -532,6 +564,8 @@ namespace MailArchiver.Services.Core
             int skip,
             int take,
             List<int> allowedAccountIds = null,
+            string sortBy = "SentDate",
+            string sortOrder = "desc",
             bool useReceivedDateForRange = false)
         {
             var baseQuery = _context.ArchivedEmails.AsNoTracking().AsQueryable();
@@ -575,21 +609,19 @@ namespace MailArchiver.Services.Core
                 if (!string.IsNullOrEmpty(tsQuery))
                 {
                     // Split terms and strip the ':*' suffix (used for prefix matching in PostgreSQL full-text search)
-                    // The fallback ILike search already supports partial matching via %wildcard%
                     var words = tsQuery.Split('&', StringSplitOptions.RemoveEmptyEntries)
-                                      .Select(w => w.Trim().Replace("''", "'").Replace(":*", ""))
+                                      .Select(w => w.Trim().Replace("''", "'").Replace(":*", "").Trim('\'').ToLowerInvariant())
                                       .ToList();
 
                     foreach (var word in words)
                     {
-                        var escapedWord = word.Replace("'", "''");
                         searchQuery = searchQuery.Where(e =>
-                            EF.Functions.ILike(e.Subject, $"%{escapedWord}%") ||
-                            EF.Functions.ILike(e.From, $"%{escapedWord}%") ||
-                            EF.Functions.ILike(e.To, $"%{escapedWord}%") ||
-                            EF.Functions.ILike(e.Body, $"%{escapedWord}%") ||
-                            EF.Functions.ILike(e.Cc, $"%{escapedWord}%") ||
-                            EF.Functions.ILike(e.Bcc, $"%{escapedWord}%")
+                            (e.Subject != null && e.Subject.ToLower().Contains(word)) ||
+                            (e.From != null && e.From.ToLower().Contains(word)) ||
+                            (e.To != null && e.To.ToLower().Contains(word)) ||
+                            (e.Body != null && e.Body.ToLower().Contains(word)) ||
+                            (e.Cc != null && e.Cc.ToLower().Contains(word)) ||
+                            (e.Bcc != null && e.Bcc.ToLower().Contains(word))
                         );
                     }
                 }
@@ -613,20 +645,20 @@ namespace MailArchiver.Services.Core
 
                     foreach (var term in terms)
                     {
-                        var escapedTerm = term.Replace("'", "''");
+                        var normalizedTerm = term.ToLowerInvariant();
                         switch (field.ToLower())
                         {
                             case "subject":
-                                searchQuery = searchQuery.Where(e => e.Subject != null && EF.Functions.ILike(e.Subject, $"%{escapedTerm}%"));
+                                searchQuery = searchQuery.Where(e => e.Subject != null && e.Subject.ToLower().Contains(normalizedTerm));
                                 break;
                             case "body":
-                                searchQuery = searchQuery.Where(e => e.Body != null && EF.Functions.ILike(e.Body, $"%{escapedTerm}%"));
+                                searchQuery = searchQuery.Where(e => e.Body != null && e.Body.ToLower().Contains(normalizedTerm));
                                 break;
                             case "from":
-                                searchQuery = searchQuery.Where(e => e.From != null && EF.Functions.ILike(e.From, $"%{escapedTerm}%"));
+                                searchQuery = searchQuery.Where(e => e.From != null && e.From.ToLower().Contains(normalizedTerm));
                                 break;
                             case "to":
-                                searchQuery = searchQuery.Where(e => e.To != null && EF.Functions.ILike(e.To, $"%{escapedTerm}%"));
+                                searchQuery = searchQuery.Where(e => e.To != null && e.To.ToLower().Contains(normalizedTerm));
                                 break;
                         }
                     }
@@ -659,9 +691,27 @@ namespace MailArchiver.Services.Core
             }
 
             var totalCount = await searchQuery.CountAsync();
-            var emails = await searchQuery
+            var ascending = string.Equals(sortOrder, "asc", StringComparison.OrdinalIgnoreCase);
+            var orderedQuery = sortBy?.ToLowerInvariant() switch
+            {
+                "subject" => ascending
+                    ? searchQuery.OrderBy(email => email.Subject)
+                    : searchQuery.OrderByDescending(email => email.Subject),
+                "from" => ascending
+                    ? searchQuery.OrderBy(email => email.From)
+                    : searchQuery.OrderByDescending(email => email.From),
+                "to" => ascending
+                    ? searchQuery.OrderBy(email => email.To)
+                    : searchQuery.OrderByDescending(email => email.To),
+                "receiveddate" => ascending
+                    ? searchQuery.OrderBy(email => email.ReceivedDate)
+                    : searchQuery.OrderByDescending(email => email.ReceivedDate),
+                _ => ascending
+                    ? searchQuery.OrderBy(email => email.SentDate)
+                    : searchQuery.OrderByDescending(email => email.SentDate)
+            };
+            var emails = await orderedQuery
                 .Include(e => e.MailAccount)
-                .OrderByDescending(e => e.SentDate)
                 .Skip(skip)
                 .Take(take)
                 .ToListAsync();
@@ -676,6 +726,70 @@ namespace MailArchiver.Services.Core
         public async Task<int> GetEmailCountByAccountAsync(int accountId)
         {
             return await _context.ArchivedEmails.CountAsync(e => e.MailAccountId == accountId);
+        }
+
+        /// <summary>
+        /// Keeps one mailbox's local archive within the configured message count.
+        /// Attachments are removed first and shared attachment payloads are collected only
+        /// when no remaining email references them.
+        /// </summary>
+        public async Task<int> EnforceLocalEmailLimitAsync(int accountId, CancellationToken cancellationToken = default)
+        {
+            var maximum = Math.Max(0, _mailSyncOptions.MaxStoredEmailsPerAccount);
+            if (maximum == 0)
+                return 0;
+
+            var batchSize = Math.Clamp(_batchOptions.BatchSize, 1, 100);
+            var deleted = 0;
+
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var emailIds = await _context.ArchivedEmails
+                    .Where(email => email.MailAccountId == accountId)
+                    .OrderByDescending(email => email.ReceivedDate)
+                    .ThenByDescending(email => email.SentDate)
+                    .ThenByDescending(email => email.Id)
+                    .Skip(maximum)
+                    .Select(email => email.Id)
+                    .Take(batchSize)
+                    .ToListAsync(cancellationToken);
+
+                if (emailIds.Count == 0)
+                    break;
+
+                // Retention is an explicit local-storage policy, so it may remove
+                // otherwise locked archive rows just like account deletion does.
+                await _context.ArchivedEmails
+                    .Where(email => emailIds.Contains(email.Id) && email.IsLocked)
+                    .ExecuteUpdateAsync(
+                        updates => updates.SetProperty(email => email.IsLocked, false),
+                        cancellationToken);
+
+                await _context.EmailAttachments
+                    .Where(attachment => emailIds.Contains(attachment.ArchivedEmailId))
+                    .ExecuteDeleteAsync(cancellationToken);
+
+                deleted += await _context.ArchivedEmails
+                    .Where(email => emailIds.Contains(email.Id))
+                    .ExecuteDeleteAsync(cancellationToken);
+            }
+
+            if (deleted > 0)
+            {
+                await _context.AttachmentContents
+                    .Where(content => !content.Attachments.Any())
+                    .ExecuteDeleteAsync(cancellationToken);
+
+                _logger.LogInformation(
+                    "Local mailbox cap removed {Count} older email(s) from account {AccountId}; keeping the newest {Maximum}",
+                    deleted,
+                    accountId,
+                    maximum);
+            }
+
+            return deleted;
         }
 
         #endregion

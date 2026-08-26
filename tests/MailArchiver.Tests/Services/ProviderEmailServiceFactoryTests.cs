@@ -108,6 +108,6 @@ public class ProviderEmailServiceFactoryTests
     private sealed class FakeImapEmailService : ImapEmailService
     {
         public FakeImapEmailService()
-            : base(null!, null!, null!, null!, null!, null!, NullLogger<ImapEmailService>.Instance) { }
+            : base(null!, null!, null!, null!, null!, NullLogger<ImapEmailService>.Instance) { }
     }
 }

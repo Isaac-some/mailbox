@@ -49,10 +49,6 @@ namespace MailArchiver.Controllers
                 return NotFound();
             }
 
-            // Get user's mail accounts
-            var mailAccounts = await _userService.GetUserMailAccountsAsync(id);
-            ViewBag.MailAccounts = mailAccounts;
-
             return View(user);
         }
 
@@ -446,28 +442,7 @@ namespace MailArchiver.Controllers
         [AdminRequired]
         public async Task<IActionResult> AssignAccounts(int id)
         {
-            var user = await _userService.GetUserByIdAsync(id);
-            if (user == null)
-            {
-                TempData["ErrorMessage"] = _localizer["UserNotFound"].Value;
-                return RedirectToAction(nameof(Index));
-            }
-
-            // Get all mail accounts
-            var allAccounts = await _context.MailAccounts.ToListAsync();
-
-            // Get currently assigned accounts
-            var assignedAccounts = await _userService.GetUserMailAccountsAsync(id);
-            var assignedAccountIds = assignedAccounts.Select(a => a.Id).ToList();
-
-            var model = new UserMailAccountViewModel
-            {
-                User = user,
-                AllMailAccounts = allAccounts,
-                AssignedAccountIds = assignedAccountIds
-            };
-
-            return View(model);
+            return NotFound();
         }
 
         // POST: Users/AssignAccounts/5
@@ -476,46 +451,7 @@ namespace MailArchiver.Controllers
         [AdminRequired]
         public async Task<IActionResult> AssignAccounts(int id, int[] selectedAccountIds)
         {
-            try
-            {
-                var user = await _userService.GetUserByIdAsync(id);
-                if (user == null)
-                {
-                    TempData["ErrorMessage"] = _localizer["UserNotFound"].Value;
-                    return RedirectToAction(nameof(Index));
-                }
-
-                // Get currently assigned accounts
-                var currentAssignedAccounts = await _userService.GetUserMailAccountsAsync(id);
-                var currentAssignedIds = currentAssignedAccounts.Select(a => a.Id).ToList();
-
-                // Remove accounts that are no longer selected
-                foreach (var accountId in currentAssignedIds)
-                {
-                    if (!selectedAccountIds.Contains(accountId))
-                    {
-                        await _userService.RemoveMailAccountFromUserAsync(id, accountId);
-                    }
-                }
-
-                // Add newly selected accounts
-                foreach (var accountId in selectedAccountIds)
-                {
-                    if (!currentAssignedIds.Contains(accountId))
-                    {
-                        await _userService.AssignMailAccountToUserAsync(id, accountId);
-                    }
-                }
-
-                TempData["SuccessMessage"] = _localizer["AccountAssignmentSuccess", user.Username].Value;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error updating mail account assignments: {Message}", ex.Message);
-                TempData["ErrorMessage"] = $"{_localizer["ErrorOccurred"]}: {ex.Message}";
-            }
-
-            return RedirectToAction(nameof(Index));
+            return NotFound();
         }
 
         // GET: Users/ChangePassword

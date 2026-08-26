@@ -1,0 +1,295 @@
+@model MailArchiver.ViewModels.OutboundMailTaskIndexViewModel
+@{
+    ViewData["Title"] = "发件任务";
+}
+
+<div class="account-page">
+    <header class="account-page__header">
+        <div>
+            <p class="account-page__eyebrow">KOUZI MAIL</p>
+            <h1>发件任务</h1>
+            <p class="account-page__summary">上传 CSV，让不同邮箱按各自时间发送不同主题和正文。</p>
+        </div>
+        <div class="d-flex gap-2 flex-wrap">
+            <a asp-action="DownloadTemplate" class="btn btn-light btn-sm">
+                <i class="bi bi-download" aria-hidden="true"></i> 下载模板
+            </a>
+            <a asp-controller="MailAccounts" asp-action="Index" class="btn btn-light btn-sm">返回邮箱账号</a>
+        </div>
+    </header>
+
+    <section class="card sender-csv-builder mb-4">
+        <div class="card-header d-flex align-items-center justify-content-between gap-3 flex-wrap">
+            <div>
+                <h2 class="h5 mb-1">生成发件 CSV</h2>
+                <p class="small text-muted mb-0">从账号库选择，或导入一份名单自动匹配。</p>
+            </div>
+            <div class="sender-builder__count" aria-live="polite">
+                已选 <strong id="selectedSenderCount">0</strong> / <span id="availableSenderCount">@Model.SenderAccounts.Count(account => account.CanSend)</span>
+            </div>
+        </div>
+        <div class="sender-builder__layout">
+            <section class="sender-builder__accounts" aria-labelledby="senderAccountHeading">
+                <div class="sender-builder__toolbar">
+                    <div>
+                        <h3 class="h6 mb-1" id="senderAccountHeading">当前邮箱账号</h3>
+                        <p class="small text-muted mb-0">仅可发件账号能被选择。</p>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button type="button" class="btn btn-outline-secondary btn-sm" id="clearSenderSelection">清空</button>
+                        <button type="button" class="btn btn-outline-primary btn-sm" id="selectVisibleSenders">全选筛选结果</button>
+                    </div>
+                </div>
+                <label for="senderAccountSearch" class="visually-hidden">搜索当前邮箱账号</label>
+                <div class="sender-builder__search">
+                    <i class="bi bi-search" aria-hidden="true"></i>
+                    <input type="search" id="senderAccountSearch" placeholder="搜索邮箱或名称" autocomplete="off" />
+                </div>
+                <div class="sender-account-list" id="senderAccountList">
+                    @if (Model.SenderAccounts.Count == 0)
+                    {
+                        <div class="sender-builder__empty">账号库中还没有邮箱。</div>
+                    }
+                    else
+                    {
+                        @foreach (var account in Model.SenderAccounts)
+                        {
+                            var searchText = $"{account.EmailAddress} {account.Name}".ToLowerInvariant();
+                            <label class="sender-account-row @(account.CanSend ? string.Empty : "sender-account-row--disabled")"
+                                   data-search="@searchText" data-account-id="@account.Id">
+                                <input type="checkbox" class="form-check-input sender-account-checkbox"
+                                       value="@account.Id" disabled="@(!account.CanSend)" />
+                                <span class="sender-account-row__body">
+                                    <span class="sender-account-row__email">@account.EmailAddress</span>
+                                    <span class="sender-account-row__name">@account.Name</span>
+                                </span>
+                                <span class="sender-account-row__status">
+                                    @(account.CanSend ? "可发件" : account.IsEnabled ? "缺少发件授权" : "已停用")
+                                </span>
+                            </label>
+                        }
+                    }
+                </div>
+            </section>
+
+            <section class="sender-builder__matcher" aria-labelledby="senderMatchHeading">
+                <div>
+                    <h3 class="h6 mb-1" id="senderMatchHeading">从外部名单匹配</h3>
+                    <p class="small text-muted mb-0">整块粘贴表格，或上传名单文件；只提取邮箱地址。</p>
+                </div>
+                <form asp-action="PreviewSenderSelection" method="post" enctype="multipart/form-data" id="senderMatchForm"
+                      data-preview-url="@Url.Action("PreviewSenderSelection", "OutboundMailTasks")">
+                    @Html.AntiForgeryToken()
+                    <label for="senderSourceText" class="form-label mt-3">粘贴名单</label>
+                    <textarea class="form-control" id="senderSourceText" name="SourceText" rows="7"
+                              spellcheck="false" placeholder="可直接粘贴一列、多列或整张表格"></textarea>
+                    <label for="senderListFile" class="form-label mt-3">或上传文件</label>
+                    <input class="form-control" id="senderListFile" name="ListFile" type="file"
+                           accept=".xlsx,.csv,.tsv,.txt,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,text/tab-separated-values,text/plain" />
+                    <div class="form-text">支持 XLSX、CSV、TSV、TXT，最多 5 MB。</div>
+                    <button type="submit" class="btn btn-outline-primary w-100 mt-3" id="matchSenderButton">
+                        <i class="bi bi-check2-square" aria-hidden="true"></i> 匹配并选中
+                    </button>
+                </form>
+                <div class="alert alert-danger mt-3 mb-0 d-none" id="senderMatchError" role="alert"></div>
+                <div class="sender-match-result d-none" id="senderMatchResult" aria-live="polite">
+                    <p class="mb-2" id="senderMatchSummary"></p>
+                    <dl class="mb-0">
+                        <div class="d-none" id="unavailableSenderResult"><dt>不可发件</dt><dd id="unavailableSenderEmails"></dd></div>
+                        <div class="d-none" id="unmatchedSenderResult"><dt>库内未找到</dt><dd id="unmatchedSenderEmails"></dd></div>
+                    </dl>
+                </div>
+            </section>
+        </div>
+        <form asp-action="DownloadSenderCsv" method="post" id="senderDownloadForm" class="sender-builder__footer">
+            @Html.AntiForgeryToken()
+            <div id="selectedSenderInputs"></div>
+            <p class="small text-muted mb-0">下载后填写时间、收件邮箱、主题和正文，再在下方创建任务。</p>
+            <button type="submit" class="btn btn-primary" id="downloadSenderCsv" disabled>
+                <i class="bi bi-download" aria-hidden="true"></i> 下载已选邮箱 CSV
+            </button>
+        </form>
+    </section>
+
+    <section class="card mb-4">
+        <div class="card-body p-4">
+            <h2 class="h5 mb-3">新建任务</h2>
+            <form asp-action="Import" method="post" enctype="multipart/form-data" id="taskImportForm">
+                @Html.AntiForgeryToken()
+                <div class="row g-3 align-items-end">
+                    <div class="col-lg-8">
+                        <label asp-for="CsvFile" class="form-label">发件 CSV</label>
+                        <input asp-for="CsvFile" type="file" accept=".csv,text/csv" class="form-control" required />
+                        <div class="form-text">
+                            必需列：时间、发件邮箱、收件邮箱、主题、正文。时间按 @Model.TimeZoneId 解释；留空表示立即发送。最多 5,000 行、5 MB。
+                        </div>
+                    </div>
+                    <div class="col-lg-4">
+                        <button type="submit" class="btn btn-primary w-100" id="createTaskButton">
+                            <i class="bi bi-calendar2-check" aria-hidden="true"></i> 创建发件任务
+                        </button>
+                    </div>
+                </div>
+            </form>
+
+            @if (Model.ImportErrors.Count > 0)
+            {
+                <div class="alert alert-danger mt-3 mb-0">
+                    <strong>CSV 未创建任务，请先修正以下问题：</strong>
+                    <ul class="mb-0 mt-2">
+                        @foreach (var error in Model.ImportErrors.Take(100))
+                        {
+                            <li>第 @error.LineNumber 行：@error.Reason</li>
+                        }
+                    </ul>
+                    @if (Model.ImportErrors.Count > 100)
+                    {
+                        <p class="mb-0 mt-2">另有 @(Model.ImportErrors.Count - 100) 个问题未显示。</p>
+                    }
+                </div>
+            }
+        </div>
+    </section>
+
+    <section class="card shadow-sm border-0">
+        <div class="card-body p-0">
+            <div class="p-4 pb-2"><h2 class="h5 mb-0">最近任务</h2></div>
+            @if (Model.Tasks.Count == 0)
+            {
+                <div class="p-4 text-muted">还没有发件任务。</div>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table align-middle mb-0">
+                        <thead><tr><th>任务</th><th>创建时间</th><th>进度</th><th>异常</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var task in Model.Tasks)
+                            {
+                                <tr>
+                                    <td><strong>@task.Name</strong><div class="small text-muted">共 @task.Total 封</div></td>
+                                    <td><span data-utc-time="@task.CreatedAtUtc.ToString("yyyy-MM-ddTHH:mm:ss")">@task.CreatedAtUtc</span></td>
+                                    <td>
+                                        <span class="badge text-bg-success">已发 @task.Sent</span>
+                                        @if (task.Pending > 0) { <span class="badge text-bg-secondary">待发 @task.Pending</span> }
+                                        @if (task.Sending > 0) { <span class="badge text-bg-primary">发送中 @task.Sending</span> }
+                                    </td>
+                                    <td>
+                                        @if (task.Failed > 0) { <span class="badge text-bg-danger">失败 @task.Failed</span> }
+                                        @if (task.Interrupted > 0) { <span class="badge text-bg-warning">结果不确定 @task.Interrupted</span> }
+                                        @if (task.Cancelled > 0) { <span class="badge text-bg-light">已取消 @task.Cancelled</span> }
+                                    </td>
+                                    <td class="text-end"><a asp-action="Details" asp-route-id="@task.Id" class="btn btn-outline-primary btn-sm">查看</a></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </section>
+</div>
+
+@section Scripts {
+    <script>
+        const senderRows = Array.from(document.querySelectorAll('.sender-account-row'));
+        const senderCheckboxes = Array.from(document.querySelectorAll('.sender-account-checkbox:not(:disabled)'));
+        const senderSearch = document.getElementById('senderAccountSearch');
+        const selectedSenderCount = document.getElementById('selectedSenderCount');
+        const selectedSenderInputs = document.getElementById('selectedSenderInputs');
+        const downloadSenderCsv = document.getElementById('downloadSenderCsv');
+
+        function refreshSenderSelection() {
+            const selected = senderCheckboxes.filter(checkbox => checkbox.checked);
+            selectedSenderCount.textContent = selected.length.toLocaleString();
+            downloadSenderCsv.disabled = selected.length === 0;
+            selectedSenderInputs.replaceChildren(...selected.map(checkbox => {
+                const input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = 'SelectedAccountIds';
+                input.value = checkbox.value;
+                return input;
+            }));
+            senderRows.forEach(row => {
+                const checkbox = row.querySelector('.sender-account-checkbox');
+                row.classList.toggle('sender-account-row--selected', Boolean(checkbox?.checked));
+            });
+        }
+
+        senderCheckboxes.forEach(checkbox => checkbox.addEventListener('change', refreshSenderSelection));
+        senderSearch?.addEventListener('input', function () {
+            const query = this.value.trim().toLowerCase();
+            senderRows.forEach(row => row.classList.toggle('d-none', !row.dataset.search.includes(query)));
+        });
+        document.getElementById('selectVisibleSenders')?.addEventListener('click', function () {
+            senderRows.filter(row => !row.classList.contains('d-none')).forEach(row => {
+                const checkbox = row.querySelector('.sender-account-checkbox:not(:disabled)');
+                if (checkbox) checkbox.checked = true;
+            });
+            refreshSenderSelection();
+        });
+        document.getElementById('clearSenderSelection')?.addEventListener('click', function () {
+            senderCheckboxes.forEach(checkbox => checkbox.checked = false);
+            refreshSenderSelection();
+        });
+
+        const senderMatchForm = document.getElementById('senderMatchForm');
+        senderMatchForm?.addEventListener('submit', async function (event) {
+            event.preventDefault();
+            const button = document.getElementById('matchSenderButton');
+            const error = document.getElementById('senderMatchError');
+            const resultPanel = document.getElementById('senderMatchResult');
+            button.disabled = true;
+            button.textContent = '正在匹配...';
+            error.classList.add('d-none');
+            resultPanel.classList.add('d-none');
+
+            try {
+                const response = await fetch(this.dataset.previewUrl, {
+                    method: 'POST',
+                    body: new FormData(this),
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                });
+                const result = await response.json();
+                if (!response.ok) throw new Error(result.message || '名单匹配失败。');
+
+                senderCheckboxes.forEach(checkbox => checkbox.checked = false);
+                new Set(result.matchedAccountIds.map(String)).forEach(id => {
+                    const checkbox = document.querySelector(`.sender-account-checkbox[value="${id}"]`);
+                    if (checkbox) checkbox.checked = true;
+                });
+                senderSearch.value = '';
+                senderRows.forEach(row => row.classList.remove('d-none'));
+                refreshSenderSelection();
+
+                document.getElementById('senderMatchSummary').textContent =
+                    `识别 ${result.recognizedCount.toLocaleString()} 个邮箱，已匹配并选中 ${result.matchedCount.toLocaleString()} 个。`;
+                renderMatchDetail('unavailableSenderResult', 'unavailableSenderEmails', result.unavailableEmails, result.unavailableCount);
+                renderMatchDetail('unmatchedSenderResult', 'unmatchedSenderEmails', result.unmatchedEmails, result.unmatchedCount);
+                resultPanel.classList.remove('d-none');
+            } catch (exception) {
+                error.textContent = exception.message;
+                error.classList.remove('d-none');
+            } finally {
+                button.disabled = false;
+                button.innerHTML = '<i class="bi bi-check2-square" aria-hidden="true"></i> 重新匹配';
+            }
+        });
+
+        function renderMatchDetail(rowId, valueId, emails, count) {
+            const row = document.getElementById(rowId);
+            const value = document.getElementById(valueId);
+            row.classList.toggle('d-none', count === 0);
+            value.textContent = count > emails.length
+                ? `${emails.join('、')} 等 ${count.toLocaleString()} 个`
+                : emails.join('、');
+        }
+
+        document.getElementById('taskImportForm')?.addEventListener('submit', function () {
+            const button = document.getElementById('createTaskButton');
+            if (!button || !this.checkValidity()) return;
+            button.disabled = true;
+            button.innerHTML = '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span> 正在校验 CSV';
+        });
+    </script>
+}

@@ -29,6 +29,7 @@ namespace MailArchiver.Services
         public string AccessToken { get; set; } = string.Empty;
         public string RefreshToken { get; set; } = string.Empty;
         public DateTime Expiry { get; set; }
+        public string GrantedScopes { get; set; } = string.Empty;
         /// <summary>
         /// The primary login name (preferred_username/email claim) of the account that was
         /// actually authorized, extracted from the id_token. Null when no id_token was returned.
@@ -61,8 +62,6 @@ namespace MailArchiver.Services
         // openid/profile/email are requested so the token response contains an id_token from
         // which the actually-authorized account's primary login name can be extracted. Outlook
         // rejects XOAUTH2 when the SASL username is a secondary alias of the mailbox.
-        private static readonly string[] Scopes = ["https://outlook.office.com/IMAP.AccessAsUser.All", "offline_access", "openid", "profile", "email"];
-
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly ILogger<MsaOAuthService> _logger;
         private readonly MsaOAuthOptions _options;
@@ -104,7 +103,7 @@ namespace MailArchiver.Services
             var body = new Dictionary<string, string>
             {
                 ["client_id"] = resolvedClientId,
-                ["scope"] = string.Join(" ", Scopes),
+                ["scope"] = string.Join(" ", MsaOAuthScopePolicy.RequestedScopes),
             };
             var response = await client.PostAsync($"{Authority}/devicecode", new FormUrlEncodedContent(body));
             var json = await response.Content.ReadAsStringAsync();
@@ -177,6 +176,7 @@ namespace MailArchiver.Services
                     AccessToken = accessToken,
                     RefreshToken = refreshToken,
                     Expiry = DateTime.UtcNow.AddSeconds(expiresIn - 60),
+                    GrantedScopes = ReadGrantedScopes(root),
                     AuthorizedUsername = ExtractAuthorizedUsername(root),
                 },
             };
@@ -190,7 +190,6 @@ namespace MailArchiver.Services
                 ["grant_type"] = "refresh_token",
                 ["client_id"] = resolvedClientId,
                 ["refresh_token"] = refreshToken,
-                ["scope"] = string.Join(" ", Scopes),
             };
             if (!string.IsNullOrEmpty(clientSecret))
                 body["client_secret"] = clientSecret;
@@ -219,9 +218,15 @@ namespace MailArchiver.Services
                 AccessToken = accessToken,
                 RefreshToken = refreshToken,
                 Expiry = DateTime.UtcNow.AddSeconds(expiresIn - 60),
+                GrantedScopes = ReadGrantedScopes(root),
                 AuthorizedUsername = ExtractAuthorizedUsername(root),
             };
         }
+
+        private static string ReadGrantedScopes(JsonElement tokenResponse)
+            => tokenResponse.TryGetProperty("scope", out var scope)
+                ? scope.GetString() ?? string.Empty
+                : string.Empty;
 
         // Extracts the authorized account's primary login name from the id_token in a token
         // response. Best-effort: returns null when no id_token is present or parsing fails.

@@ -81,6 +81,12 @@ namespace MailArchiver.Migrations
                     b.Property<string>("OAuthAccessToken")
                         .HasColumnType("text");
 
+                    b.Property<string>("OAuthGrantedScopes")
+                        .HasColumnType("text");
+
+                    b.Property<string>("OAuthRedirectUri")
+                        .HasColumnType("text");
+
                     b.Property<string>("OAuthRefreshToken")
                         .HasColumnType("text");
 
@@ -461,6 +467,50 @@ namespace MailArchiver.Migrations
                     b.ToTable("Users", "mail_archiver");
                 });
 
+            modelBuilder.Entity("MailArchiver.Models.RegistrationCode", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("CodeHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("CodePrefix")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime?>("RevokedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime?>("UsedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("UsedByUserId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CodeHash")
+                        .IsUnique();
+
+                    b.ToTable("RegistrationCodes", "mail_archiver");
+                });
+
             modelBuilder.Entity("MailArchiver.Models.UserMailAccount", b =>
                 {
                     b.Property<int>("Id")
@@ -483,6 +533,94 @@ namespace MailArchiver.Migrations
                         .IsUnique();
 
                     b.ToTable("UserMailAccounts", "mail_archiver");
+                });
+
+            modelBuilder.Entity("MailArchiver.Models.OutboundMailTask", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.ToTable("OutboundMailTasks", "mail_archiver");
+                });
+
+            modelBuilder.Entity("MailArchiver.Models.OutboundMailTaskItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Body")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("CompletedAtUtc")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("CsvRowNumber")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasColumnType("text");
+
+                    b.Property<int>("MailAccountId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("MessageId")
+                        .HasColumnType("text");
+
+                    b.Property<int>("OutboundMailTaskId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Recipient")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("ScheduledAtUtc")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<bool?>("SentCopySaved")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("StartedAtUtc")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("Subject")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MailAccountId");
+
+                    b.HasIndex("OutboundMailTaskId");
+
+                    b.HasIndex("Status", "ScheduledAtUtc");
+
+                    b.ToTable("OutboundMailTaskItems", "mail_archiver");
                 });
 
             modelBuilder.Entity("MailArchiver.Models.ArchivedEmail", b =>
@@ -545,6 +683,36 @@ namespace MailArchiver.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("MailArchiver.Models.OutboundMailTask", b =>
+                {
+                    b.HasOne("MailArchiver.Models.User", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("CreatedByUser");
+                });
+
+            modelBuilder.Entity("MailArchiver.Models.OutboundMailTaskItem", b =>
+                {
+                    b.HasOne("MailAccount", "MailAccount")
+                        .WithMany()
+                        .HasForeignKey("MailAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MailArchiver.Models.OutboundMailTask", "OutboundMailTask")
+                        .WithMany("Items")
+                        .HasForeignKey("OutboundMailTaskId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MailAccount");
+
+                    b.Navigation("OutboundMailTask");
+                });
+
             modelBuilder.Entity("MailAccount", b =>
                 {
                     b.Navigation("ArchivedEmails");
@@ -567,6 +735,11 @@ namespace MailArchiver.Migrations
                     b.Navigation("ApiKeys");
 
                     b.Navigation("UserMailAccounts");
+                });
+
+            modelBuilder.Entity("MailArchiver.Models.OutboundMailTask", b =>
+                {
+                    b.Navigation("Items");
                 });
 
 

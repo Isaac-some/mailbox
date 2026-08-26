@@ -37,6 +37,8 @@ public class MailAccount
     public string? OAuthRefreshToken { get; set; }
     public string? OAuthAccessToken { get; set; }
     public DateTime? OAuthTokenExpiry { get; set; }
+    public string? OAuthGrantedScopes { get; set; }
+    public string? OAuthRedirectUri { get; set; }
 
     // Per-account sync scheduling
     public int? SyncIntervalMinutes { get; set; }

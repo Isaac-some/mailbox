@@ -29,12 +29,11 @@ namespace MailArchiver.Controllers
                 return Unauthorized();
             }
 
-            var isAdmin = _authService.IsCurrentUserAdmin(HttpContext);
-            var keys = isAdmin
-                ? (await _apiKeyService.GetAllKeysAsync()).Select(k => ApiKeyViewModel.FromEntity(k, includeOwner: true)).ToList()
-                : (await _apiKeyService.GetKeysForUserAsync(uid.Value)).Select(k => ApiKeyViewModel.FromEntity(k, includeOwner: false)).ToList();
+            var keys = (await _apiKeyService.GetKeysForUserAsync(uid.Value))
+                .Select(k => ApiKeyViewModel.FromEntity(k, includeOwner: false))
+                .ToList();
 
-            ViewBag.IsAdmin = isAdmin;
+            ViewBag.IsAdmin = false;
             return View(keys);
         }
 
@@ -76,8 +75,7 @@ namespace MailArchiver.Controllers
                 return Unauthorized();
             }
 
-            var isAdmin = _authService.IsCurrentUserAdmin(HttpContext);
-            var ok = await _apiKeyService.RevokeAsync(id, uid.Value, isAdmin);
+            var ok = await _apiKeyService.RevokeAsync(id, uid.Value, isAdmin: false);
             TempData[ok ? "SuccessMessage" : "ErrorMessage"] = ok
                 ? _localizer["ApiKeyRevokedSuccess"].Value
                 : _localizer["ApiKeyRevokeFailed"].Value;

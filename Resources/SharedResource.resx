@@ -914,10 +914,10 @@
     <value>登录</value>
   </data>
 <data name="AppName" xml:space="preserve">
-    <value>邮件存档器</value>
+    <value>邮箱助手</value>
   </data>
 <data name="LoginSubtitle" xml:space="preserve">
-    <value>请登录以访问电子邮件存档</value>
+    <value>登录后管理邮箱账号和归档邮件</value>
   </data>
 <data name="UsernameLabel" xml:space="preserve">
     <value>用户名</value>
@@ -1668,7 +1668,7 @@
     <value>下载备份代码</value>
   </data>
 <data name="BackupCodesFileHeader" xml:space="preserve">
-    <value>邮件存档器 - 双因素身份验证备份代码。将这些备份代码存储在安全的地方。如果您无法访问身份验证器应用程序，您可以使用它们登录。每个备份代码只能使用一次。代码使用后将失效。</value>
+    <value>邮箱助手 - 双因素身份验证备份代码。将这些备份代码存储在安全的地方。如果您无法访问身份验证器应用程序，您可以使用它们登录。每个备份代码只能使用一次。代码使用后将失效。</value>
   </data>
 <data name="BackupCodesFileFooter" xml:space="preserve">
     <value>重要提示：请确保这些代码的安全，不要与任何人共享。</value>
@@ -2598,7 +2598,7 @@
     <value>无需注册应用程序。</value>
   </data>
 <data name="MsaDefaultClientInfoCreate" xml:space="preserve">
-    <value>Mail-Archiver 使用预先配置的应用程序注册。输入电子邮件地址，保存，然后单击{0}。</value>
+    <value>邮箱助手使用预先配置的应用程序注册。输入电子邮件地址，保存，然后单击{0}。</value>
   </data>
 <data name="MsaAuthorize" xml:space="preserve">
     <value>授权</value>
@@ -2613,7 +2613,7 @@
     <value>（使用您的 Microsoft 帐户登录）</value>
   </data>
 <data name="MsaAppRegStepName" xml:space="preserve">
-    <value>选择任何名称（例如邮件存档器）</value>
+    <value>选择任何名称（例如邮箱助手）</value>
   </data>
 <data name="MsaAppRegStepAccountTypes" xml:space="preserve">
     <value>在支持的帐户类型下选择：任何组织目录中的帐户和个人 Microsoft 帐户</value>
@@ -2658,7 +2658,7 @@
     <value>输入客户端 ID，保存，然后单击 {0}。</value>
   </data>
 <data name="MsaDefaultClientInfoEdit" xml:space="preserve">
-    <value>Mail-Archiver 使用预配置的应用程序注册 - 不需要自己的应用程序注册。仅填写以使用自定义客户端 ID。</value>
+    <value>邮箱助手使用预配置的应用程序注册 - 不需要自己的应用程序注册。仅填写以使用自定义客户端 ID。</value>
   </data>
 <data name="MsaNoSecretNeededShort" xml:space="preserve">
     <value>没有秘密，不需要重定向 URI。</value>

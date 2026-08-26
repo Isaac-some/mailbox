@@ -1,5 +1,3 @@
-@using MailArchiver.Services
-@inject MailArchiver.Services.IAuthenticationService AuthService
 @inject Microsoft.Extensions.Localization.IStringLocalizer<MailArchiver.SharedResource> Localizer
 @{ var currentCulture = System.Globalization.CultureInfo.CurrentUICulture.Name; }
 <!DOCTYPE html>
@@ -22,24 +20,25 @@
     <link rel="stylesheet" href="~/css/mailbox.css" asp-append-version="true" />
     <link rel="stylesheet" href="~/css/mobile-tables.css" asp-append-version="true" />
     <link rel="stylesheet" href="~/css/dark-mode.css" asp-append-version="true" />
-    <link rel="icon" type="image/svg" href="~/favicon.svg">
+    <link rel="icon" type="image/png" href="~/icons/icon-192x192.png">
     <link rel="manifest" href="~/manifest.json">
     <!-- Apple touch icons for iOS home screen -->
     <link rel="apple-touch-icon" href="~/icons/icon-152x152.png">
     <link rel="apple-touch-icon" sizes="180x180" href="~/icons/icon-192x192.png">
     <link rel="apple-touch-icon" sizes="152x152" href="~/icons/icon-152x152.png">
     <link rel="apple-touch-icon" sizes="120x120" href="~/icons/icon-128x128.png">
-    <meta name="apple-mobile-web-app-title" content="Mail Archiver">
+    <meta name="apple-mobile-web-app-title" content="邮箱助手">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black">
 </head>
 
 <body>
-    <header>
-        <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
+    <header class="app-chrome">
+        <nav class="navbar navbar-expand-lg fixed-top" aria-label="应用工具栏">
             <div class="container-fluid">
                 <a class="navbar-brand" asp-area="" asp-controller="MailAccounts" asp-action="Index">
-                    <i class="bi bi-envelope-check me-1"></i>邮箱助手
+                    <img src="~/icons/icon-128x128.png" alt="" class="app-brand-mark" />
+                    <span>邮箱助手</span>
                 </a>
                 <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target=".navbar-collapse"
                     aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
@@ -47,10 +46,10 @@
                 </button>
                 <div class="navbar-collapse collapse">
                     <ul class="navbar-nav me-auto"></ul>
-                    <div class="d-flex align-items-center">
+                    <div class="app-toolbar-actions d-flex align-items-center">
                         @if (string.Equals(Environment.GetEnvironmentVariable("KOUZI_LOCAL_APP"), "1", StringComparison.Ordinal))
                         {
-                            <a class="btn btn-outline-light btn-sm me-2" asp-controller="LocalMaintenance" asp-action="Index" title="本机数据" aria-label="本机数据">
+                            <a class="btn btn-toolbar-icon btn-sm me-2" asp-controller="LocalMaintenance" asp-action="Index" title="本机数据" aria-label="本机数据">
                                 <i class="bi bi-gear" aria-hidden="true"></i>
                             </a>
                         }

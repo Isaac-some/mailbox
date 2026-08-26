@@ -1,5 +1,6 @@
 @using MailArchiver.Models.ViewModels
 @inject MailArchiver.Services.IAuthenticationService AuthService
+@inject Microsoft.Extensions.Options.IOptions<MailArchiver.Models.OutboundMailOptions> OutboundMailOptions
 @model IEnumerable<MailAccountViewModel>
 @{
     ViewData["Title"] = "邮箱账号";
@@ -24,7 +25,7 @@
             <p class="account-page__summary">搜索账号，直接打开最近 1 个月的收件箱。</p>
         </div>
         <div class="account-page__actions">
-            @if (isAdmin)
+            @if (canManage)
             {
                 <a asp-action="ImportCsv" class="btn btn-light btn-sm">
                     <i class="bi bi-upload" aria-hidden="true"></i>
@@ -37,6 +38,22 @@
                         同步全部
                     </button>
                 </form>
+                <button type="button" class="btn btn-outline-danger btn-sm" data-bs-toggle="modal"
+                        data-bs-target="#whitelistDeletionModal">
+                    <i class="bi bi-shield-check" aria-hidden="true"></i>
+                    @(isAdmin ? "全局加白删除" : "加白删除")
+                </button>
+            }
+            @if (OutboundMailOptions.Value.Enabled)
+            {
+                <a asp-controller="OutboundMailTasks" asp-action="Index" class="btn btn-primary btn-sm">
+                    <i class="bi bi-calendar2-check" aria-hidden="true"></i>
+                    发件任务
+                </a>
+                <a asp-controller="OutboundMail" asp-action="Index" class="btn btn-primary btn-sm">
+                    <i class="bi bi-pencil-square" aria-hidden="true"></i>
+                    写邮件
+                </a>
             }
             <a asp-action="Create" class="btn btn-primary btn-sm">
                 <i class="bi bi-plus-lg" aria-hidden="true"></i>
@@ -91,6 +108,16 @@
                                 {
                                     <span class="status-badge status-badge--off"><span aria-hidden="true"></span>已停用</span>
                                 }
+                                @if (item.Provider == ProviderType.MSA)
+                                {
+                                    <div class="small text-muted mt-1">
+                                        @(item.MsaCanSend ? "Outlook 可收发" : item.CanSend ? "Outlook 待验证" : item.MsaIsAuthorized ? "需重新授权发件" : "Outlook 未授权")
+                                    </div>
+                                }
+                                else if (item.Provider == ProviderType.IMAP && item.CanSend)
+                                {
+                                    <div class="small text-muted mt-1">可收发</div>
+                                }
                             </td>
                             <td class="account-last-sync">
                                 @if (item.LastSync > new DateTime(1970, 1, 1))
@@ -118,12 +145,34 @@
                                             </button>
                                         </form>
                                     }
+                                    @if (OutboundMailOptions.Value.Enabled && item.CanSend)
+                                    {
+                                        <a asp-controller="OutboundMail" asp-action="Index" asp-route-accountId="@item.Id"
+                                           class="btn btn-outline-primary btn-sm account-icon-btn" title="用此账号写邮件" aria-label="用此账号写邮件">
+                                            <i class="bi bi-send" aria-hidden="true"></i>
+                                        </a>
+                                    }
+                                    else if (OutboundMailOptions.Value.Enabled && item.Provider == ProviderType.MSA)
+                                    {
+                                        <a asp-action="AuthorizeMsaDevice" asp-route-id="@item.Id"
+                                           class="btn btn-outline-warning btn-sm account-icon-btn" title="授权 Outlook 收发" aria-label="授权 Outlook 收发">
+                                            <i class="bi bi-shield-lock" aria-hidden="true"></i>
+                                        </a>
+                                    }
                                     <a asp-action="Edit" asp-route-id="@item.Id" class="btn btn-outline-secondary btn-sm account-icon-btn" title="编辑账号" aria-label="编辑账号">
                                         <i class="bi bi-three-dots" aria-hidden="true"></i>
                                     </a>
-                                    <a asp-action="Delete" asp-route-id="@item.Id" class="btn btn-outline-danger btn-sm account-icon-btn" title="删除账号" aria-label="删除账号">
+                                    <button type="button"
+                                            class="btn btn-outline-danger btn-sm account-icon-btn"
+                                            title="删除账号"
+                                            aria-label="删除账号"
+                                            data-bs-toggle="modal"
+                                            data-bs-target="#deleteAccountModal"
+                                            data-account-id="@item.Id"
+                                            data-account-email="@item.EmailAddress"
+                                            data-email-count="@item.ArchivedEmailCount">
                                         <i class="bi bi-trash3" aria-hidden="true"></i>
-                                    </a>
+                                    </button>
                                 </div>
                             </td>
                         </tr>
@@ -171,3 +220,198 @@
         </nav>
     }
 </div>
+
+<div class="modal fade account-delete-modal" id="deleteAccountModal" tabindex="-1"
+     aria-labelledby="deleteAccountModalLabel" aria-describedby="deleteAccountMessage" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <form asp-action="Delete" method="post" class="modal-content" id="deleteAccountForm">
+            @Html.AntiForgeryToken()
+            <input type="hidden" name="id" id="deleteAccountId" />
+            <div class="modal-header">
+                <h2 class="modal-title fs-6" id="deleteAccountModalLabel">删除邮箱</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="取消"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-0" id="deleteAccountMessage"></p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-light" data-bs-dismiss="modal">取消</button>
+                <button type="submit" class="btn btn-danger" id="confirmSingleDelete">确认删除</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="modal fade whitelist-delete-modal" id="whitelistDeletionModal" tabindex="-1"
+     aria-labelledby="whitelistDeletionModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <form asp-action="WhitelistDelete" method="post" class="modal-content" id="whitelistDeletionForm"
+              data-preview-url="@Url.Action("WhitelistDeletionPreview", "MailAccounts")">
+            @Html.AntiForgeryToken()
+            <input type="hidden" name="PreviewFingerprint" id="whitelistPreviewFingerprint" />
+            <div class="modal-header">
+                <h2 class="modal-title fs-6" id="whitelistDeletionModalLabel">@(isAdmin ? "全局加白删除" : "加白删除")</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="取消"></button>
+            </div>
+            <div class="modal-body">
+                <label for="whitelistSourceText" class="form-label fw-semibold">粘贴需要保留的邮箱文本</label>
+                <textarea class="form-control whitelist-source" id="whitelistSourceText" name="SourceText"
+                          rows="8" required spellcheck="false"
+                          placeholder="name@example.com"></textarea>
+                <div class="form-text">仅识别以 .com 结尾的完整邮箱地址；识别到的账号保留，@(isAdmin ? "数据库中的其余全部账号" : "分配给你的其余账号")删除，不受当前页和搜索条件影响。</div>
+
+                <div class="alert alert-danger mt-3 mb-0 d-none" id="whitelistPreviewError" role="alert"></div>
+
+                <section class="whitelist-preview mt-3 d-none" id="whitelistPreview" aria-live="polite">
+                    <p class="whitelist-preview__summary mb-2" id="whitelistPreviewSummary"></p>
+                    <dl class="whitelist-preview__lists mb-0">
+                        <div>
+                            <dt>保留账号</dt>
+                            <dd id="whitelistKeepEmails"></dd>
+                        </div>
+                        <div>
+                            <dt>待删除账号</dt>
+                            <dd id="whitelistDeleteEmails"></dd>
+                        </div>
+                    </dl>
+                    <p class="whitelist-preview__note mb-0 d-none" id="whitelistUnmatchedNote"></p>
+                </section>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-light" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-outline-secondary" id="previewWhitelistDeletion">
+                    识别并预览
+                </button>
+                <button type="submit" class="btn btn-danger" id="confirmWhitelistDeletion" disabled>
+                    确认删除
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const deleteModal = document.getElementById('deleteAccountModal');
+            const deleteForm = document.getElementById('deleteAccountForm');
+            const deleteAccountId = document.getElementById('deleteAccountId');
+            const deleteMessage = document.getElementById('deleteAccountMessage');
+            const singleDeleteButton = document.getElementById('confirmSingleDelete');
+
+            deleteModal.addEventListener('show.bs.modal', function (event) {
+                const trigger = event.relatedTarget;
+                const accountId = trigger.getAttribute('data-account-id');
+                const accountEmail = trigger.getAttribute('data-account-email');
+                const emailCount = Number(trigger.getAttribute('data-email-count') || 0);
+
+                deleteAccountId.value = accountId;
+                deleteMessage.textContent =
+                    `是否删除邮箱 ${accountEmail}？删除后该邮箱账号及 ${emailCount.toLocaleString()} 条邮件将被永久删除。`;
+                singleDeleteButton.disabled = false;
+                singleDeleteButton.textContent = '确认删除';
+            });
+
+            deleteForm.addEventListener('submit', function () {
+                singleDeleteButton.disabled = true;
+                singleDeleteButton.textContent = '正在删除...';
+            });
+
+            const whitelistModal = document.getElementById('whitelistDeletionModal');
+            const whitelistForm = document.getElementById('whitelistDeletionForm');
+            const sourceText = document.getElementById('whitelistSourceText');
+            const previewButton = document.getElementById('previewWhitelistDeletion');
+            const confirmButton = document.getElementById('confirmWhitelistDeletion');
+            const fingerprint = document.getElementById('whitelistPreviewFingerprint');
+            const preview = document.getElementById('whitelistPreview');
+            const previewError = document.getElementById('whitelistPreviewError');
+            const previewSummary = document.getElementById('whitelistPreviewSummary');
+            const keepEmails = document.getElementById('whitelistKeepEmails');
+            const deleteEmails = document.getElementById('whitelistDeleteEmails');
+            const unmatchedNote = document.getElementById('whitelistUnmatchedNote');
+
+            function invalidateWhitelistPreview() {
+                fingerprint.value = '';
+                confirmButton.disabled = true;
+                confirmButton.textContent = '确认删除';
+                preview.classList.add('d-none');
+                previewError.classList.add('d-none');
+            }
+
+            function summarizeEmails(emails, count) {
+                if (count === 0) return '无';
+                const visible = emails.join('、');
+                return count > emails.length ? `${visible} 等 ${count.toLocaleString()} 个` : visible;
+            }
+
+            whitelistModal.addEventListener('show.bs.modal', function () {
+                whitelistForm.reset();
+                invalidateWhitelistPreview();
+                previewButton.disabled = false;
+                previewButton.textContent = '识别并预览';
+            });
+
+            sourceText.addEventListener('input', invalidateWhitelistPreview);
+
+            previewButton.addEventListener('click', async function () {
+                if (!sourceText.reportValidity()) return;
+
+                previewButton.disabled = true;
+                previewButton.textContent = '识别中...';
+                previewError.classList.add('d-none');
+
+                try {
+                    const response = await fetch(whitelistForm.dataset.previewUrl, {
+                        method: 'POST',
+                        body: new FormData(whitelistForm),
+                        headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                    });
+                    const result = await response.json();
+                    if (!response.ok) {
+                        throw new Error(result.message || '识别失败，请检查粘贴内容。');
+                    }
+
+                    fingerprint.value = result.previewFingerprint;
+                    previewSummary.textContent =
+                        `将保留 ${result.keepCount.toLocaleString()} 个账号，删除 ${result.deleteAccountCount.toLocaleString()} 个账号及 ${result.deleteEmailCount.toLocaleString()} 条邮件。`;
+                    keepEmails.textContent = summarizeEmails(result.keepEmails, result.keepCount);
+                    deleteEmails.textContent = summarizeEmails(result.deleteEmails, result.deleteAccountCount);
+
+                    if (result.unmatchedCount > 0) {
+                        unmatchedNote.textContent =
+                            `另有 ${result.unmatchedCount.toLocaleString()} 个识别出的邮箱不在可管理账号中。`;
+                        unmatchedNote.classList.remove('d-none');
+                    } else {
+                        unmatchedNote.classList.add('d-none');
+                    }
+
+                    preview.classList.remove('d-none');
+                    confirmButton.disabled = result.deleteAccountCount === 0;
+                    confirmButton.textContent = result.deleteAccountCount === 0
+                        ? '无需删除'
+                        : `确认删除 ${result.deleteAccountCount.toLocaleString()} 个账号`;
+                } catch (error) {
+                    fingerprint.value = '';
+                    preview.classList.add('d-none');
+                    previewError.textContent = error.message;
+                    previewError.classList.remove('d-none');
+                    confirmButton.disabled = true;
+                } finally {
+                    previewButton.disabled = false;
+                    previewButton.textContent = '重新识别';
+                }
+            });
+
+            whitelistForm.addEventListener('submit', function (event) {
+                if (!fingerprint.value) {
+                    event.preventDefault();
+                    return;
+                }
+
+                confirmButton.disabled = true;
+                previewButton.disabled = true;
+                confirmButton.textContent = '正在提交...';
+            });
+        });
+    </script>
+}

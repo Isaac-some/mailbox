@@ -182,32 +182,19 @@ namespace MailArchiver.Services
 
                 // Phase 2: Unlock all emails
                 job.CurrentPhase = "Unlocking emails";
-                var lockedEmails = await context.ArchivedEmails
+                await context.ArchivedEmails
                     .Where(e => e.MailAccountId == job.MailAccountId && e.IsLocked)
-                    .ToListAsync(cancellationToken);
-
-                if (lockedEmails.Any())
-                {
-                    _logger.LogInformation("Job {JobId}: Unlocking {Count} locked emails for account {AccountId}",
-                        job.JobId, lockedEmails.Count, job.MailAccountId);
-
-                    foreach (var email in lockedEmails)
-                    {
-                        email.IsLocked = false;
-                    }
-                    await context.SaveChangesAsync(cancellationToken);
-                }
+                    .ExecuteUpdateAsync(
+                        updates => updates.SetProperty(email => email.IsLocked, false),
+                        cancellationToken);
 
                 // Phase 3: Count items to delete
                 job.CurrentPhase = "Counting items";
-                var emailIds = await context.ArchivedEmails
-                    .Where(e => e.MailAccountId == job.MailAccountId)
-                    .Select(e => e.Id)
-                    .ToListAsync(cancellationToken);
-
-                job.TotalEmails = emailIds.Count;
+                job.TotalEmails = await context.ArchivedEmails
+                    .CountAsync(e => e.MailAccountId == job.MailAccountId, cancellationToken);
                 job.TotalAttachments = await context.EmailAttachments
-                    .Where(a => emailIds.Contains(a.ArchivedEmailId))
+                    .Where(a => context.ArchivedEmails.Any(e =>
+                        e.Id == a.ArchivedEmailId && e.MailAccountId == job.MailAccountId))
                     .CountAsync(cancellationToken);
 
                 _logger.LogInformation("Job {JobId}: Found {EmailCount} emails and {AttachmentCount} attachments to delete",
@@ -215,14 +202,23 @@ namespace MailArchiver.Services
 
                 // Phase 4: Delete attachments in batches
                 job.CurrentPhase = "Deleting attachments";
-                await DeleteAttachmentsInBatches(job, context, emailIds, cancellationToken);
+                await DeleteAttachmentsInBatches(job, context, cancellationToken);
 
                 // Phase 5: Delete emails in batches
                 job.CurrentPhase = "Deleting emails";
-                await DeleteEmailsInBatches(job, context, emailIds, cancellationToken);
+                await DeleteEmailsInBatches(job, context, cancellationToken);
 
                 // Phase 6: Delete the mail account
                 job.CurrentPhase = "Deleting account";
+                await DeleteOutboundTaskDependenciesAsync(
+                    context,
+                    job.MailAccountId,
+                    cancellationToken);
+
+                await context.AccessLogs
+                    .Where(log => log.MailAccountId == job.MailAccountId)
+                    .ExecuteDeleteAsync(cancellationToken);
+
                 var account = await context.MailAccounts.FindAsync(new object[] { job.MailAccountId }, cancellationToken);
                 if (account != null)
                 {
@@ -231,6 +227,10 @@ namespace MailArchiver.Services
                     _logger.LogInformation("Job {JobId}: Deleted mail account {AccountName} (ID: {AccountId})",
                         job.JobId, job.MailAccountName, job.MailAccountId);
                 }
+
+                await context.AttachmentContents
+                    .Where(content => !content.Attachments.Any())
+                    .ExecuteDeleteAsync(cancellationToken);
 
                 if (job.Status != MailAccountDeletionJobStatus.Cancelled)
                 {
@@ -264,32 +264,45 @@ namespace MailArchiver.Services
             }
         }
 
+        internal static async Task DeleteOutboundTaskDependenciesAsync(
+            MailArchiverDbContext context,
+            int mailAccountId,
+            CancellationToken cancellationToken)
+        {
+            await context.OutboundMailTaskItems
+                .Where(item => item.MailAccountId == mailAccountId)
+                .ExecuteDeleteAsync(cancellationToken);
+
+            await context.OutboundMailTasks
+                .Where(task => !task.Items.Any())
+                .ExecuteDeleteAsync(cancellationToken);
+        }
+
         private async Task DeleteAttachmentsInBatches(
             MailAccountDeletionJob job, 
             MailArchiverDbContext context, 
-            List<int> emailIds, 
             CancellationToken cancellationToken)
         {
-            const int batchSize = 1000;
-            var processedCount = 0;
+            const int batchSize = 100;
 
-            while (processedCount < job.TotalAttachments)
+            while (true)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                var batch = await context.EmailAttachments
-                    .Where(a => emailIds.Contains(a.ArchivedEmailId))
+                var attachmentIds = await context.EmailAttachments
+                    .Where(a => context.ArchivedEmails.Any(e =>
+                        e.Id == a.ArchivedEmailId && e.MailAccountId == job.MailAccountId))
+                    .OrderBy(a => a.Id)
+                    .Select(a => a.Id)
                     .Take(batchSize)
                     .ToListAsync(cancellationToken);
 
-                if (!batch.Any())
+                if (attachmentIds.Count == 0)
                     break;
 
-                context.EmailAttachments.RemoveRange(batch);
-                await context.SaveChangesAsync(cancellationToken);
-
-                job.DeletedAttachments += batch.Count;
-                processedCount += batch.Count;
+                job.DeletedAttachments += await context.EmailAttachments
+                    .Where(a => attachmentIds.Contains(a.Id))
+                    .ExecuteDeleteAsync(cancellationToken);
 
                 // Log progress every 5000 attachments
                 if (job.DeletedAttachments % 5000 == 0 || job.DeletedAttachments == job.TotalAttachments)
@@ -312,29 +325,27 @@ namespace MailArchiver.Services
         private async Task DeleteEmailsInBatches(
             MailAccountDeletionJob job, 
             MailArchiverDbContext context, 
-            List<int> emailIds, 
             CancellationToken cancellationToken)
         {
-            const int batchSize = 1000;
-            var processedCount = 0;
+            const int batchSize = 100;
 
-            while (processedCount < job.TotalEmails)
+            while (true)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                var batch = await context.ArchivedEmails
+                var emailIds = await context.ArchivedEmails
                     .Where(e => e.MailAccountId == job.MailAccountId)
+                    .OrderBy(e => e.Id)
+                    .Select(e => e.Id)
                     .Take(batchSize)
                     .ToListAsync(cancellationToken);
 
-                if (!batch.Any())
+                if (emailIds.Count == 0)
                     break;
 
-                context.ArchivedEmails.RemoveRange(batch);
-                await context.SaveChangesAsync(cancellationToken);
-
-                job.DeletedEmails += batch.Count;
-                processedCount += batch.Count;
+                job.DeletedEmails += await context.ArchivedEmails
+                    .Where(e => emailIds.Contains(e.Id))
+                    .ExecuteDeleteAsync(cancellationToken);
 
                 // Log progress every 5000 emails
                 if (job.DeletedEmails % 5000 == 0 || job.DeletedEmails == job.TotalEmails)

@@ -451,7 +451,7 @@ public class UserServiceTests
     }
 
     [Fact]
-    public async Task IsUserAuthorizedForAccountAsync_Admin_GrantsAll()
+    public async Task IsUserAuthorizedForAccountAsync_AdminWithoutAssignment_Denies()
     {
         await using var scope = await _fixture.CreateTransactionalContextAsync();
         var ctx = scope.Context;
@@ -466,13 +466,13 @@ public class UserServiceTests
             ctx.MailAccounts.Add(acct);
             await ctx.SaveChangesAsync();
             var svc = ServiceFactory.CreateUserService(ctx);
-            Assert.True(await svc.IsUserAuthorizedForAccountAsync(admin.Id, acct.Id));
+            Assert.False(await svc.IsUserAuthorizedForAccountAsync(admin.Id, acct.Id));
         }
         finally { await scope.RollbackAsync(); }
     }
 
     [Fact]
-    public async Task IsUserAuthorizedForAccountAsync_SelfManager_GrantsAll()
+    public async Task IsUserAuthorizedForAccountAsync_SelfManagerWithoutAssignment_Denies()
     {
         await using var scope = await _fixture.CreateTransactionalContextAsync();
         var ctx = scope.Context;
@@ -489,7 +489,7 @@ public class UserServiceTests
             ctx.MailAccounts.Add(acct);
             await ctx.SaveChangesAsync();
             var svc = ServiceFactory.CreateUserService(ctx);
-            Assert.True(await svc.IsUserAuthorizedForAccountAsync(user.Id, acct.Id));
+            Assert.False(await svc.IsUserAuthorizedForAccountAsync(user.Id, acct.Id));
         }
         finally { await scope.RollbackAsync(); }
     }

@@ -1,0 +1,59 @@
+@model MailArchiver.ViewModels.RegisterViewModel
+@{
+    ViewData["Title"] = "授权注册";
+    Layout = "_LoginLayout";
+}
+
+<div class="login-container">
+    <div class="card login-card">
+        <div class="card-body">
+            <div class="text-center mb-4">
+                <i class="bi bi-person-check display-3 text-primary"></i>
+                <h2 class="mt-3">授权注册</h2>
+                <p class="text-muted">使用内部授权码创建账号</p>
+            </div>
+
+            <form asp-action="Register" method="post">
+                @Html.AntiForgeryToken()
+                <div asp-validation-summary="ModelOnly" class="alert alert-danger"></div>
+                <div class="mb-3">
+                    <label asp-for="AuthorizationCode" class="form-label"></label>
+                    <input asp-for="AuthorizationCode" class="form-control" autocomplete="one-time-code" autofocus />
+                    <span asp-validation-for="AuthorizationCode" class="text-danger"></span>
+                </div>
+                <div class="mb-3">
+                    <label asp-for="Username" class="form-label"></label>
+                    <input asp-for="Username" class="form-control" autocomplete="username" />
+                    <span asp-validation-for="Username" class="text-danger"></span>
+                </div>
+                <div class="mb-3">
+                    <label asp-for="Email" class="form-label"></label>
+                    <input asp-for="Email" class="form-control" autocomplete="email" />
+                    <span asp-validation-for="Email" class="text-danger"></span>
+                </div>
+                <div class="mb-3">
+                    <label asp-for="Password" class="form-label"></label>
+                    <input asp-for="Password" class="form-control" autocomplete="new-password" />
+                    <span asp-validation-for="Password" class="text-danger"></span>
+                </div>
+                <div class="mb-3">
+                    <label asp-for="ConfirmPassword" class="form-label"></label>
+                    <input asp-for="ConfirmPassword" class="form-control" autocomplete="new-password" />
+                    <span asp-validation-for="ConfirmPassword" class="text-danger"></span>
+                </div>
+                <div class="d-grid">
+                    <button type="submit" class="btn btn-primary btn-lg">
+                        <i class="bi bi-person-plus me-2"></i>创建账号
+                    </button>
+                </div>
+            </form>
+            <div class="text-center mt-3">
+                <a asp-action="Login">返回登录</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    @{await Html.RenderPartialAsync("_ValidationScriptsPartial");}
+}

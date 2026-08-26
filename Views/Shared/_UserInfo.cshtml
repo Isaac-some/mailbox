@@ -2,7 +2,7 @@
 @if (AuthService.IsAuthenticationRequired())
 {
     <form asp-controller="Auth" asp-action="Logout" method="post" class="d-inline">
-        <button type="submit" class="btn btn-outline-light btn-sm" title="退出登录" aria-label="退出登录" onclick="return confirm('确定要退出登录吗？');">
+        <button type="submit" class="btn btn-toolbar-icon btn-sm" title="退出登录" aria-label="退出登录" onclick="return confirm('确定要退出登录吗？');">
             <i class="bi bi-box-arrow-right" aria-hidden="true"></i>
         </button>
     </form>

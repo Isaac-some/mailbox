@@ -24,11 +24,8 @@ public class AccountsApiController : ApiControllerBase
     {
         var allowedAccountIds = await GetAllowedAccountIdsAsync();
 
-        var accountsQuery = _context.MailAccounts.AsQueryable();
-        if (allowedAccountIds != null)
-        {
-            accountsQuery = accountsQuery.Where(a => allowedAccountIds.Contains(a.Id));
-        }
+        var accountsQuery = _context.MailAccounts
+            .Where(a => allowedAccountIds.Contains(a.Id));
 
         var accounts = await accountsQuery
             .OrderBy(a => a.Name)
@@ -41,7 +38,7 @@ public class AccountsApiController : ApiControllerBase
     public async Task<ActionResult<List<FolderNodeDto>>> GetFolders(int id)
     {
         var allowedAccountIds = await GetAllowedAccountIdsAsync();
-        if (allowedAccountIds != null && !allowedAccountIds.Contains(id))
+        if (!allowedAccountIds.Contains(id))
         {
             return NotFound();
         }

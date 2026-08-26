@@ -1,5 +1,6 @@
 using MailArchiver.Data;
 using MailArchiver.Models;
+using MailArchiver.Services.Core;
 using MailArchiver.Services.Shared;
 using MailArchiver.Utilities;
 using Microsoft.EntityFrameworkCore;
@@ -22,6 +23,7 @@ namespace MailArchiver.Services.Providers.Graph
         private readonly GraphAuthClientFactory _authFactory;
         private readonly IGraphFolderService _folderService;
         private readonly GraphMailArchiver _archiver;
+        private readonly EmailCoreService _coreService;
         private readonly BatchOperationOptions _batchOptions;
         private readonly MailSyncOptions _mailSyncOptions;
         private readonly DateTimeHelper _dateTimeHelper;
@@ -33,6 +35,7 @@ namespace MailArchiver.Services.Providers.Graph
             GraphAuthClientFactory authFactory,
             IGraphFolderService folderService,
             GraphMailArchiver archiver,
+            EmailCoreService coreService,
             IOptions<BatchOperationOptions> batchOptions,
             IOptions<MailSyncOptions> mailSyncOptions,
             DateTimeHelper dateTimeHelper)
@@ -43,6 +46,7 @@ namespace MailArchiver.Services.Providers.Graph
             _authFactory = authFactory;
             _folderService = folderService;
             _archiver = archiver;
+            _coreService = coreService;
             _batchOptions = batchOptions.Value;
             _mailSyncOptions = mailSyncOptions.Value;
             _dateTimeHelper = dateTimeHelper;
@@ -155,6 +159,8 @@ namespace MailArchiver.Services.Providers.Graph
                         trackedAccount.LastSync = DateTime.UtcNow;
                         await _context.SaveChangesAsync();
                     }
+
+                    deletedEmails += await _coreService.EnforceLocalEmailLimitAsync(account.Id);
                 }
                 else
                 {

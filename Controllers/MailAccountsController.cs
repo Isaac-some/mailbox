@@ -10,6 +10,8 @@ using Microsoft.AspNetCore.Mvc.Rendering;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Localization;
+using System.Security.Cryptography;
+using System.Text;
 
 using MailArchiver.Attributes;
 
@@ -91,34 +93,23 @@ namespace MailArchiver.Controllers
 
         private async Task<bool> HasAccessToAccountAsync(int accountId)
         {
-            // Use the authentication service to get user info properly
-            var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
-            var currentUsername = authService.GetCurrentUserDisplayName(HttpContext);
-            var isAdmin = authService.IsCurrentUserAdmin(HttpContext);
-            var isSelfManager = authService.IsCurrentUserSelfManager(HttpContext);
+            var authService = HttpContext.RequestServices.GetRequiredService<IAuthenticationService>();
+            var userId = authService.GetCurrentUserId(HttpContext);
+            return await MailAccountManagementScope.Apply(
+                    _context.MailAccounts,
+                    userId,
+                    authService.IsCurrentUserAdmin(HttpContext))
+                .AnyAsync(account => account.Id == accountId);
+        }
 
-            _logger.LogInformation("HasAccessToAccountAsync - Current username: {Username}, IsAdmin: {IsAdmin}, IsSelfManager: {IsSelfManager}", 
-                currentUsername, isAdmin, isSelfManager);
-
-            // Admin users have access to all accounts
-            if (isAdmin)
-            {
-                _logger.LogInformation("User is admin, granting access to account {AccountId}", accountId);
-                return true;
-            }
-
-            // SelfManager users have access only to assigned accounts
-            if (isSelfManager)
-            {
-                var hasAccess = await _context.MailAccounts
-                    .AnyAsync(ma => ma.Id == accountId && ma.UserMailAccounts.Any(uma => uma.User.Username.ToLower() == currentUsername.ToLower()));
-                _logger.LogInformation("User is SelfManager, access to account {AccountId}: {HasAccess}", accountId, hasAccess);
-                return hasAccess;
-            }
-
-            // Other users have no access
-            _logger.LogInformation("User has no special permissions, denying access to account {AccountId}", accountId);
-            return false;
+        private IQueryable<MailAccount> ManageableMailAccounts()
+        {
+            var authService = HttpContext.RequestServices.GetRequiredService<IAuthenticationService>();
+            var userId = authService.GetCurrentUserId(HttpContext);
+            return MailAccountManagementScope.Apply(
+                _context.MailAccounts,
+                userId,
+                authService.IsCurrentUserAdmin(HttpContext));
         }
 
         // GET: MailAccounts
@@ -127,30 +118,18 @@ namespace MailArchiver.Controllers
             // Use the authentication service to get user info properly
             var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
             var currentUsername = authService.GetCurrentUserDisplayName(HttpContext);
-            var isAdmin = authService.IsCurrentUserAdmin(HttpContext);
-            var isSelfManager = authService.IsCurrentUserSelfManager(HttpContext);
-            
-            _logger.LogInformation("Current username: {Username}, IsAdmin: {IsAdmin}, IsSelfManager: {IsSelfManager}", 
-                currentUsername, isAdmin, isSelfManager);
+            IQueryable<MailAccount> mailAccountsQuery = ManageableMailAccounts();
 
-            IQueryable<MailAccount> mailAccountsQuery;
-
-            // Check if user is admin (including legacy admin)
-            if (isAdmin)
+            var pendingDeletionIds = _mailAccountDeletionService
+                .GetAllJobs()
+                .Where(job => job.Status is MailAccountDeletionJobStatus.Queued or MailAccountDeletionJobStatus.Running)
+                .Select(job => job.MailAccountId)
+                .Distinct()
+                .ToList();
+            if (pendingDeletionIds.Count > 0)
             {
-                _logger.LogInformation("User is admin, showing all accounts");
-                mailAccountsQuery = _context.MailAccounts;
-            }
-            else if (isSelfManager)
-            {
-                _logger.LogInformation("User is SelfManager, showing only assigned accounts");
-                mailAccountsQuery = _context.MailAccounts
-                    .Where(ma => ma.UserMailAccounts.Any(uma => uma.User.Username.ToLower() == currentUsername.ToLower()));
-            }
-            else
-            {
-                _logger.LogInformation("User has no special permissions, showing no accounts");
-                mailAccountsQuery = _context.MailAccounts.Where(ma => false); // Empty query
+                mailAccountsQuery = mailAccountsQuery
+                    .Where(account => !pendingDeletionIds.Contains(account.Id));
             }
 
             q = q?.Trim();
@@ -185,7 +164,19 @@ namespace MailArchiver.Controllers
                     IsEnabled = a.IsEnabled,
                     LastSync = a.LastSync,
                     DeleteAfterDays = a.DeleteAfterDays,
-                    Provider = a.Provider
+                    Provider = a.Provider,
+                    MsaIsAuthorized = a.Provider == ProviderType.MSA && !string.IsNullOrEmpty(a.OAuthRefreshToken),
+                    MsaCanSend = a.Provider == ProviderType.MSA && a.OAuthRefreshToken != null &&
+                        a.OAuthGrantedScopes != null && a.OAuthGrantedScopes.Contains(MsaOAuthScopePolicy.Smtp),
+                    CanSend = (a.Provider == ProviderType.MSA && a.OAuthRefreshToken != null &&
+                            (a.OAuthGrantedScopes == null || a.OAuthGrantedScopes.Contains(MsaOAuthScopePolicy.Smtp))) ||
+                        (a.Provider == ProviderType.IMAP &&
+                            (a.Password != null ||
+                             (a.ClientId != null && a.OAuthRefreshToken != null &&
+                              ((a.EmailAddress.ToLower().EndsWith("@gmail.com") ||
+                                a.EmailAddress.ToLower().EndsWith("@googlemail.com")) ||
+                               (a.EmailAddress.ToLower().Contains("@yahoo.") && a.ClientSecret != null && a.OAuthRedirectUri != null))))),
+                    ArchivedEmailCount = a.ArchivedEmails.Count()
                 })
                 .ToListAsync();
 
@@ -245,6 +236,7 @@ namespace MailArchiver.Controllers
                 MsaClientId = account.Provider == ProviderType.MSA ? account.ClientId : null,
                 MsaIsAuthorized = account.Provider == ProviderType.MSA && !string.IsNullOrEmpty(account.OAuthRefreshToken),
                 MsaTokenExpiry = account.OAuthTokenExpiry,
+                ArchivedEmailCount = emailCount,
             };
 
             ViewBag.EmailCount = emailCount;
@@ -272,23 +264,41 @@ namespace MailArchiver.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> Create(CreateMailAccountViewModel model)
         {
-            if (model.Provider != ProviderType.IMAP ||
-                !SupportedMailProviderPolicy.TryResolve(model.EmailAddress, out var preset))
+            if (model.Provider == ProviderType.IMAP)
             {
-                ModelState.AddModelError(nameof(model.EmailAddress), "仅支持 Yahoo 和 GMX 邮箱。");
+                if (!SupportedMailProviderPolicy.TryResolve(model.EmailAddress, out var preset))
+                {
+                    ModelState.AddModelError(nameof(model.EmailAddress), "IMAP 收件目前仅支持 Gmail、Yahoo 和 GMX 邮箱。");
+                }
+                else
+                {
+                    // Never trust server, port, TLS or username posted by the browser.
+                    model.ImapServer = preset.ImapServer;
+                    model.ImapPort = preset.ImapPort;
+                    model.UseSSL = preset.UseSsl;
+                    model.Username = model.EmailAddress!.Trim();
+                    model.Name = MailAccountNamePolicy.Derive(model.EmailAddress!);
+                    ModelState.Remove(nameof(model.Name));
+                    ModelState.Remove(nameof(model.ImapServer));
+                    ModelState.Remove(nameof(model.ImapPort));
+                    ModelState.Remove(nameof(model.Username));
+                }
+            }
+            else if (model.Provider == ProviderType.MSA)
+            {
+                model.ImapServer = "outlook.office365.com";
+                model.ImapPort = 993;
+                model.UseSSL = true;
+                model.Username = model.EmailAddress?.Trim();
+                model.Name = MailAccountNamePolicy.Derive(model.EmailAddress ?? string.Empty);
+                ModelState.Remove(nameof(model.Name));
             }
             else
             {
-                // Never trust server, port, TLS or username posted by the browser.
-                model.ImapServer = preset.ImapServer;
-                model.ImapPort = preset.ImapPort;
-                model.UseSSL = preset.UseSsl;
-                model.Username = model.EmailAddress!.Trim();
-                model.DeleteAfterDays = null;
-                model.LocalRetentionDays = null;
-                model.Name = MailAccountNamePolicy.Derive(model.EmailAddress!);
-                ModelState.Remove(nameof(model.Name));
+                ModelState.AddModelError(nameof(model.Provider), "本地版目前仅支持 Gmail、Yahoo、GMX 和 Outlook 个人邮箱。");
             }
+            model.DeleteAfterDays = null;
+            model.LocalRetentionDays = null;
 
             // When a default MSA ClientId is configured, per-account ClientId is optional.
             // When it is NOT configured, the per-account ClientId is required (validated below).
@@ -315,14 +325,32 @@ namespace MailArchiver.Controllers
                     ImapServer = model.ImapServer,
                     ImapPort = model.ImapPort,
                     Username = model.Username,
-                    Password = _credentialEncryptionService.Encrypt(model.Password!),
+                    Password = model.Provider == ProviderType.IMAP && !string.IsNullOrWhiteSpace(model.Password)
+                        ? _credentialEncryptionService.Encrypt(model.Password)
+                        : null,
                     UseSSL = model.UseSSL,
                     IsEnabled = model.IsEnabled,
-                    Provider = ProviderType.IMAP,
+                    Provider = model.Provider,
                     // For MSA: store the per-account ClientId only when one was entered.
                     // When empty, the MsaOAuthService resolves the configured default at runtime.
-                    ClientId = null,
-                    ClientSecret = null,
+                    ClientId = model.Provider switch
+                    {
+                        ProviderType.MSA when !string.IsNullOrWhiteSpace(model.MsaClientId) => model.MsaClientId.Trim(),
+                        ProviderType.IMAP when !string.IsNullOrWhiteSpace(model.ExternalOAuthClientId) => model.ExternalOAuthClientId.Trim(),
+                        _ => null
+                    },
+                    ClientSecret = model.Provider switch
+                    {
+                        ProviderType.MSA when !string.IsNullOrWhiteSpace(model.MsaClientSecret) => model.MsaClientSecret,
+                        ProviderType.IMAP when !string.IsNullOrWhiteSpace(model.ExternalOAuthClientSecret) => model.ExternalOAuthClientSecret,
+                        _ => null
+                    },
+                    OAuthRefreshToken = model.Provider == ProviderType.IMAP && !string.IsNullOrWhiteSpace(model.OAuthRefreshToken)
+                        ? model.OAuthRefreshToken.Trim()
+                        : null,
+                    OAuthRedirectUri = model.Provider == ProviderType.IMAP && !string.IsNullOrWhiteSpace(model.ExternalOAuthRedirectUri)
+                        ? model.ExternalOAuthRedirectUri.Trim()
+                        : null,
                     TenantId = null,
                     ExcludedFolders = string.Empty,
                     DeleteAfterDays = null,
@@ -403,18 +431,18 @@ namespace MailArchiver.Controllers
                     _logger.LogInformation("Saving account to database");
                     _context.MailAccounts.Add(account);
                     await _context.SaveChangesAsync();
-                    if (account.IsEnabled)
+                    if (account.IsEnabled && account.Provider == ProviderType.IMAP)
                     {
                         _onDemandSyncQueue.Enqueue(account.Id, MailSyncRequestPriority.Bulk, MailSyncRequestKind.ValidateConnection);
                     }
 
-                    // Auto-assign the account to the current user if they are a SelfManager (not Admin)
+                    // Every account is owned by the user who adds it.
                     var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
                     var currentUsername = authService.GetCurrentUserDisplayName(HttpContext);
                     var currentUser = await _context.Users
                         .FirstOrDefaultAsync(u => u.Username.ToLower() == currentUsername.ToLower());
                     
-                    if (currentUser != null && !currentUser.IsAdmin && currentUser.IsSelfManager)
+                    if (currentUser != null)
                     {
                         var userMailAccount = new UserMailAccount
                         {
@@ -423,7 +451,7 @@ namespace MailArchiver.Controllers
                         };
                         _context.UserMailAccounts.Add(userMailAccount);
                         await _context.SaveChangesAsync();
-                        _logger.LogInformation("Auto-assigned account {AccountName} to SelfManager user {Username}", 
+                        _logger.LogInformation("Assigned account {AccountName} to owner {Username}",
                             account.Name, currentUser.Username);
                     }
 
@@ -510,7 +538,7 @@ namespace MailArchiver.Controllers
                     .Select(mailbox => mailbox.EmailAddress!.Trim().ToLowerInvariant())
                     .ToList();
 
-                var existingAddresses = await _context.MailAccounts
+                var existingAddresses = await ManageableMailAccounts()
                     .Where(account => account.Provider == ProviderType.M365 && mailboxAddresses.Contains(account.EmailAddress.ToLower()))
                     .Select(account => account.EmailAddress.ToLower())
                     .ToListAsync();
@@ -560,7 +588,7 @@ namespace MailArchiver.Controllers
                 var currentUser = await _context.Users
                     .FirstOrDefaultAsync(user => user.Username.ToLower() == currentUsername.ToLower());
 
-                if (currentUser != null && !currentUser.IsAdmin && currentUser.IsSelfManager)
+                if (currentUser != null)
                 {
                     _context.UserMailAccounts.AddRange(accountsToCreate.Select(account => new UserMailAccount
                     {
@@ -569,7 +597,7 @@ namespace MailArchiver.Controllers
                     }));
                     await _context.SaveChangesAsync();
 
-                    _logger.LogInformation("Auto-assigned {Count} M365 tenant accounts to SelfManager user {Username}",
+                    _logger.LogInformation("Assigned {Count} M365 tenant accounts to owner {Username}",
                         accountsToCreate.Count, currentUser.Username);
                 }
 
@@ -639,7 +667,7 @@ namespace MailArchiver.Controllers
                     .Select(mailbox => mailbox.EmailAddress!.Trim().ToLowerInvariant())
                     .ToList();
 
-                var existingAddresses = await _context.MailAccounts
+                var existingAddresses = await ManageableMailAccounts()
                     .Where(account => account.Provider == ProviderType.M365 && mailboxAddresses.Contains(account.EmailAddress.ToLower()))
                     .Select(account => account.EmailAddress.ToLower())
                     .ToListAsync();
@@ -700,8 +728,11 @@ namespace MailArchiver.Controllers
                 SyncIntervalMinutes = account.SyncIntervalMinutes,
                 FullSyncIntervalHours = account.FullSyncIntervalHours,
                 Provider = account.Provider,
-                ClientId = account.ClientId,
-                ClientSecret = account.ClientSecret,
+                ClientId = account.Provider == ProviderType.M365 ? account.ClientId : null,
+                ClientSecret = account.Provider == ProviderType.M365 ? account.ClientSecret : null,
+                ExternalOAuthClientId = account.Provider == ProviderType.IMAP ? account.ClientId : null,
+                ExternalOAuthClientSecret = null,
+                ExternalOAuthRedirectUri = account.Provider == ProviderType.IMAP ? account.OAuthRedirectUri : null,
                 TenantId = account.TenantId,
                 MsaClientId = account.Provider == ProviderType.MSA ? account.ClientId : null,
                 MsaIsAuthorized = account.Provider == ProviderType.MSA && !string.IsNullOrEmpty(account.OAuthRefreshToken),
@@ -774,23 +805,37 @@ namespace MailArchiver.Controllers
                 return NotFound();
             }
 
-            if (model.Provider != ProviderType.IMAP ||
-                !SupportedMailProviderPolicy.TryResolve(model.EmailAddress, out var preset))
+            if (model.Provider == ProviderType.IMAP)
             {
-                ModelState.AddModelError(nameof(model.EmailAddress), "仅支持 Yahoo 和 GMX 邮箱。");
+                if (!SupportedMailProviderPolicy.TryResolve(model.EmailAddress, out var preset))
+                {
+                    ModelState.AddModelError(nameof(model.EmailAddress), "IMAP 收件目前仅支持 Gmail、Yahoo 和 GMX 邮箱。");
+                }
+                else
+                {
+                    model.ImapServer = preset.ImapServer;
+                    model.ImapPort = preset.ImapPort;
+                    model.UseSSL = preset.UseSsl;
+                    model.Username = model.EmailAddress.Trim();
+                    model.Name = MailAccountNamePolicy.Derive(model.EmailAddress);
+                    ModelState.Remove(nameof(model.Name));
+                }
+            }
+            else if (model.Provider == ProviderType.MSA)
+            {
+                model.ImapServer = "outlook.office365.com";
+                model.ImapPort = 993;
+                model.UseSSL = true;
+                model.Name = MailAccountNamePolicy.Derive(model.EmailAddress);
+                ModelState.Remove(nameof(model.Name));
             }
             else
             {
-                model.ImapServer = preset.ImapServer;
-                model.ImapPort = preset.ImapPort;
-                model.UseSSL = preset.UseSsl;
-                model.Username = model.EmailAddress.Trim();
-                model.DeleteAfterDays = null;
-                model.LocalRetentionDays = null;
-                model.Name = MailAccountNamePolicy.Derive(model.EmailAddress);
-                model.GroupName = string.Empty;
-                ModelState.Remove(nameof(model.Name));
+                ModelState.AddModelError(nameof(model.Provider), "本地版目前仅支持 Gmail、Yahoo、GMX 和 Outlook 个人邮箱。");
             }
+            model.DeleteAfterDays = null;
+            model.LocalRetentionDays = null;
+            model.GroupName = string.Empty;
 
             // Remove password validation if left blank
             if (string.IsNullOrEmpty(model.Password))
@@ -827,10 +872,14 @@ namespace MailArchiver.Controllers
                     account.ImapServer = model.ImapServer;
                     account.ImapPort = model.ImapPort;
                     // For MSA the Username holds the authorized identity captured from the
-                    // OAuth id_token — it must survive edits and is never user-editable.
-                    account.Username = model.Username;
+                    // OAuth id_token. The disabled form field is intentionally not posted,
+                    // so ordinary edits must never overwrite that identity.
+                    if (model.Provider == ProviderType.IMAP)
+                    {
+                        account.Username = model.EmailAddress.Trim();
+                    }
                     account.IsEnabled = model.IsEnabled;
-                    account.Provider = ProviderType.IMAP;
+                    account.Provider = model.Provider;
 
                     if (model.Provider == ProviderType.M365)
                     {
@@ -841,10 +890,14 @@ namespace MailArchiver.Controllers
                         // Switching away from MSA: invalidate cached MSA OAuth tokens
                         account.OAuthAccessToken = null;
                         account.OAuthRefreshToken = null;
+                        account.OAuthGrantedScopes = null;
                         account.OAuthTokenExpiry = null;
+                        account.OAuthRedirectUri = null;
                     }
                     else if (model.Provider == ProviderType.MSA)
                     {
+                        // Outlook authenticates exclusively through OAuth.
+                        account.Password = null;
                         var clientSecretChanged = !string.IsNullOrEmpty(model.MsaClientSecret);
 
                         if (!string.IsNullOrEmpty(model.MsaClientId))
@@ -858,6 +911,7 @@ namespace MailArchiver.Controllers
                                 account.OAuthAccessToken = null;
                                 account.OAuthTokenExpiry = null;
                                 account.OAuthRefreshToken = null;
+                                account.OAuthGrantedScopes = null;
                             }
                             else if (clientSecretChanged)
                             {
@@ -877,12 +931,40 @@ namespace MailArchiver.Controllers
                                 account.OAuthAccessToken = null;
                                 account.OAuthTokenExpiry = null;
                                 account.OAuthRefreshToken = null;
+                                account.OAuthGrantedScopes = null;
                             }
                         }
                         // else: no override entered and no default configured → keep existing account.ClientId.
 
                         if (clientSecretChanged)
                             account.ClientSecret = model.MsaClientSecret;
+                        account.TenantId = null;
+                        account.OAuthRedirectUri = null;
+                    }
+                    else if (model.Provider == ProviderType.IMAP)
+                    {
+                        var clientIdChanged = !string.IsNullOrWhiteSpace(model.ExternalOAuthClientId) &&
+                            !string.Equals(model.ExternalOAuthClientId.Trim(), account.ClientId, StringComparison.Ordinal);
+                        var refreshTokenChanged = !string.IsNullOrWhiteSpace(model.OAuthRefreshToken);
+                        if (!string.IsNullOrWhiteSpace(model.ExternalOAuthClientId))
+                            account.ClientId = model.ExternalOAuthClientId.Trim();
+                        if (!string.IsNullOrWhiteSpace(model.ExternalOAuthClientSecret))
+                            account.ClientSecret = model.ExternalOAuthClientSecret;
+                        if (refreshTokenChanged)
+                            account.OAuthRefreshToken = model.OAuthRefreshToken!.Trim();
+                        else if (clientIdChanged)
+                        {
+                            account.OAuthRefreshToken = null;
+                            account.OAuthGrantedScopes = null;
+                        }
+                        if (!string.IsNullOrWhiteSpace(model.ExternalOAuthRedirectUri))
+                            account.OAuthRedirectUri = model.ExternalOAuthRedirectUri.Trim();
+                        if (clientIdChanged || refreshTokenChanged || !string.IsNullOrWhiteSpace(model.ExternalOAuthClientSecret) ||
+                            !string.IsNullOrWhiteSpace(model.ExternalOAuthRedirectUri))
+                        {
+                            account.OAuthAccessToken = null;
+                            account.OAuthTokenExpiry = null;
+                        }
                         account.TenantId = null;
                     }
                     else
@@ -893,11 +975,13 @@ namespace MailArchiver.Controllers
                         // Switching away from MSA: invalidate cached MSA OAuth tokens
                         account.OAuthAccessToken = null;
                         account.OAuthRefreshToken = null;
+                        account.OAuthGrantedScopes = null;
                         account.OAuthTokenExpiry = null;
+                        account.OAuthRedirectUri = null;
                     }
 
                     // Only update password if provided
-                    if (!string.IsNullOrEmpty(model.Password))
+                    if (model.Provider == ProviderType.IMAP && !string.IsNullOrEmpty(model.Password))
                     {
                         account.Password = _credentialEncryptionService.Encrypt(model.Password);
                     }
@@ -939,7 +1023,8 @@ namespace MailArchiver.Controllers
                     }
 
                     await _context.SaveChangesAsync();
-                    if (account.IsEnabled && account.Provider == ProviderType.IMAP)
+                    if (account.IsEnabled && (account.Provider == ProviderType.IMAP ||
+                        (account.Provider == ProviderType.MSA && !string.IsNullOrEmpty(account.OAuthRefreshToken))))
                     {
                         _onDemandSyncQueue.Enqueue(account.Id, MailSyncRequestPriority.Bulk, MailSyncRequestKind.ValidateConnection);
                     }
@@ -971,12 +1056,8 @@ namespace MailArchiver.Controllers
                                              ma.EmailAddress.ToLower().Contains("@" + domain) &&
                                              ma.Id != account.Id);
 
-                            // Apply security filter for Self Manager users
-                            if (!isAdmin && isSelfManager)
-                            {
-                                accountsQuery = accountsQuery
-                                    .Where(ma => ma.UserMailAccounts.Any(uma => uma.User.Username.ToLower() == currentUsername.ToLower()));
-                            }
+                            accountsQuery = accountsQuery
+                                .Where(ma => ma.UserMailAccounts.Any(uma => uma.User.Username.ToLower() == currentUsername.ToLower()));
 
                             var accountsToUpdate = await accountsQuery.ToListAsync();
                             
@@ -1089,100 +1170,132 @@ namespace MailArchiver.Controllers
             // Determine number of emails to delete
             var emailCount = await _context.ArchivedEmails.CountAsync(e => e.MailAccountId == id);
 
-            _logger.LogInformation("Account {AccountId} has {Count} emails. Deletion threshold: {Threshold}",
-                id, emailCount, _batchOptions.AsyncThreshold);
+            _logger.LogInformation("Queueing deletion for account {AccountId} with {Count} email(s)", id, emailCount);
 
             // Get current user info for logging
-            var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
+            var authService = HttpContext.RequestServices.GetRequiredService<IAuthenticationService>();
             var currentUsername = authService.GetCurrentUserDisplayName(HttpContext);
 
-            // Check if async deletion is needed (for large accounts)
-            if (emailCount > _batchOptions.AsyncThreshold)
+            // Account deletion always runs in the background. Even a small mailbox can
+            // contain large attachment payloads, and deleting it in the HTTP request
+            // freezes the local app until SQLite finishes the work.
+            _mailAccountDeletionService.QueueDeletion(id, account.Name, currentUsername ?? "System");
+            TempData["SuccessMessage"] = _localizer["AccountDeletionQueued", account.Name].Value;
+            return RedirectToAction(nameof(Index));
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> WhitelistDeletionPreview(WhitelistDeletionRequest request)
+        {
+            var whitelist = WhitelistDeletionParser.ExtractComAddresses(request.SourceText);
+            if (whitelist.Count == 0)
             {
-                _logger.LogInformation("Using async deletion for {Count} emails from account {AccountId}", emailCount, id);
-
-                // Queue async deletion
-                var jobId = _mailAccountDeletionService.QueueDeletion(id, account.Name, currentUsername ?? "System");
-
-                // Log the deletion request
-                if (!string.IsNullOrEmpty(currentUsername))
+                return BadRequest(new
                 {
-                    await _accessLogService.LogAccessAsync(currentUsername, AccessLogType.Account, 
-                        searchParameters: $"Queued async deletion for mail account: {account.Name} with {emailCount} emails",
-                        mailAccountId: account.Id);
-                }
-
-                TempData["SuccessMessage"] = _localizer["AccountDeletionQueued", account.Name].Value;
-                return RedirectToAction("DeletionStatus", new { jobId });
+                    message = "未识别到以 .com 结尾的完整邮箱地址。"
+                });
             }
 
-            // For smaller accounts, delete synchronously (original logic)
-            _logger.LogInformation("Using sync deletion for {Count} emails from account {AccountId}", emailCount, id);
-
-            // Cancel any running sync jobs for this account before deletion
-            _syncJobService.CancelJobsForAccount(id);
-            _logger.LogInformation("Cancelled any running sync jobs for account {AccountId} ({AccountName}) before deletion", id, account.Name);
-
-            // Log sync job cancellations
-            if (!string.IsNullOrEmpty(currentUsername))
-            {
-                await _accessLogService.LogAccessAsync(currentUsername, AccessLogType.SyncCancel,
-                    searchParameters: $"Cancelled sync jobs for account: {account.Name} (account deletion)",
-                    mailAccountId: account.Id);
-            }
-
-            // Unlock all emails for this account (required for compliance mode)
-            var lockedEmails = await _context.ArchivedEmails
-                .Where(e => e.MailAccountId == id && e.IsLocked)
-                .ToListAsync();
-
-            if (lockedEmails.Any())
-            {
-                _logger.LogInformation("Unlocking {Count} locked emails for account {AccountId} ({AccountName}) before deletion", 
-                    lockedEmails.Count, id, account.Name);
-                
-                foreach (var email in lockedEmails)
+            var accounts = await ManageableMailAccounts()
+                .AsNoTracking()
+                .Select(account => new
                 {
-                    email.IsLocked = false;
-                }
-                await _context.SaveChangesAsync();
-            }
-
-            // First delete attachments
-            var emailIds = await _context.ArchivedEmails
-                .Where(e => e.MailAccountId == id)
-                .Select(e => e.Id)
+                    account.Id,
+                    account.EmailAddress,
+                    EmailCount = account.ArchivedEmails.Count()
+                })
                 .ToListAsync();
 
-            var attachments = await _context.EmailAttachments
-                .Where(a => emailIds.Contains(a.ArchivedEmailId))
-                .ToListAsync();
+            var keptAccounts = accounts
+                .Where(account => whitelist.Contains(account.EmailAddress))
+                .OrderBy(account => account.EmailAddress)
+                .ToList();
 
-            _context.EmailAttachments.RemoveRange(attachments);
-
-            // Then delete emails
-            var emails = await _context.ArchivedEmails
-                .Where(e => e.MailAccountId == id)
-                .ToListAsync();
-
-            _context.ArchivedEmails.RemoveRange(emails);
-
-            // Finally delete the account
-            _context.MailAccounts.Remove(account);
-
-            await _context.SaveChangesAsync();
-
-            // Log the account deletion action
-            if (!string.IsNullOrEmpty(currentUsername))
+            if (keptAccounts.Count == 0)
             {
-                await _accessLogService.LogAccessAsync(currentUsername, AccessLogType.Account, 
-                    searchParameters: $"Deleted mail account: {account.Name} with {emailCount} emails",
-                    mailAccountId: account.Id);
+                return BadRequest(new
+                {
+                    message = $"识别到 {whitelist.Count:N0} 个 .com 邮箱，但没有匹配任何可管理账号。为防止全部误删，操作已中止。"
+                });
             }
 
-            TempData["SuccessMessage"] = _localizer["EmailAccountDeleteSuccess", emailCount].Value;
+            var deletedAccounts = accounts
+                .Where(account => !whitelist.Contains(account.EmailAddress))
+                .OrderBy(account => account.EmailAddress)
+                .ToList();
+
+            return Json(new
+            {
+                recognizedCount = whitelist.Count,
+                keepCount = keptAccounts.Count,
+                unmatchedCount = whitelist.Count - keptAccounts.Count,
+                deleteAccountCount = deletedAccounts.Count,
+                deleteEmailCount = deletedAccounts.Sum(account => account.EmailCount),
+                keepEmails = keptAccounts.Take(8).Select(account => account.EmailAddress),
+                deleteEmails = deletedAccounts.Take(8).Select(account => account.EmailAddress),
+                previewFingerprint = BuildDeletionFingerprint(deletedAccounts.Select(account => account.Id))
+            });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> WhitelistDelete(WhitelistDeletionRequest request)
+        {
+            var whitelist = WhitelistDeletionParser.ExtractComAddresses(request.SourceText);
+            if (whitelist.Count == 0)
+            {
+                TempData["ErrorMessage"] = "未识别到以 .com 结尾的完整邮箱地址，未删除任何账号。";
+                return RedirectToAction(nameof(Index));
+            }
+
+            var accounts = await ManageableMailAccounts()
+                .AsNoTracking()
+                .Select(account => new
+                {
+                    account.Id,
+                    account.Name,
+                    account.EmailAddress
+                })
+                .ToListAsync();
+
+            if (!accounts.Any(account => whitelist.Contains(account.EmailAddress)))
+            {
+                TempData["ErrorMessage"] = "白名单没有匹配任何可管理账号，为防止全部误删，未删除任何账号。";
+                return RedirectToAction(nameof(Index));
+            }
+
+            var accountsToDelete = accounts
+                .Where(account => !whitelist.Contains(account.EmailAddress))
+                .OrderBy(account => account.Id)
+                .ToList();
+
+            var currentFingerprint = BuildDeletionFingerprint(accountsToDelete.Select(account => account.Id));
+            if (string.IsNullOrWhiteSpace(request.PreviewFingerprint) ||
+                !string.Equals(currentFingerprint, request.PreviewFingerprint, StringComparison.Ordinal))
+            {
+                TempData["ErrorMessage"] = "账号列表在预览后发生了变化，请重新执行加白删除。";
+                return RedirectToAction(nameof(Index));
+            }
+
+            var authService = HttpContext.RequestServices.GetRequiredService<IAuthenticationService>();
+            var currentUsername = authService.GetCurrentUserDisplayName(HttpContext) ?? "System";
+            foreach (var account in accountsToDelete)
+            {
+                _mailAccountDeletionService.QueueDeletion(account.Id, account.Name, currentUsername);
+            }
+
+            TempData["SuccessMessage"] = accountsToDelete.Count == 0
+                ? "所有可管理邮箱都在白名单中，没有账号需要删除。"
+                : $"已提交删除 {accountsToDelete.Count:N0} 个非白名单邮箱，任务将在后台执行。";
 
             return RedirectToAction(nameof(Index));
+        }
+
+        private static string BuildDeletionFingerprint(IEnumerable<int> accountIds)
+        {
+            var source = string.Join(",", accountIds.Order());
+            return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source)));
         }
 
         // GET: MailAccounts/DeletionStatus
@@ -1243,6 +1356,11 @@ namespace MailArchiver.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> Sync(int id)
         {
+            var isMailboxRefresh = string.Equals(
+                Request.Headers["X-Requested-With"],
+                "XMLHttpRequest",
+                StringComparison.OrdinalIgnoreCase);
+
             // Use proper authentication service
             if (!await HasAccessToAccountAsync(id))
             {
@@ -1272,11 +1390,16 @@ namespace MailArchiver.Controllers
             }
 
             var queueStatus = _onDemandSyncQueue.Enqueue(id, MailSyncRequestPriority.Interactive);
+            if (isMailboxRefresh)
+            {
+                return Json(new { state = queueStatus.State.ToString() });
+            }
+
             TempData["SuccessMessage"] = queueStatus.State == MailSyncQueueState.Running
                 ? "该邮箱正在同步，页面会自动更新。"
                 : "已优先加入同步队列，页面会自动更新。";
 
-            return RedirectToAction("Index", "Emails", new { SelectedAccountId = id });
+            return RedirectToAction(nameof(Index));
         }
 
         [HttpPost]
@@ -1292,13 +1415,11 @@ namespace MailArchiver.Controllers
             if (account is null)
                 return NotFound();
 
-            var wasIdle = _onDemandSyncQueue.GetStatus(id).State == MailSyncQueueState.NotQueued;
-            var status = _onDemandSyncQueue.Enqueue(id, MailSyncRequestPriority.Interactive);
+            var status = _onDemandSyncQueue.GetStatus(id);
             return Json(new
             {
                 state = status.State.ToString(),
-                kind = status.Kind?.ToString(),
-                completedSinceLastCheck = wasIdle
+                kind = status.Kind?.ToString()
             });
         }
 
@@ -1317,12 +1438,16 @@ namespace MailArchiver.Controllers
         public async Task<IActionResult> SyncAll()
         {
             var authService = HttpContext.RequestServices.GetRequiredService<IAuthenticationService>();
-            if (!authService.IsCurrentUserAdmin(HttpContext))
+            var userId = authService.GetCurrentUserId(HttpContext);
+            if (!userId.HasValue)
                 return Forbid();
 
             var accountIds = await _context.MailAccounts
                 .AsNoTracking()
-                .Where(a => a.IsEnabled && a.Provider != ProviderType.IMPORT)
+                .Where(a =>
+                    a.IsEnabled &&
+                    a.Provider != ProviderType.IMPORT &&
+                    a.UserMailAccounts.Any(ownership => ownership.UserId == userId.Value))
                 .Select(a => a.Id)
                 .ToListAsync();
 
@@ -1473,23 +1598,8 @@ namespace MailArchiver.Controllers
 
             IQueryable<MailAccount> mailAccountsQuery;
 
-            // Check if user is admin (including legacy admin)
-            if (isAdmin)
-            {
-                _logger.LogInformation("User is admin, showing all accounts");
-                mailAccountsQuery = _context.MailAccounts;
-            }
-            else if (isSelfManager)
-            {
-                _logger.LogInformation("User is SelfManager, showing only assigned accounts");
-                mailAccountsQuery = _context.MailAccounts
-                    .Where(ma => ma.UserMailAccounts.Any(uma => uma.User.Username.ToLower() == currentUsername.ToLower()));
-            }
-            else
-            {
-                _logger.LogInformation("User has no special permissions, showing no accounts");
-                mailAccountsQuery = _context.MailAccounts.Where(ma => false); // Empty query
-            }
+            mailAccountsQuery = _context.MailAccounts
+                .Where(ma => ma.UserMailAccounts.Any(uma => uma.User.Username.ToLower() == currentUsername.ToLower()));
 
             var accounts = await mailAccountsQuery
                 .Where(a => a.IsEnabled)
@@ -1771,23 +1881,8 @@ namespace MailArchiver.Controllers
 
             IQueryable<MailAccount> mailAccountsQuery;
 
-            // Check if user is admin (including legacy admin)
-            if (isAdmin)
-            {
-                _logger.LogInformation("User is admin, showing all accounts");
-                mailAccountsQuery = _context.MailAccounts;
-            }
-            else if (isSelfManager)
-            {
-                _logger.LogInformation("User is SelfManager, showing only assigned accounts");
-                mailAccountsQuery = _context.MailAccounts
-                    .Where(ma => ma.UserMailAccounts.Any(uma => uma.User.Username.ToLower() == currentUsername.ToLower()));
-            }
-            else
-            {
-                _logger.LogInformation("User has no special permissions, showing no accounts");
-                mailAccountsQuery = _context.MailAccounts.Where(ma => false); // Empty query
-            }
+            mailAccountsQuery = _context.MailAccounts
+                .Where(ma => ma.UserMailAccounts.Any(uma => uma.User.Username.ToLower() == currentUsername.ToLower()));
 
             var accounts = await mailAccountsQuery
                 .Where(a => a.IsEnabled)
@@ -2330,6 +2425,7 @@ namespace MailArchiver.Controllers
                 account.OAuthAccessToken = poll.Token!.AccessToken;
                 account.OAuthRefreshToken = poll.Token.RefreshToken;
                 account.OAuthTokenExpiry = poll.Token.Expiry;
+                account.OAuthGrantedScopes = poll.Token.GrantedScopes;
 
                 // Store the primary login name of the account that was actually authorized.
                 // Outlook rejects XOAUTH2 when the SASL username is a secondary alias or does
@@ -2346,6 +2442,9 @@ namespace MailArchiver.Controllers
                     account.Username = poll.Token.AuthorizedUsername;
                 }
                 await _context.SaveChangesAsync();
+
+                if (account.IsEnabled)
+                    _onDemandSyncQueue.Enqueue(account.Id, MailSyncRequestPriority.Interactive, MailSyncRequestKind.ValidateConnection);
 
                 var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
                 var currentUsername = authService?.GetCurrentUserDisplayName(HttpContext);
@@ -2435,12 +2534,8 @@ namespace MailArchiver.Controllers
                                  ma.EmailAddress.ToLower().Contains("@" + domain) &&
                                  ma.ClientId != null);
 
-                // Apply security filter for Self Manager users
-                if (!isAdmin && isSelfManager)
-                {
-                    accountsQuery = accountsQuery
-                        .Where(ma => ma.UserMailAccounts.Any(uma => uma.User.Username.ToLower() == currentUsername.ToLower()));
-                }
+                accountsQuery = accountsQuery
+                    .Where(ma => ma.UserMailAccounts.Any(uma => uma.User.Username.ToLower() == currentUsername.ToLower()));
 
                 // Exclude current account if editing
                 if (excludeAccountId.HasValue)
@@ -2546,12 +2641,8 @@ namespace MailArchiver.Controllers
                                  ma.EmailAddress.ToLower().Contains("@" + domain) &&
                                  ma.Id != accountId); // Exclude the source account
 
-                // Apply security filter for Self Manager users
-                if (!isAdmin && isSelfManager)
-                {
-                    accountsQuery = accountsQuery
-                        .Where(ma => ma.UserMailAccounts.Any(uma => uma.User.Username.ToLower() == currentUsername.ToLower()));
-                }
+                accountsQuery = accountsQuery
+                    .Where(ma => ma.UserMailAccounts.Any(uma => uma.User.Username.ToLower() == currentUsername.ToLower()));
 
                 var accountsToUpdate = await accountsQuery.ToListAsync();
 
@@ -2624,7 +2715,7 @@ namespace MailArchiver.Controllers
                 .Select(mailbox => mailbox.EmailAddress!.Trim().ToLowerInvariant())
                 .ToList();
 
-            var existingAddresses = await _context.MailAccounts
+            var existingAddresses = await ManageableMailAccounts()
                 .Where(account => account.Provider == ProviderType.M365 &&
                                   account.EmailAddress != null &&
                                   mailboxAddresses.Contains(account.EmailAddress.ToLower()))
@@ -2649,7 +2740,7 @@ namespace MailArchiver.Controllers
         public async Task<IActionResult> TenantManagement(int id)
         {
             var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
-            if (authService == null || !authService.IsCurrentUserAdmin(HttpContext))
+            if (authService == null || !authService.IsAuthenticated(HttpContext))
             {
                 return Forbid();
             }
@@ -2730,7 +2821,7 @@ namespace MailArchiver.Controllers
         public async Task<IActionResult> AddTenantMailboxes(TenantManagementViewModel model)
         {
             var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
-            if (authService == null || !authService.IsCurrentUserAdmin(HttpContext))
+            if (authService == null || !authService.IsAuthenticated(HttpContext))
             {
                 return Forbid();
             }
@@ -2773,6 +2864,12 @@ namespace MailArchiver.Controllers
 
             try
             {
+                var currentUserId = authService.GetCurrentUserId(HttpContext);
+                if (!currentUserId.HasValue)
+                {
+                    return Forbid();
+                }
+
                 // Re-fetch the tenant list to validate the selected addresses against it.
                 var tenantMailboxes = await GetTenantMailboxesWithExistingAsync(
                     sourceAccount.ClientId!,
@@ -2827,22 +2924,13 @@ namespace MailArchiver.Controllers
                     await _context.SaveChangesAsync();
                     addedCount = accountsToCreate.Count;
 
-                    // SelfManager auto-assignment (consistent with Create flow)
-                    var currentUsernameForAssignment = authService.GetCurrentUserDisplayName(HttpContext);
-                    var currentUser = await _context.Users
-                        .FirstOrDefaultAsync(user => user.Username.ToLower() == currentUsernameForAssignment.ToLower());
-                    if (currentUser != null && !currentUser.IsAdmin && currentUser.IsSelfManager)
+                    // Assign every imported tenant account to the importing user.
+                    _context.UserMailAccounts.AddRange(accountsToCreate.Select(account => new UserMailAccount
                     {
-                        _context.UserMailAccounts.AddRange(accountsToCreate.Select(account => new UserMailAccount
-                        {
-                            UserId = currentUser.Id,
-                            MailAccountId = account.Id
-                        }));
-                        await _context.SaveChangesAsync();
-
-                        _logger.LogInformation("Auto-assigned {Count} tenant accounts to SelfManager user {Username}",
-                            accountsToCreate.Count, currentUser.Username);
-                    }
+                        UserId = currentUserId.Value,
+                        MailAccountId = account.Id
+                    }));
+                    await _context.SaveChangesAsync();
                 }
 
                 if (model.RenameExistingAccounts)
@@ -2851,6 +2939,7 @@ namespace MailArchiver.Controllers
                         .Where(a => a.Provider == ProviderType.M365
                                  && a.ClientId == sourceAccount.ClientId
                                  && a.TenantId == sourceAccount.TenantId
+                                 && a.UserMailAccounts.Any(ownership => ownership.UserId == currentUserId.Value)
                                  && a.EmailAddress != null)
                         .ToListAsync();
 
@@ -2944,14 +3033,6 @@ namespace MailArchiver.Controllers
         [HttpGet]
         public IActionResult ImportCsv()
         {
-            var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
-            if (!authService.IsCurrentUserAdmin(HttpContext))
-            {
-                _logger.LogWarning("Non-admin user attempted to access CSV bulk import page");
-                TempData["ErrorMessage"] = _localizer["CsvImportAdminOnly"].Value;
-                return RedirectToAction(nameof(Index));
-            }
-
             var model = new BulkImportImapViewModel
             {
                 ImapPort = 993,
@@ -2968,11 +3049,10 @@ namespace MailArchiver.Controllers
         public async Task<IActionResult> ImportCsv(BulkImportImapViewModel model)
         {
             var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
-            if (!authService.IsCurrentUserAdmin(HttpContext))
+            var currentUserId = authService?.GetCurrentUserId(HttpContext);
+            if (!currentUserId.HasValue)
             {
-                _logger.LogWarning("Non-admin user attempted CSV bulk import");
-                TempData["ErrorMessage"] = _localizer["CsvImportAdminOnly"].Value;
-                return RedirectToAction(nameof(Index));
+                return Forbid();
             }
 
             if (model.CsvFile == null || model.CsvFile.Length == 0)
@@ -3000,16 +3080,70 @@ namespace MailArchiver.Controllers
                 var rows = new List<CsvParsedRow>();
                 var failedRows = new List<CsvImportFailedRow>();
 
+                string uploadedText;
                 using (var stream = model.CsvFile.OpenReadStream())
                 using (var reader = new StreamReader(stream, detectEncodingFromByteOrderMarks: true))
+                {
+                    uploadedText = await reader.ReadToEndAsync();
+                }
+
+                var firstNonEmptyLine = uploadedText
+                    .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+                    .FirstOrDefault(line => !string.IsNullOrWhiteSpace(line));
+
+                if (OutlookAccountTextParser.LooksLikeFormat(firstNonEmptyLine))
+                {
+                    using var outlookReader = new StringReader(uploadedText);
+                    var parsed = OutlookAccountTextParser.Parse(outlookReader);
+                    rows.AddRange(parsed.Accounts.Select(account => new CsvParsedRow
+                    {
+                        LineNumber = account.LineNumber,
+                        Email = account.Email,
+                        Provider = ProviderType.MSA,
+                        ClientId = account.ClientId,
+                        OAuthRefreshToken = account.RefreshToken
+                    }));
+                    failedRows.AddRange(parsed.Errors.Select(error => new CsvImportFailedRow
+                    {
+                        LineNumber = error.LineNumber,
+                        Email = string.Empty,
+                        Reason = error.Reason
+                    }));
+                }
+                else if (firstNonEmptyLine?.Contains('\t') == true &&
+                    !firstNonEmptyLine.Split('\t')[0].Trim().Equals("邮箱", StringComparison.OrdinalIgnoreCase) &&
+                    !firstNonEmptyLine.Split('\t')[0].Trim().Equals("email", StringComparison.OrdinalIgnoreCase))
+                {
+                    using var externalReader = new StringReader(uploadedText);
+                    var parsed = ExternalMailAccountTextParser.Parse(externalReader);
+                    rows.AddRange(parsed.Accounts.Select(account => new CsvParsedRow
+                    {
+                        LineNumber = account.LineNumber,
+                        Email = account.Email,
+                        Provider = ProviderType.IMAP,
+                        Password = account.AppPassword ?? string.Empty,
+                        ClientId = account.ClientId,
+                        ClientSecret = account.ClientSecret,
+                        OAuthRefreshToken = account.RefreshToken,
+                        OAuthRedirectUri = account.RedirectUri
+                    }));
+                    failedRows.AddRange(parsed.Errors.Select(error => new CsvImportFailedRow
+                    {
+                        LineNumber = error.LineNumber,
+                        Email = string.Empty,
+                        Reason = error.Reason
+                    }));
+                }
+                else
                 {
                     int lineNumber = 0;
                     string[]? headers = null;
                     var headerIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
-                    using (var parser = new Microsoft.VisualBasic.FileIO.TextFieldParser(reader))
+                    using (var csvReader = new StringReader(uploadedText))
+                    using (var parser = new Microsoft.VisualBasic.FileIO.TextFieldParser(csvReader))
                     {
-                        parser.SetDelimiters(",");
+                        parser.SetDelimiters(firstNonEmptyLine?.Contains('\t') == true ? "\t" : ",");
                         parser.HasFieldsEnclosedInQuotes = true;
 
                         while (!parser.EndOfData)
@@ -3047,7 +3181,7 @@ namespace MailArchiver.Controllers
                                         {
                                             LineNumber = lineNumber,
                                             Email = string.Empty,
-                                            Reason = "CSV 必须包含“邮箱”和“SMTP授权码”两列。"
+                                            Reason = "CSV 必须包含邮箱，以及应用专用密码；或 Client ID、Refresh Token（Yahoo 还需 Client Secret）。"
                                         });
                                         break;
                                     }
@@ -3092,7 +3226,7 @@ namespace MailArchiver.Controllers
                 }
 
                 var dedupedRows = rows
-                    .GroupBy(r => r.Email!.Trim().ToLowerInvariant())
+                    .GroupBy(r => $"{r.Provider}:{r.Email!.Trim().ToLowerInvariant()}")
                     .Select(g => g.First())
                     .ToList();
 
@@ -3102,7 +3236,7 @@ namespace MailArchiver.Controllers
                     var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                     foreach (var row in rows)
                     {
-                        var key = row.Email!.Trim().ToLowerInvariant();
+                        var key = $"{row.Provider}:{row.Email!.Trim().ToLowerInvariant()}";
                         if (!seen.Add(key))
                         {
                             result.SkippedRows.Add(new CsvImportSkippedRow
@@ -3125,7 +3259,10 @@ namespace MailArchiver.Controllers
                 {
                     var chunk = emailList.Skip(i).Take(chunkSize).ToList();
                     var matches = await _context.MailAccounts
-                        .Where(a => a.Provider == ProviderType.IMAP && chunk.Contains(a.EmailAddress.ToLower()))
+                        .Where(a =>
+                            (a.Provider == ProviderType.IMAP || a.Provider == ProviderType.MSA) &&
+                            chunk.Contains(a.EmailAddress.ToLower()) &&
+                            a.UserMailAccounts.Any(ownership => ownership.UserId == currentUserId.Value))
                         .Select(a => a.EmailAddress.ToLower())
                         .ToListAsync();
                     foreach (var m in matches)
@@ -3162,35 +3299,52 @@ namespace MailArchiver.Controllers
                         continue;
                     }
 
-                    if (!SupportedMailProviderPolicy.TryResolve(row.Email, out var preset))
+                    ImapProviderPreset? preset = null;
+                    if (row.Provider == ProviderType.IMAP &&
+                        !SupportedMailProviderPolicy.TryResolve(row.Email, out preset))
                     {
                         result.FailedRows.Add(new CsvImportFailedRow
                         {
                             LineNumber = row.LineNumber,
                             Email = row.Email,
-                            Reason = "仅支持 Yahoo 和 GMX 邮箱。"
+                            Reason = "仅支持 Gmail、Yahoo 和 GMX；Outlook 请上传四列 Tab 分隔的 TXT。"
                         });
                         result.FailedCount++;
                         continue;
                     }
 
-                    var account = new MailAccount
-                    {
-                        Name = MailAccountNamePolicy.Derive(row.Email),
-                        EmailAddress = row.Email!.Trim(),
-                        GroupName = string.Empty,
-                        ImapServer = preset.ImapServer,
-                        ImapPort = preset.ImapPort,
-                        Username = row.Email!.Trim(),
-                        Password = _credentialEncryptionService.Encrypt(row.Password),
-                        UseSSL = preset.UseSsl,
-                        IsEnabled = model.IsEnabled,
-                        Provider = ProviderType.IMAP,
-                        ExcludedFolders = string.Empty,
-                        DeleteAfterDays = null,
-                        LocalRetentionDays = null,
-                        LastSync = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)
-                    };
+                    var account = row.Provider == ProviderType.MSA
+                        ? OutlookImportedAccountFactory.Create(
+                            new OutlookImportedAccount(
+                                row.LineNumber,
+                                row.Email,
+                                row.ClientId!,
+                                row.OAuthRefreshToken!),
+                            model.IsEnabled)
+                        : new MailAccount
+                        {
+                            Name = MailAccountNamePolicy.Derive(row.Email),
+                            EmailAddress = row.Email!.Trim(),
+                            GroupName = string.Empty,
+                            ImapServer = preset!.ImapServer,
+                            ImapPort = preset.ImapPort,
+                            Username = row.Email.Trim(),
+                            Password = string.IsNullOrWhiteSpace(row.Password)
+                                ? null
+                                : _credentialEncryptionService.Encrypt(row.Password),
+                            ClientId = row.ClientId,
+                            ClientSecret = row.ClientSecret,
+                            OAuthRefreshToken = row.OAuthRefreshToken,
+                            OAuthGrantedScopes = row.OAuthGrantedScopes,
+                            OAuthRedirectUri = row.OAuthRedirectUri,
+                            UseSSL = preset.UseSsl,
+                            IsEnabled = model.IsEnabled,
+                            Provider = ProviderType.IMAP,
+                            ExcludedFolders = string.Empty,
+                            DeleteAfterDays = null,
+                            LocalRetentionDays = null,
+                            LastSync = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+                        };
 
                     accountsToCreate.Add(account);
                     result.CreatedRows.Add(new CsvImportCreatedRow
@@ -3210,6 +3364,12 @@ namespace MailArchiver.Controllers
 
                 _context.MailAccounts.AddRange(accountsToCreate);
                 await _context.SaveChangesAsync();
+                _context.UserMailAccounts.AddRange(accountsToCreate.Select(account => new UserMailAccount
+                {
+                    UserId = currentUserId.Value,
+                    MailAccountId = account.Id
+                }));
+                await _context.SaveChangesAsync();
                 foreach (var account in accountsToCreate.Where(account => account.IsEnabled))
                 {
                     _onDemandSyncQueue.Enqueue(account.Id, MailSyncRequestPriority.Bulk, MailSyncRequestKind.ValidateConnection);
@@ -3222,7 +3382,7 @@ namespace MailArchiver.Controllers
                 if (!string.IsNullOrEmpty(currentUsername))
                 {
                     await _accessLogService.LogAccessAsync(currentUsername, AccessLogType.Account,
-                        searchParameters: $"CSV bulk import: {result.CreatedCount} IMAP accounts created, {result.SkippedCount} skipped, {result.FailedCount} failed");
+                        searchParameters: $"Account bulk import: {result.CreatedCount} accounts created, {result.SkippedCount} skipped, {result.FailedCount} failed");
                 }
 
                 _logger.LogInformation("CSV bulk import completed: {Created} created, {Skipped} skipped, {Failed} failed",
@@ -3242,17 +3402,24 @@ namespace MailArchiver.Controllers
         [HttpGet]
         public IActionResult DownloadExampleCsv()
         {
-            var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
-            if (!authService.IsCurrentUserAdmin(HttpContext))
-            {
-                return RedirectToAction(nameof(Index));
-            }
-
-            var csv = "邮箱,SMTP授权码\r\n"
-                + "alice@gmx.com,示例授权码\r\n"
-                + "bob123@yahoo.com,示例应用专用密码\r\n";
+            var csv = "邮箱,SMTP授权码,Client ID,Client Secret,Refresh Token,Redirect URI\r\n"
+                + "alice@gmx.com,示例应用专用密码,,,,\r\n"
+                + "bob123@yahoo.com,示例应用专用密码,,,,\r\n"
+                + "carol@gmail.com,,示例GoogleClientID,,示例RefreshToken,\r\n"
+                + "david@yahoo.com,,示例YahooClientID,示例YahooClientSecret,示例RefreshToken,oob\r\n";
             var bytes = System.Text.Encoding.UTF8.GetBytes(csv);
             return File(bytes, "text/csv", "邮箱批量导入示例.csv");
+        }
+
+        [HttpGet]
+        public IActionResult DownloadExampleTxt()
+        {
+            var text = "alice@gmx.com\t示例应用专用密码\r\n"
+                + "bob@yahoo.com\t示例应用专用密码\r\n"
+                + "carol@gmail.com\t示例GoogleClientID\t示例RefreshToken\r\n"
+                + "david@yahoo.com\t示例YahooClientID\t示例YahooClientSecret\t示例RefreshToken\toob\r\n";
+            var bytes = System.Text.Encoding.UTF8.GetBytes(text);
+            return File(bytes, "text/plain", "邮箱批量导入示例.txt");
         }
 
         private static CsvParsedRow? ParseCsvRow(string[] fields, Dictionary<string, int> headerIndex,
@@ -3261,6 +3428,11 @@ namespace MailArchiver.Controllers
         {
             string email = string.Empty;
             string password = string.Empty;
+            string? clientId = null;
+            string? clientSecret = null;
+            string? refreshToken = null;
+            string? scopes = null;
+            string? redirectUri = null;
             string? username = null;
             string? imapServer = null;
             int? imapPort = null;
@@ -3270,6 +3442,11 @@ namespace MailArchiver.Controllers
             {
                 email = GetFieldValue(fields, headerIndex, "email");
                 password = GetFieldValueRaw(fields, headerIndex, "app_password");
+                clientId = GetFieldValueOrNull(fields, headerIndex, "client_id");
+                clientSecret = GetFieldValueOrNull(fields, headerIndex, "client_secret");
+                refreshToken = GetFieldValueOrNull(fields, headerIndex, "refresh_token");
+                scopes = GetFieldValueOrNull(fields, headerIndex, "scopes");
+                redirectUri = GetFieldValueOrNull(fields, headerIndex, "redirect_uri");
                 username = null;
                 imapServer = null;
                 var portStr = GetFieldValueOrNull(fields, headerIndex, "imap_port");
@@ -3331,15 +3508,47 @@ namespace MailArchiver.Controllers
                 return null;
             }
 
-            if (string.IsNullOrWhiteSpace(password))
+            var hasPassword = !string.IsNullOrWhiteSpace(password);
+            var hasAnyOAuthValue = !string.IsNullOrWhiteSpace(clientId)
+                || !string.IsNullOrWhiteSpace(clientSecret)
+                || !string.IsNullOrWhiteSpace(refreshToken);
+            if (!hasPassword && !hasAnyOAuthValue)
             {
                 failedRows.Add(new CsvImportFailedRow
                 {
                     LineNumber = lineNumber,
                     Email = email,
-                    Reason = localizer["CsvImportMissingPassword", lineNumber].Value
+                    Reason = "必须提供应用专用密码，或完整 OAuth 凭据。"
                 });
                 return null;
+            }
+
+            if (!hasPassword)
+            {
+                if (!ExternalOAuthProviderPolicy.TryResolve(email, out var oauthProvider))
+                {
+                    failedRows.Add(new CsvImportFailedRow
+                    {
+                        LineNumber = lineNumber,
+                        Email = email,
+                        Reason = "GMX 官方不支持 OAuth，请提供应用专用密码。"
+                    });
+                    return null;
+                }
+                if (string.IsNullOrWhiteSpace(clientId) || string.IsNullOrWhiteSpace(refreshToken) ||
+                    (oauthProvider.RequiresClientSecret && string.IsNullOrWhiteSpace(clientSecret)) ||
+                    (oauthProvider.RequiresRedirectUri && string.IsNullOrWhiteSpace(redirectUri)))
+                {
+                    failedRows.Add(new CsvImportFailedRow
+                    {
+                        LineNumber = lineNumber,
+                        Email = email,
+                        Reason = oauthProvider.RequiresClientSecret
+                            ? "Yahoo OAuth 必须提供 Client ID、Client Secret、Refresh Token 和 Redirect URI。"
+                            : "Gmail OAuth 必须提供 Client ID 和 Refresh Token。"
+                    });
+                    return null;
+                }
             }
 
             return new CsvParsedRow
@@ -3347,6 +3556,11 @@ namespace MailArchiver.Controllers
                 LineNumber = lineNumber,
                 Email = email,
                 Password = password,
+                ClientId = clientId,
+                ClientSecret = clientSecret,
+                OAuthRefreshToken = refreshToken,
+                OAuthGrantedScopes = scopes,
+                OAuthRedirectUri = redirectUri,
                 Username = username,
                 ImapServer = imapServer,
                 ImapPort = imapPort,

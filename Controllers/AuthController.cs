@@ -25,6 +25,7 @@ namespace MailArchiver.Controllers
         private readonly IAccessLogService _accessLogService;
         private readonly IServiceScopeFactory _serviceScopeFactory;
         private readonly IOptions<OAuthOptions> _oAuthOptions;
+        private readonly IRegistrationCodeService _registrationCodes;
 
         public AuthController(
             MailArchiver.Services.IAuthenticationService authService
@@ -34,7 +35,8 @@ namespace MailArchiver.Controllers
             , IStringLocalizer<SharedResource> localizer
             , IAccessLogService accessLogService
             , IServiceScopeFactory serviceScopeFactory
-            , IOptions<OAuthOptions> oAuthOptions)
+            , IOptions<OAuthOptions> oAuthOptions
+            , IRegistrationCodeService registrationCodes)
         {
             _authService = authService;
             _authenticationHandler = authenticationHandler;
@@ -44,6 +46,7 @@ namespace MailArchiver.Controllers
             _accessLogService = accessLogService;
             _serviceScopeFactory = serviceScopeFactory;
             _oAuthOptions = oAuthOptions;
+            _registrationCodes = registrationCodes;
         }
 
         [HttpGet]
@@ -83,6 +86,42 @@ namespace MailArchiver.Controllers
             }
 
             return View(new LoginViewModel());
+        }
+
+        [HttpGet]
+        public IActionResult Register()
+        {
+            if (_authService.IsAuthenticated(HttpContext))
+            {
+                return RedirectToAction("Index", "MailAccounts");
+            }
+
+            return View(new MailArchiver.ViewModels.RegisterViewModel());
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [EnableRateLimiting("LoginAttempts")]
+        public async Task<IActionResult> Register(MailArchiver.ViewModels.RegisterViewModel model)
+        {
+            if (!ModelState.IsValid)
+            {
+                return View(model);
+            }
+
+            var result = await _registrationCodes.RegisterAsync(
+                model.AuthorizationCode,
+                model.Username,
+                model.Email,
+                model.Password);
+            if (!result.Succeeded || result.User == null)
+            {
+                ModelState.AddModelError(string.Empty, result.Error ?? "注册失败");
+                return View(model);
+            }
+
+            await _authService.StartUserSessionAsync(result.User);
+            return RedirectToAction("Index", "MailAccounts");
         }
 
         private void ConfigureOAuthViewData(string? returnUrl)

@@ -313,33 +313,29 @@
     var deleteAccountModal = new ModalViewModel
     {
         Id = "deleteAccountModal-" + Model.Id,
-        Title = Localizer["DeleteEmailAccountTitle"].ToString(),
-        Message = string.Format(Localizer["DeleteAccountConfirm"].ToString(), Model.EmailAddress),
-        IncludeList = true,
-        ListTitle1 = Localizer["WhatWillBeDeleted"].ToString(),
-        ListItems1 = new List<string> { Localizer["DeleteItemAccountConfig"].ToString() },
-        ListTitle2 = Localizer["ThisAction"].ToString(),
-        ListItems2 = new List<string>
-        {
-            Localizer["ActionCannotBeUndone"].ToString(),
-            Localizer["ActionCannotBeRecovered"].ToString()
-        },
-        ShowWarning = true,
-        WarningMessage = Localizer["DeletionCannotBeUndone"].ToString(),
-        ConfirmButtonText = Localizer["DeleteEmailAccountTitle"].ToString(),
+        Title = "删除邮箱",
+        Message = $"是否删除邮箱 {Model.EmailAddress}？删除后该邮箱账号及 {Model.ArchivedEmailCount:N0} 条邮件将被永久删除。",
+        Size = "modal-sm",
+        ConfirmButtonText = "确认删除",
         ConfirmButtonClass = "btn-danger",
-        CancelButtonText = Localizer["Cancel"].ToString()
+        CancelButtonText = "取消"
     };
 }
 
 @await Html.PartialAsync("_ModalTemplate", fullResyncModal)
 @await Html.PartialAsync("_ModalTemplate", deleteAccountModal)
+<form asp-action="Delete" asp-route-id="@Model.Id" method="post" id="detailsDeleteAccountForm" class="d-none">
+    @Html.AntiForgeryToken()
+</form>
 
 @section Scripts {
     <script>
         document.addEventListener('DOMContentLoaded', function () {
-            document.getElementById('deleteAccountModal-@Model.Id-Confirm').addEventListener('click', function () {
-                window.location.href = '@Url.Action("Delete", "MailAccounts", new { id = Model.Id })';
+            const deleteButton = document.getElementById('deleteAccountModal-@Model.Id-Confirm');
+            deleteButton.addEventListener('click', function () {
+                deleteButton.disabled = true;
+                deleteButton.textContent = '正在删除...';
+                document.getElementById('detailsDeleteAccountForm').requestSubmit();
             });
         });
     </script>

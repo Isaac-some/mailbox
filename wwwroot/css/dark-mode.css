@@ -797,3 +797,52 @@
 [data-theme="dark"] .dashboard-empty-state .empty-icon {
   opacity: 0.15;
 }
+
+/* Local macOS application surface */
+[data-theme="dark"] {
+  --app-background: #1c1c1e;
+  --app-surface: rgba(44, 44, 46, .84);
+  --app-surface-solid: #2c2c2e;
+  --app-ink: #f5f5f7;
+  --app-secondary: #98989f;
+  --app-separator: rgba(235, 235, 245, .18);
+  --mail-ink: #f5f5f7;
+  --mail-muted: #98989f;
+  --mail-line: rgba(235, 235, 245, .18);
+  --mail-surface: #2c2c2e;
+  --mail-bg: #1c1c1e;
+  --mail-accent-soft: rgba(0, 122, 255, .24);
+}
+
+[data-theme="dark"] body,
+[data-theme="dark"] .mailbox-page,
+[data-theme="dark"] .account-page { background: var(--app-background); color: var(--app-ink); }
+[data-theme="dark"] .app-chrome .navbar { background: rgba(35, 35, 37, .8) !important; border-bottom-color: var(--app-separator); }
+[data-theme="dark"] .navbar-brand, [data-theme="dark"] h1, [data-theme="dark"] h2, [data-theme="dark"] h3,
+[data-theme="dark"] h4, [data-theme="dark"] h5, [data-theme="dark"] h6 { color: var(--app-ink) !important; }
+[data-theme="dark"] .btn-toolbar-icon { color: #f5f5f7; }
+[data-theme="dark"] .btn-toolbar-icon:hover, [data-theme="dark"] .btn-toolbar-icon:focus-visible { color: #fff; background: rgba(235, 235, 245, .12); }
+[data-theme="dark"] .card, [data-theme="dark"] .account-table-wrap, [data-theme="dark"] .mailbox-split,
+[data-theme="dark"] .mail-viewer { background: var(--app-surface-solid); border-color: var(--app-separator); }
+[data-theme="dark"] .card-header, [data-theme="dark"] .account-table thead th { background: rgba(235, 235, 245, .08) !important; color: var(--app-ink); border-color: var(--app-separator); }
+[data-theme="dark"] .form-control, [data-theme="dark"] .form-select, [data-theme="dark"] .account-search,
+[data-theme="dark"] .mailbox-search { background: #3a3a3c; color: var(--app-ink); border-color: var(--app-separator); }
+[data-theme="dark"] .account-search input, [data-theme="dark"] .mailbox-search input { color: var(--app-ink); }
+[data-theme="dark"] .form-label, [data-theme="dark"] .form-section-header { color: var(--app-ink); }
+[data-theme="dark"] .form-section { background: rgba(235, 235, 245, .05); border-color: var(--app-separator); }
+[data-theme="dark"] .btn-light, [data-theme="dark"] .btn-outline-secondary, [data-theme="dark"] .icon-button { background: rgba(235, 235, 245, .08); color: #f5f5f7; border-color: var(--app-separator); }
+[data-theme="dark"] .btn-light:hover, [data-theme="dark"] .btn-outline-secondary:hover { background: rgba(235, 235, 245, .16); color: #fff; border-color: rgba(235, 235, 245, .3); }
+[data-theme="dark"] .table { --bs-table-bg: transparent; --bs-table-color: var(--app-ink); --bs-table-border-color: var(--app-separator); }
+[data-theme="dark"] .account-table tbody tr:hover, [data-theme="dark"] .mail-item:hover { background: rgba(0, 122, 255, .12); }
+[data-theme="dark"] .mail-item { border-color: var(--app-separator); }
+[data-theme="dark"] .mail-viewer__header, [data-theme="dark"] .mailbox-list { border-color: var(--app-separator); }
+[data-theme="dark"] .mail-viewer__body pre { color: var(--app-ink); }
+[data-theme="dark"] .alert-success { background: #14351b; color: #9ce5a9; border-color: #286c35; }
+[data-theme="dark"] .alert-danger { background: #431c1b; color: #ffb4ab; border-color: #8a3330; }
+[data-theme="dark"] .alert-warning { background: #3d2c0e; color: #ffd48a; border-color: #7e5b1a; }
+[data-theme="dark"] .msa-info-banner { background: #142b45; color: #b9dcff; border-color: #295d92; }
+
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  [data-theme="dark"] .app-chrome .navbar { background: #232325 !important; }
+  [data-theme="dark"] .card { border-color: rgba(235, 235, 245, .38); }
+}

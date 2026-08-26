@@ -52,43 +52,5 @@
                 </div>
             </div>
         </div>
-        <div class="col-md-6">
-            <div class="card">
-                <div class="card-header"><h5 class="card-title mb-0">@Localizer["AssignedMailAccounts"]</h5></div>
-                <div class="card-body">
-                    @if (ViewBag.MailAccounts != null && ((List<MailAccount>)ViewBag.MailAccounts).Any())
-                    {
-                        <div class="table-responsive">
-                            <table class="table table-hover">
-                                <thead>
-                                    <tr>
-                                        <th>@Localizer["AccountName"]</th>
-                                        <th>@Localizer["EmailAddress"]</th>
-                                        <th>@Localizer["Status"]</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    @foreach (var account in (List<MailAccount>)ViewBag.MailAccounts)
-                                    {
-                                        <tr>
-                                            <td>@account.Name</td>
-                                            <td>@account.EmailAddress</td>
-                                            <td>
-                                                @if (account.IsEnabled)
-                                                { <span class="badge bg-success">@Localizer["Enabled"]</span> }
-                                                else
-                                                { <span class="badge bg-danger">@Localizer["Disabled"]</span> }
-                                            </td>
-                                        </tr>
-                                    }
-                                </tbody>
-                            </table>
-                        </div>
-                    }
-                    else
-                    { <p class="text-muted">@Localizer["NoMailAccountsAssigned"]</p> }
-                </div>
-            </div>
-        </div>
     </div>
 </div>

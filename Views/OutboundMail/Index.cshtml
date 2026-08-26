@@ -1,0 +1,76 @@
+@model MailArchiver.ViewModels.ComposeMailViewModel
+@{
+    ViewData["Title"] = "写邮件";
+}
+
+<div class="compose-page">
+    <header class="compose-page__header">
+        <div>
+            <p class="account-page__eyebrow">KOUZI MAIL</p>
+            <h1>写邮件</h1>
+            <p>使用 Gmail、Yahoo、GMX 或 Outlook 账号发送纯文本邮件。</p>
+        </div>
+        <a asp-controller="MailAccounts" asp-action="Index" class="btn btn-light">返回邮箱账号</a>
+    </header>
+
+    <form asp-action="Index" method="post" enctype="multipart/form-data" class="compose-card" id="composeForm">
+        @Html.AntiForgeryToken()
+        <div asp-validation-summary="ModelOnly" class="alert alert-danger"></div>
+
+        <div class="mb-3">
+            <label asp-for="AccountId" class="form-label">发件账号</label>
+            <select asp-for="AccountId" asp-items="Model.SendingAccounts" class="form-select"></select>
+            <span asp-validation-for="AccountId" class="text-danger"></span>
+        </div>
+
+        <div class="mb-3">
+            <label asp-for="To" class="form-label">收件人</label>
+            <input asp-for="To" class="form-control" placeholder="name@example.com；多个地址用逗号分隔" autocomplete="off" />
+            <span asp-validation-for="To" class="text-danger"></span>
+        </div>
+
+        <div class="mb-3">
+            <label asp-for="Cc" class="form-label">抄送 <span class="text-muted">（可选）</span></label>
+            <input asp-for="Cc" class="form-control" placeholder="多个地址用逗号分隔" autocomplete="off" />
+            <span asp-validation-for="Cc" class="text-danger"></span>
+        </div>
+
+        <div class="mb-3">
+            <label asp-for="Subject" class="form-label">主题</label>
+            <input asp-for="Subject" class="form-control" />
+            <span asp-validation-for="Subject" class="text-danger"></span>
+        </div>
+
+        <div class="mb-3">
+            <label asp-for="Body" class="form-label">正文</label>
+            <textarea asp-for="Body" class="form-control compose-body" rows="12"></textarea>
+            <span asp-validation-for="Body" class="text-danger"></span>
+        </div>
+
+        <div class="mb-4">
+            <label asp-for="Attachments" class="form-label">附件 <span class="text-muted">（可选）</span></label>
+            <input asp-for="Attachments" class="form-control" type="file" multiple />
+            <div class="form-text">最多 @Model.MaxAttachmentCount 个，合计不超过 @(Model.MaxTotalAttachmentBytes / 1024 / 1024) MB。</div>
+            <span asp-validation-for="Attachments" class="text-danger"></span>
+        </div>
+
+        <div class="compose-actions">
+            <button type="submit" class="btn btn-primary" id="sendButton">
+                <i class="bi bi-send" aria-hidden="true"></i> 发送
+            </button>
+            <span class="text-muted small">点击一次即可，发送过程中请不要关闭页面。</span>
+        </div>
+    </form>
+</div>
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+    <script>
+        document.getElementById('composeForm')?.addEventListener('submit', function () {
+            const button = document.getElementById('sendButton');
+            if (!button || !this.checkValidity()) return;
+            button.disabled = true;
+            button.innerHTML = '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span> 正在发送';
+        });
+    </script>
+}

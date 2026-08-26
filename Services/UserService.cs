@@ -375,23 +375,6 @@ namespace MailArchiver.Services
 
         public async Task<bool> IsUserAuthorizedForAccountAsync(int userId, int mailAccountId)
         {
-            // Admin users have access to all accounts
-            var isAdmin = await IsUserAdminAsync(userId);
-            if (isAdmin)
-            {
-                _logger.LogInformation("User {UserId} is admin, granting access to account {MailAccountId}", userId, mailAccountId);
-                return true;
-            }
-
-            // Check if user is a self-manager
-            var user = await _context.Users.FindAsync(userId);
-            if (user?.IsSelfManager == true)
-            {
-                _logger.LogInformation("User {UserId} is self-manager, granting access to account {MailAccountId}", userId, mailAccountId);
-                return true;
-            }
-
-            // Check if user has direct access to the account
             var hasDirectAccess = await _context.UserMailAccounts
                 .AnyAsync(uma => uma.UserId == userId && uma.MailAccountId == mailAccountId);
 

@@ -19,22 +19,9 @@ namespace MailArchiver.Attributes
                 return;
             }
             
-            // For admin users, allow access
-            var isAdmin = authService.IsCurrentUserAdmin(context.HttpContext);
             var userId = authService.GetCurrentUserId(context.HttpContext);
-
-            if (isAdmin)
-            {
-                var logger = context.HttpContext.RequestServices.GetService<ILogger<UserAccessRequiredAttribute>>();
-                if (logger != null)
-                {
-                    logger.LogDebug("User {UserId} is admin, granting access", userId);
-                }
-                base.OnActionExecuting(context);
-                return;
-            }
             
-            // For regular users, check if they're trying to access a specific account
+            // Every user, including administrators, is restricted to owned accounts.
             // and if they have access to that account
             var userService = context.HttpContext.RequestServices.GetService<IUserService>();
             if (userService == null)

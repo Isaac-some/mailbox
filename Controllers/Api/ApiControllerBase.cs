@@ -7,16 +7,14 @@ namespace MailArchiver.Controllers.Api;
 [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting("Api")]
 public abstract class ApiControllerBase : ControllerBase
 {
-    // Returns null for admins (all accounts), a list of allowed account IDs for
-    // restricted users, or an empty list when the user has no access.
-    protected async Task<List<int>?> GetAllowedAccountIdsAsync()
+    protected async Task<List<int>> GetAllowedAccountIdsAsync()
     {
         var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
         var userService = HttpContext.RequestServices.GetService<IUserService>();
 
-        if (authService == null || userService == null || authService.IsCurrentUserAdmin(HttpContext))
+        if (authService == null || userService == null)
         {
-            return null;
+            return new List<int>();
         }
 
         var username = authService.GetCurrentUserDisplayName(HttpContext);

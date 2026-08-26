@@ -146,11 +146,11 @@ namespace MailArchiver.Controllers
             StoreSearchState(model);
 
             // Get current user's allowed accounts
-            List<int> allowedAccountIds = null;
+            List<int> allowedAccountIds = new();
             var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
             var userService = HttpContext.RequestServices.GetService<IUserService>();
             
-            if (authService != null && userService != null && !authService.IsCurrentUserAdmin(HttpContext))
+            if (authService != null && userService != null)
             {
                 var username = authService.GetCurrentUserDisplayName(HttpContext);
                 var user = await userService.GetUserByUsernameAsync(username);
@@ -189,11 +189,9 @@ namespace MailArchiver.Controllers
             }
             ViewBag.SelectedAccount = selectedAccount;
             ViewBag.LookbackDays = lookbackDays;
-            if (selectedAccount.IsEnabled)
-            {
-                var syncStatus = _onDemandSyncQueue.Enqueue(selectedAccount.Id, MailSyncRequestPriority.Interactive);
-                ViewBag.SyncState = syncStatus.State.ToString();
-            }
+            ViewBag.SyncState = selectedAccount.IsEnabled
+                ? _onDemandSyncQueue.GetStatus(selectedAccount.Id).State.ToString()
+                : MailSyncQueueState.NotQueued.ToString();
             model.AccountOptions = new List<SelectListItem>
             {
                 new SelectListItem
@@ -557,11 +555,11 @@ namespace MailArchiver.Controllers
             }
 
             // Get current user's allowed accounts for filtering
-            List<int> allowedAccountIds = null;
+            List<int> allowedAccountIds = new();
             var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
             var userService = HttpContext.RequestServices.GetService<IUserService>();
             
-            if (authService != null && userService != null && !authService.IsCurrentUserAdmin(HttpContext))
+            if (authService != null && userService != null)
             {
                 var username = authService.GetCurrentUserDisplayName(HttpContext);
                 var user = await userService.GetUserByUsernameAsync(username);
@@ -668,11 +666,11 @@ namespace MailArchiver.Controllers
             }
 
             // Get current user's allowed accounts
-            List<int> allowedAccountIds = null;
+            List<int> allowedAccountIds = new();
             var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
             var userService = HttpContext.RequestServices.GetService<IUserService>();
             
-            if (authService != null && userService != null && !authService.IsCurrentUserAdmin(HttpContext))
+            if (authService != null && userService != null)
             {
                 var username = authService.GetCurrentUserDisplayName(HttpContext);
                 var user = await userService.GetUserByUsernameAsync(username);
@@ -790,11 +788,11 @@ namespace MailArchiver.Controllers
                 ModelState.Remove("EmailSubject");
 
             // Get current user's allowed accounts
-            List<int> allowedAccountIds = null;
+            List<int> allowedAccountIds = new();
             var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
             var userService = HttpContext.RequestServices.GetService<IUserService>();
             
-            if (authService != null && userService != null && !authService.IsCurrentUserAdmin(HttpContext))
+            if (authService != null && userService != null)
             {
                 var username = authService.GetCurrentUserDisplayName(HttpContext);
                 var user = await userService.GetUserByUsernameAsync(username);
@@ -1113,11 +1111,11 @@ namespace MailArchiver.Controllers
             HttpContext.Session.Remove("BatchRestorePreserveFolders");
 
             // Get current user's allowed accounts
-            List<int> allowedAccountIds = null;
+            List<int> allowedAccountIds = new();
             var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
             var userService = HttpContext.RequestServices.GetService<IUserService>();
             
-            if (authService != null && userService != null && !authService.IsCurrentUserAdmin(HttpContext))
+            if (authService != null && userService != null)
             {
                 var username = authService.GetCurrentUserDisplayName(HttpContext);
                 var user = await userService.GetUserByUsernameAsync(username);
@@ -1263,11 +1261,11 @@ namespace MailArchiver.Controllers
                 model.SelectedEmailIds.Count, model.TargetAccountId, model.TargetFolder);
 
             // Get current user's allowed accounts
-            List<int> allowedAccountIds = null;
+            List<int> allowedAccountIds = new();
             var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
             var userService = HttpContext.RequestServices.GetService<IUserService>();
             
-            if (authService != null && userService != null && !authService.IsCurrentUserAdmin(HttpContext))
+            if (authService != null && userService != null)
             {
                 var username = authService.GetCurrentUserDisplayName(HttpContext);
                 var user = await userService.GetUserByUsernameAsync(username);
@@ -1578,11 +1576,11 @@ namespace MailArchiver.Controllers
             }
 
             // Get current user's allowed accounts
-            List<int> allowedAccountIds = null;
+            List<int> allowedAccountIds = new();
             var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
             var userService = HttpContext.RequestServices.GetService<IUserService>();
             
-            if (authService != null && userService != null && !authService.IsCurrentUserAdmin(HttpContext))
+            if (authService != null && userService != null)
             {
                 var username = authService.GetCurrentUserDisplayName(HttpContext);
                 var user = await userService.GetUserByUsernameAsync(username);
@@ -1753,11 +1751,11 @@ namespace MailArchiver.Controllers
             _logger.LogInformation("Retrieved {Count} email IDs from session for async batch restore", emailIds.Count);
 
             // Get current user's allowed accounts
-            List<int> allowedAccountIds = null;
+            List<int> allowedAccountIds = new();
             var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
             var userService = HttpContext.RequestServices.GetService<IUserService>();
             
-            if (authService != null && userService != null && !authService.IsCurrentUserAdmin(HttpContext))
+            if (authService != null && userService != null)
             {
                 var username = authService.GetCurrentUserDisplayName(HttpContext);
                 var user = await userService.GetUserByUsernameAsync(username);
@@ -2333,11 +2331,11 @@ namespace MailArchiver.Controllers
             try
             {
                 // Get current user's allowed accounts
-                List<int> allowedAccountIds = null;
+                List<int> allowedAccountIds = new();
                 var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
                 var userService = HttpContext.RequestServices.GetService<IUserService>();
                 
-                if (authService != null && userService != null && !authService.IsCurrentUserAdmin(HttpContext))
+                if (authService != null && userService != null)
                 {
                     var username = authService.GetCurrentUserDisplayName(HttpContext);
                     var user = await userService.GetUserByUsernameAsync(username);
@@ -2723,9 +2721,7 @@ namespace MailArchiver.Controllers
             _logger.LogInformation("Admin user requesting to delete {Count} emails", ids.Count);
 
             // SECURITY: filter the requested ids to those the current user is authorized to
-            // access (account membership). Admins retain full access. Prevents IDOR where a
-            // SelfManager could delete emails from accounts they are not assigned to.
-            if (!(_authService?.IsCurrentUserAdmin(HttpContext) ?? false))
+            // Account membership is required for every user, including administrators.
             {
                 var userService = HttpContext.RequestServices.GetService<IUserService>();
                 var username = _authService?.GetCurrentUserDisplayName(HttpContext);
@@ -2948,11 +2944,11 @@ namespace MailArchiver.Controllers
                 }
 
                 // Get current user's allowed accounts for filtering
-                List<int> allowedAccountIds = null;
+                List<int> allowedAccountIds = new();
                 var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
                 var userService = HttpContext.RequestServices.GetService<IUserService>();
 
-                if (authService != null && userService != null && !authService.IsCurrentUserAdmin(HttpContext))
+                if (authService != null && userService != null)
                 {
                     var username = authService.GetCurrentUserDisplayName(HttpContext);
                     var user = await userService.GetUserByUsernameAsync(username);

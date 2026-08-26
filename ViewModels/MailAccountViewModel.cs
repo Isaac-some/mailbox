@@ -68,6 +68,18 @@ namespace MailArchiver.Models.ViewModels
         [Display(Name = "Client Secret")]
         public string? ClientSecret { get; set; }
 
+        [Display(Name = "Refresh Token")]
+        public string? OAuthRefreshToken { get; set; }
+
+        [Display(Name = "OAuth Client ID")]
+        public string? ExternalOAuthClientId { get; set; }
+
+        [Display(Name = "OAuth Client Secret")]
+        public string? ExternalOAuthClientSecret { get; set; }
+
+        [Display(Name = "OAuth Redirect URI")]
+        public string? ExternalOAuthRedirectUri { get; set; }
+
         [Display(Name = "Tenant ID")]
         [ConditionalRequired(nameof(Provider), ProviderType.M365, ErrorMessage = "Tenant ID is required for M365 accounts")]
         public string? TenantId { get; set; }
@@ -81,6 +93,8 @@ namespace MailArchiver.Models.ViewModels
 
         // Read-only: indicates whether MSA account is already authorized
         public bool MsaIsAuthorized { get; set; }
+        public bool MsaCanSend { get; set; }
+        public bool CanSend { get; set; }
         public DateTime? MsaTokenExpiry { get; set; }
 
         // For UI display of available folders
@@ -88,6 +102,8 @@ namespace MailArchiver.Models.ViewModels
 
         // Speicherverbrauch des Accounts (formatiert aus AccountStorageCache)
         public string? StorageUsed { get; set; }
+
+        public int ArchivedEmailCount { get; set; }
 
         // Flag to determine if it's a new or existing account
         public bool IsNewAccount => Id == 0;

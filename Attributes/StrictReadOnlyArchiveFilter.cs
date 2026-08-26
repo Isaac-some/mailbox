@@ -4,9 +4,8 @@ using Microsoft.AspNetCore.Mvc.Filters;
 namespace MailArchiver.Attributes;
 
 /// <summary>
-/// Final HTTP-layer guard for the local archive. UI hiding is not a security
-/// control, so every archive deletion and every mailbox-write endpoint is
-/// rejected even when a caller crafts the URL directly.
+/// Final HTTP-layer guard for individual archived messages. Deleting an entire
+/// mail account is an account-management operation and remains allowed.
 /// </summary>
 public sealed class StrictReadOnlyArchiveFilter : IAsyncActionFilter
 {
@@ -23,8 +22,7 @@ public sealed class StrictReadOnlyArchiveFilter : IAsyncActionFilter
             ? routeAction
             : string.Empty;
 
-        var isBlocked = controller == "EmailsController" && EmailWriteActions.Contains(action ?? string.Empty)
-            || controller == "MailAccountsController" && string.Equals(action, "Delete", StringComparison.OrdinalIgnoreCase);
+        var isBlocked = controller == "EmailsController" && EmailWriteActions.Contains(action ?? string.Empty);
 
         if (isBlocked)
         {

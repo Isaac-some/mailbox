@@ -65,17 +65,11 @@ public sealed class LocalMaintenanceController : Controller
 
     [HttpPost]
     [ValidateAntiForgeryToken]
-    public IActionResult FactoryReset(string confirmation)
+    public IActionResult FactoryReset()
     {
         if (!IsLocalApp())
         {
             return NotFound();
-        }
-
-        if (!string.Equals(confirmation?.Trim(), "RESET", StringComparison.Ordinal))
-        {
-            TempData["ErrorMessage"] = "请输入 RESET 后再执行恢复出厂设置。";
-            return RedirectToAction(nameof(Index));
         }
 
         var markerPath = Environment.GetEnvironmentVariable("KOUZI_FACTORY_RESET_MARKER");

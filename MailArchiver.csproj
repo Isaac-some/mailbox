@@ -8,7 +8,9 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Remove="tests\**" />
+    <Compile Remove="local-app\**;tests\**;windows-app\**" />
+    <Content Remove="local-app\**;tests\**;windows-app\**" />
+    <None Remove="local-app\**;tests\**;windows-app\**" />
   </ItemGroup>
 
   <ItemGroup>

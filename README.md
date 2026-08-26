@@ -1,15 +1,65 @@
-# 粉裤子邮箱助手 Web 版
+# 蔻姿邮箱助手源码
 
-在浏览器中运行的邮箱归档与检索系统。此仓库只包含 Web 版：Docker 同时启动应用和 PostgreSQL，浏览器访问本机地址即可使用。
+本地版支持 Gmail、Yahoo、GMX 和 Outlook 个人邮箱收发件。写信支持纯文本、抄送和多个附件（默认最多 10 个、合计 10MB）。Gmail、Yahoo 支持 OAuth 或应用专用密码，GMX 使用应用专用密码，Outlook 使用 OAuth。
 
-macOS DMG 是独立发布物，不在本仓库中构建或上传，避免把本机程序、历史邮件、数据库和密钥混入 GitHub。
+Outlook 不保存微软密码。可逐个授权，也可批量导入 `邮箱<TAB>密码<TAB>Client ID<TAB>Refresh Token` 格式的 TXT；导入时密码列只做格式校验，不会保存。旧 Outlook 账号仍可收件，但需要点一次“重新授权”，取得 `SMTP.Send` 权限后才能写信。浏览器部署版默认关闭发件；Windows/macOS 本地版默认开启。
 
-## 快速启动
+## 源码开发（.NET 10）
+
+在本项目当前目录运行：
+
+```sh
+cd "/Users/zhaoxiaohandexinwanju/Documents/蔻姿邮箱助手/mail-archiver-main"
+dotnet restore MailArchiver.sln
+dotnet test MailArchiver.sln
+dotnet run --project MailArchiver.csproj
+```
+
+macOS 一键构建并运行临时测试 App（不会生成 DMG）：
+
+```sh
+cd "/Users/zhaoxiaohandexinwanju/Documents/蔻姿邮箱助手/mail-archiver-main"
+./script/build_and_run.sh --verify
+```
+
+也可以直接点击 Codex 项目的“Run”动作。临时 App 输出到 `/private/tmp/kouzi-mail-assistant-run/app/邮箱助手.app`。
+
+## Outlook 使用流程
+
+1. 在“邮箱账号”里选择“Outlook 个人邮箱”，填写邮箱地址并保存。
+2. 按微软设备授权页面提示登录并同意 IMAP 与 SMTP 权限。
+3. 授权完成后可同步收件；账号状态显示“Outlook 可收发”后，可点“写邮件”。
+4. 如果提示“邮件已经发送，但‘已发送’副本保存失败”，不要重复发送；先到收件方或 Outlook“已发送”确认。
+
+发件成功后，程序会把副本保存到 Outlook“已发送”，并立即归档到本地。日志不会记录 OAuth Token、正文或附件内容。
+
+## 后续打包
+
+本次源码交付不包含 DMG/EXE。需要发布时再执行：
+
+```sh
+cd "/Users/zhaoxiaohandexinwanju/Documents/蔻姿邮箱助手/mail-archiver-main"
+dotnet build --configuration Release
+./local-app/build-dmg.sh
+```
+
+Windows 需在 Windows PowerShell 中执行：
+
+```powershell
+cd "C:\path\to\mail-archiver-main"
+.\windows-app\build-windows.ps1
+```
+
+两个外壳都加载同一套服务端源码，因此重新打包后会获得相同的 Outlook 功能。
+
+## 浏览器版快速启动
+
+浏览器版仍可用于内部邮箱收件与检索；默认不开放写信。
 
 前提：已安装并打开 Docker Desktop。
 
 ```sh
-cd "/Users/zhaoxiaohandexinwanju/Documents/蔻姿邮箱助手/mail-archiver-main"
+cd /path/to/Kouzi/mail-archiver-main
 ./scripts/setup-local.sh
 docker compose up -d --build
 ```
@@ -19,7 +69,7 @@ docker compose up -d --build
 查看服务状态或日志：
 
 ```sh
-cd "/Users/zhaoxiaohandexinwanju/Documents/蔻姿邮箱助手/mail-archiver-main"
+cd /path/to/Kouzi/mail-archiver-main
 docker compose ps
 docker compose logs -f mailarchive-app
 ```
@@ -27,7 +77,7 @@ docker compose logs -f mailarchive-app
 停止服务但保留邮件归档数据：
 
 ```sh
-cd "/Users/zhaoxiaohandexinwanju/Documents/蔻姿邮箱助手/mail-archiver-main"
+cd /path/to/Kouzi/mail-archiver-main
 docker compose down
 ```
 
@@ -36,7 +86,7 @@ docker compose down
 早期版本把运行数据错误地放进 `Data/`，该目录同时包含 C# 源码。新版本把运行数据放入独立的 `.runtime/`。已有旧数据时，先停止旧服务，再运行一次迁移脚本；它只复制，不删除旧数据。
 
 ```sh
-cd "/Users/zhaoxiaohandexinwanju/Documents/蔻姿邮箱助手/mail-archiver-main"
+cd /path/to/Kouzi/mail-archiver-main
 docker compose down
 ./scripts/migrate-legacy-runtime.sh
 docker compose up -d --build
@@ -44,10 +94,10 @@ docker compose up -d --build
 
 ## GitHub 上传前检查
 
-以下内容已被忽略，不能上传：`.env`、`secrets/`、`.runtime/`、旧版 `Data/` 下的运行数据、`local-app/`、编译结果和日志。它们可能包含登录口令、凭据加密密钥、归档邮件或 macOS 安装包。`Data/MailArchiverDbContext.cs` 是必需源码，会正常上传。
+以下内容不能上传：`.env`、`secrets/` 中的真实密钥、`.runtime/`、旧版 `Data/` 下的运行数据、上传/导出文件、编译结果、日志以及现有 DMG/EXE。`local-app/`、`windows-app/` 和 `Data/MailArchiverDbContext.cs` 是必需源码，应当保留；仅排除它们各自的 `build/bin/obj` 产物。
 
 ```sh
-cd "/Users/zhaoxiaohandexinwanju/Documents/蔻姿邮箱助手/mail-archiver-main"
+cd /path/to/Kouzi/mail-archiver-main
 git init
 git add .
 git status
@@ -58,15 +108,8 @@ git status
 ## 安全边界
 
 - 默认仅监听本机 `127.0.0.1:5000`，不会直接暴露到互联网。
-- 要在局域网或公网提供服务，必须先恢复 `Authentication__Enabled=true`、配置管理员账号密码，并配置 HTTPS 反向代理。
+- 线上部署使用 `docker-compose.production.yml`，强制开启登录并要求管理员密码。
+- 线上部署步骤见 `PRODUCTION_DEPLOYMENT.md`，必须配置 HTTPS 反向代理。
 - PostgreSQL 数据在 `.runtime/postgres/`；数据保护密钥在 `.runtime/data-protection-keys/`。备份时必须同时备份两者和 `secrets/credential_encryption_key`。
-
-## 开发与验证
-
-```sh
-cd "/Users/zhaoxiaohandexinwanju/Documents/蔻姿邮箱助手/mail-archiver-main"
-dotnet test MailArchiver.sln
-docker build -t kouzi-mail-assistant-web .
-```
 
 本项目基于 [Mail Archiver](https://github.com/s1t5/mail-archiver) 修改，按仓库中的 GPL-3.0 许可证发布。

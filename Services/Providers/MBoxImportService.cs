@@ -34,7 +34,8 @@ private readonly IServiceProvider _serviceProvider;
             _serviceProvider = serviceProvider;
             _logger = logger;
             _batchOptions = batchOptions.Value;
-            _uploadsPath = Path.Combine(environment.ContentRootPath, "uploads", "mbox");
+            var writableRoot = LocalAppStoragePathPolicy.ResolveWritableRoot(environment.ContentRootPath);
+            _uploadsPath = Path.Combine(writableRoot, "uploads", "mbox");
             Directory.CreateDirectory(_uploadsPath);
             _cleanupTimer = new Timer(_ => CleanupOldJobs(), null, TimeSpan.FromHours(24), TimeSpan.FromHours(24));
         }

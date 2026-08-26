@@ -3,6 +3,7 @@ using System.ComponentModel.DataAnnotations;
 using MailArchiver;
 using MailArchiver.Attributes;
 using MailArchiver.Models;
+using MailArchiver.Services;
 using Microsoft.Extensions.Localization;
 
 namespace MailArchiver.Models.ViewModels
@@ -29,9 +30,20 @@ namespace MailArchiver.Models.ViewModels
         [Display(Name = "Username")]
         public string? Username { get; set; }
         
-        [ConditionalRequired(nameof(Provider), ProviderType.IMAP, ErrorMessage = "Password is required for IMAP accounts")]
         [Display(Name = "Password")]
         public string? Password { get; set; }
+
+        [Display(Name = "Refresh Token")]
+        public string? OAuthRefreshToken { get; set; }
+
+        [Display(Name = "OAuth Client ID")]
+        public string? ExternalOAuthClientId { get; set; }
+
+        [Display(Name = "OAuth Client Secret")]
+        public string? ExternalOAuthClientSecret { get; set; }
+
+        [Display(Name = "OAuth Redirect URI")]
+        public string? ExternalOAuthRedirectUri { get; set; }
         
         [Display(Name = "Use SSL")]
         public bool UseSSL { get; set; } = true;
@@ -127,6 +139,22 @@ namespace MailArchiver.Models.ViewModels
                 yield return new ValidationResult(
                     localizer?["ClientSecretRequired"].Value ?? "Client Secret is required for M365 accounts",
                     new[] { nameof(ClientSecret) });
+            }
+
+            if (Provider == ProviderType.IMAP && string.IsNullOrWhiteSpace(Password))
+            {
+                if (!ExternalOAuthProviderPolicy.TryResolve(EmailAddress, out var oauthProvider) ||
+                    string.IsNullOrWhiteSpace(ExternalOAuthClientId) ||
+                    string.IsNullOrWhiteSpace(OAuthRefreshToken) ||
+                    (oauthProvider.RequiresClientSecret && string.IsNullOrWhiteSpace(ExternalOAuthClientSecret)) ||
+                    (oauthProvider.RequiresRedirectUri && string.IsNullOrWhiteSpace(ExternalOAuthRedirectUri)))
+                {
+                    yield return new ValidationResult(
+                        oauthProvider?.RequiresClientSecret == true
+                            ? "Yahoo 必须提供应用专用密码，或完整的 Client ID、Client Secret、Refresh Token、Redirect URI。"
+                            : "必须提供应用专用密码，或 Gmail 的 Client ID、Refresh Token。",
+                        new[] { nameof(Password) });
+                }
             }
         }
     }

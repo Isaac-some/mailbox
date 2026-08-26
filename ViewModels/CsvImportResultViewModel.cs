@@ -35,6 +35,12 @@ namespace MailArchiver.Models.ViewModels
         public int LineNumber { get; set; }
         public string Email { get; set; } = string.Empty;
         public string Password { get; set; } = string.Empty;
+        public ProviderType Provider { get; set; } = ProviderType.IMAP;
+        public string? ClientId { get; set; }
+        public string? ClientSecret { get; set; }
+        public string? OAuthRefreshToken { get; set; }
+        public string? OAuthGrantedScopes { get; set; }
+        public string? OAuthRedirectUri { get; set; }
         public string? Username { get; set; }
         public string? ImapServer { get; set; }
         public int? ImapPort { get; set; }

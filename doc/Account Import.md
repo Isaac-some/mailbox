@@ -11,9 +11,20 @@ Two bulk import paths exist, depending on the mail provider:
 | Provider | Bulk Import Method | Documentation |
 |---|---|---|
 | **Microsoft 365 (tenant)** | Tenant discovery via Microsoft Graph — one app registration accesses every mailbox in the tenant | [Microsoft 365 Tenant Mailbox Import](M365TenantImport.md) |
+| **Outlook personal** | Headerless, tab-separated TXT containing email, password, Client ID and Refresh Token | This page (see below) |
 | **IMAP** | CSV bulk import — upload a CSV file with one row per mailbox | This page (see below) |
 
-> **Note:** Microsoft personal accounts (Outlook.com / M365 Family, provider **MSA**) use an interactive device-code authorization flow and cannot be bulk-imported. They must be created and authorized one at a time. See [MSA Outlook Setup](MSA_Outlook_Setup.md).
+## Outlook Personal TXT Bulk Import
+
+The account import page accepts the vendor format below without a header row. Columns are separated by a Tab character, not spaces or commas:
+
+```text
+email@example.com<TAB>password<TAB>client-id<TAB>refresh-token
+```
+
+The password column is required by the source format but is never retained. The app stores the per-account Client ID and Refresh Token, then uses Microsoft OAuth/XOAUTH2 for both IMAP receiving and SMTP sending. Each row is validated independently; malformed rows are reported by line number. Imported accounts are queued for connection validation, which refreshes the token and records the scopes actually granted by Microsoft. A token without `SMTP.Send` remains receive-only.
+
+Interactive device-code authorization remains available for accounts without an importable Refresh Token. See [MSA Outlook Setup](MSA_Outlook_Setup.md).
 
 ---
 

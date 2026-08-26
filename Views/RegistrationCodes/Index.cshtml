@@ -1,0 +1,92 @@
+@model IReadOnlyList<MailArchiver.ViewModels.RegistrationCodeViewModel>
+@{
+    ViewData["Title"] = "授权码";
+    var newCode = TempData["NewRegistrationCode"] as string;
+    var now = DateTime.UtcNow;
+}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3 mb-0">授权码</h1>
+    <form asp-action="Create" method="post" class="d-flex gap-2">
+        @Html.AntiForgeryToken()
+        <select name="validDays" class="form-select" aria-label="有效期">
+            <option value="1">1 天</option>
+            <option value="7" selected>7 天</option>
+            <option value="30">30 天</option>
+        </select>
+        <button type="submit" class="btn btn-primary text-nowrap">
+            <i class="bi bi-plus-lg me-1"></i>生成
+        </button>
+    </form>
+</div>
+
+@if (!string.IsNullOrEmpty(newCode))
+{
+    <div class="alert alert-success">
+        <div class="fw-semibold mb-1">新授权码只显示这一次</div>
+        <div class="input-group">
+            <input id="new-registration-code" class="form-control font-monospace" value="@newCode" readonly />
+            <button type="button" class="btn btn-outline-success" title="复制授权码"
+                    onclick="navigator.clipboard.writeText(document.getElementById('new-registration-code').value)">
+                <i class="bi bi-copy"></i>
+            </button>
+        </div>
+    </div>
+}
+
+<div class="table-responsive">
+    <table class="table table-hover align-middle">
+        <thead>
+            <tr>
+                <th>编号</th>
+                <th>创建时间</th>
+                <th>到期时间</th>
+                <th>状态</th>
+                <th>使用者</th>
+                <th class="text-end">操作</th>
+            </tr>
+        </thead>
+        <tbody>
+        @foreach (var code in Model)
+        {
+            var available = code.UsedAt == null && code.RevokedAt == null && code.ExpiresAt > now;
+            <tr>
+                <td class="font-monospace">@code.CodePrefix…</td>
+                <td><span data-utc-time="@code.CreatedAt.ToString("s")">@code.CreatedAt</span></td>
+                <td><span data-utc-time="@code.ExpiresAt.ToString("s")">@code.ExpiresAt</span></td>
+                <td>
+                    @if (code.UsedAt != null)
+                    {
+                        <span class="badge text-bg-secondary">已使用</span>
+                    }
+                    else if (code.RevokedAt != null)
+                    {
+                        <span class="badge text-bg-danger">已撤销</span>
+                    }
+                    else if (code.ExpiresAt <= now)
+                    {
+                        <span class="badge text-bg-warning">已过期</span>
+                    }
+                    else
+                    {
+                        <span class="badge text-bg-success">可使用</span>
+                    }
+                </td>
+                <td>@(code.UsedByUsername ?? "—")</td>
+                <td class="text-end">
+                    @if (available)
+                    {
+                        <form asp-action="Revoke" method="post" class="d-inline">
+                            @Html.AntiForgeryToken()
+                            <input type="hidden" name="id" value="@code.Id" />
+                            <button type="submit" class="btn btn-sm btn-outline-danger" title="撤销授权码">
+                                <i class="bi bi-x-lg"></i>
+                            </button>
+                        </form>
+                    }
+                </td>
+            </tr>
+        }
+        </tbody>
+    </table>
+</div>

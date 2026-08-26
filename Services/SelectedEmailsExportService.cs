@@ -32,7 +32,8 @@ namespace MailArchiver.Services
             _serviceProvider = serviceProvider;
             _logger = logger;
             _batchOptions = batchOptions.Value;
-            _exportsPath = Path.Combine(environment.ContentRootPath, "exports");
+            var writableRoot = LocalAppStoragePathPolicy.ResolveWritableRoot(environment.ContentRootPath);
+            _exportsPath = Path.Combine(writableRoot, "exports");
 
             // Create exports directory if it doesn't exist
             Directory.CreateDirectory(_exportsPath);

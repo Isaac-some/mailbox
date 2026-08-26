@@ -1,0 +1,88 @@
+@using MailArchiver.Models
+@model MailArchiver.ViewModels.OutboundMailTaskDetailsViewModel
+@{
+    ViewData["Title"] = "发件任务详情";
+    static string StatusText(OutboundMailTaskItemStatus status) => status switch
+    {
+        OutboundMailTaskItemStatus.Pending => "待发送",
+        OutboundMailTaskItemStatus.Sending => "发送中",
+        OutboundMailTaskItemStatus.Sent => "已发送",
+        OutboundMailTaskItemStatus.SentWithoutCopy => "已发出/副本异常",
+        OutboundMailTaskItemStatus.Failed => "失败",
+        OutboundMailTaskItemStatus.Interrupted => "结果不确定",
+        OutboundMailTaskItemStatus.Cancelled => "已取消",
+        _ => status.ToString()
+    };
+    static string StatusClass(OutboundMailTaskItemStatus status) => status switch
+    {
+        OutboundMailTaskItemStatus.Sent => "text-bg-success",
+        OutboundMailTaskItemStatus.SentWithoutCopy => "text-bg-warning",
+        OutboundMailTaskItemStatus.Failed => "text-bg-danger",
+        OutboundMailTaskItemStatus.Interrupted => "text-bg-warning",
+        OutboundMailTaskItemStatus.Sending => "text-bg-primary",
+        _ => "text-bg-secondary"
+    };
+}
+
+<div class="account-page">
+    <header class="account-page__header">
+        <div>
+            <p class="account-page__eyebrow">发件任务 #@Model.Id</p>
+            <h1>@Model.Name</h1>
+            <p class="account-page__summary">逐封结果以本页为准；“已发送”表示邮件服务商已确认并保存已发送副本；本地归档失败只记日志，不影响发件结果。</p>
+        </div>
+        <div class="d-flex gap-2 flex-wrap">
+            @if (Model.Items.Any(item => item.Status == OutboundMailTaskItemStatus.Pending))
+            {
+                <form asp-action="Cancel" asp-route-id="@Model.Id" method="post" onsubmit="return confirm('确定取消所有尚未开始的邮件吗？');">
+                    @Html.AntiForgeryToken()
+                    <button class="btn btn-outline-danger btn-sm" type="submit">取消待发邮件</button>
+                </form>
+            }
+            <a asp-action="Index" class="btn btn-light btn-sm">返回发件任务</a>
+        </div>
+    </header>
+
+    <section class="card shadow-sm border-0">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table align-middle mb-0">
+                    <thead><tr><th>CSV 行</th><th>计划时间（@Model.TimeZoneId）</th><th>发件邮箱</th><th>收件邮箱</th><th>主题</th><th>状态</th><th>说明</th><th></th></tr></thead>
+                    <tbody>
+                        @foreach (var item in Model.Items)
+                        {
+                            <tr>
+                                <td>@item.CsvRowNumber</td>
+                                <td><span data-utc-time="@item.ScheduledAtUtc.ToString("yyyy-MM-ddTHH:mm:ss")">@item.ScheduledAtUtc</span></td>
+                                <td>@item.Sender</td>
+                                <td>@item.Recipient</td>
+                                <td>@item.Subject</td>
+                                <td><span class="badge @StatusClass(item.Status)">@StatusText(item.Status)</span></td>
+                                <td class="small">
+                                    @if (!string.IsNullOrWhiteSpace(item.ErrorMessage)) { <span>@item.ErrorMessage</span> }
+                                    else if (!string.IsNullOrWhiteSpace(item.MessageId)) { <span title="@item.MessageId">Message-ID 已记录</span> }
+                                </td>
+                                <td class="text-end">
+                                    @if (item.Status == OutboundMailTaskItemStatus.Failed)
+                                    {
+                                        <form asp-action="Retry" asp-route-id="@item.Id" method="post">
+                                            @Html.AntiForgeryToken()
+                                            <button type="submit" class="btn btn-outline-primary btn-sm">重试</button>
+                                        </form>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+</div>
+
+@if (Model.IsActive)
+{
+    @section Scripts {
+        <script>window.setTimeout(() => window.location.reload(), 3000);</script>
+    }
+}

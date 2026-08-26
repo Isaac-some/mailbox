@@ -17,4 +17,25 @@ public class CsvImportHeaderPolicyTests
         Assert.False(columns.ContainsKey("name"));
         Assert.False(columns.ContainsKey("password"));
     }
+
+    [Theory]
+    [InlineData("邮箱", "Client ID", "Refresh Token")]
+    [InlineData("email", "client_id", "client_secret", "refresh_token")]
+    public void TryCreateCanonicalIndex_accepts_OAuth_headers(params string[] headers)
+    {
+        var accepted = CsvImportHeaderPolicy.TryCreateCanonicalIndex(headers, out var columns);
+
+        Assert.True(accepted);
+        Assert.True(columns.ContainsKey("email"));
+        Assert.True(columns.ContainsKey("client_id"));
+        Assert.True(columns.ContainsKey("refresh_token"));
+    }
+
+    [Fact]
+    public void TryCreateCanonicalIndex_maps_Yahoo_redirect_uri()
+    {
+        Assert.True(CsvImportHeaderPolicy.TryCreateCanonicalIndex(
+            ["邮箱", "Client ID", "Client Secret", "Refresh Token", "Redirect URI"], out var columns));
+        Assert.Equal(4, columns["redirect_uri"]);
+    }
 }

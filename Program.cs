@@ -167,6 +167,7 @@ builder.Services.AddScoped<MailArchiver.Utilities.DateTimeHelper>();
 // Add HTTP Client factory (used by VersionUpdateService for GitHub API calls)
 builder.Services.AddHttpClient("GitHubReleases");
 builder.Services.AddHttpClient("MsaOAuth");
+builder.Services.AddHttpClient("ExternalMailOAuth");
 
 // Register CSV import options for bulk IMAP account import
 builder.Services.Configure<CsvImportOptions>(builder.Configuration.GetSection(CsvImportOptions.CsvImport));
@@ -180,6 +181,12 @@ builder.Services.AddSingleton<ICredentialEncryptionService, CredentialEncryption
 // Register MSA OAuth options and service for personal Microsoft accounts
 builder.Services.Configure<MsaOAuthOptions>(builder.Configuration.GetSection(MsaOAuthOptions.SectionName));
 builder.Services.AddScoped<MailArchiver.Services.IMsaOAuthService, MailArchiver.Services.MsaOAuthService>();
+builder.Services.AddScoped<MailArchiver.Services.IMsaTokenManager, MailArchiver.Services.MsaTokenManager>();
+builder.Services.AddScoped<MailArchiver.Services.IExternalOAuthTokenManager, MailArchiver.Services.ExternalOAuthTokenManager>();
+builder.Services.Configure<OutboundMailOptions>(builder.Configuration.GetSection(OutboundMailOptions.SectionName));
+builder.Services.AddScoped<MailArchiver.Services.IOutlookRestMailSender, MailArchiver.Services.OutlookRestMailSender>();
+builder.Services.AddScoped<MailArchiver.Services.IOutboundMailService, MailArchiver.Services.OutboundMailService>();
+builder.Services.AddHostedService<MailArchiver.Services.OutboundMailTaskWorker>();
 
 // Add Session support
 builder.Services.AddDistributedMemoryCache();
@@ -380,6 +387,7 @@ builder.Services.AddScoped<MailArchiver.Services.Providers.IProviderEmailService
 builder.Services.AddScoped<IAuthenticationService, CookieAuthenticationService>();
 builder.Services.AddScoped<OAuthAuthenticationService>();
 builder.Services.AddScoped<IUserService, UserService>();
+builder.Services.AddScoped<IRegistrationCodeService, RegistrationCodeService>();
 builder.Services.AddSingleton<ISyncJobService, SyncJobService>(); // NEUE SERVICE
 
 // Register BatchRestoreService as singleton and hosted service - MUST be the same instance
@@ -671,6 +679,7 @@ using (var scope = app.Services.CreateScope())
             // PostgreSQL migrations embed provider-specific DDL. A fresh, private
             // SQLite archive is created directly from the shared EF model instead.
             context.Database.EnsureCreated();
+            await MailArchiver.Data.LocalDatabaseSchemaUpgrade.ApplyAsync(context);
         }
         else
         {
