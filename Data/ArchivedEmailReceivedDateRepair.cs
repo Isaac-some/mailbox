@@ -1,6 +1,7 @@
 using System.Data;
 using System.Globalization;
 using System.Text.RegularExpressions;
+using MailArchiver.Models;
 using MailArchiver.Utilities;
 using Microsoft.EntityFrameworkCore;
 
@@ -55,6 +56,7 @@ public static class ArchivedEmailReceivedDateRepair
                 if (batch.Count == 0)
                     break;
 
+                var corrections = new List<(ArchivedEmail Email, DateTime CorrectedDate)>();
                 foreach (var email in batch)
                 {
                     var parsedReceivedDate = TryExtractReceivedDate(email.RawHeaders);
@@ -63,13 +65,38 @@ public static class ArchivedEmailReceivedDateRepair
                         : email.SentDate;
 
                     if (email.ReceivedDate != correctedDate)
-                    {
-                        email.ReceivedDate = correctedDate;
-                        repairedCount++;
-                    }
+                        corrections.Add((email, correctedDate));
                 }
 
-                await context.SaveChangesAsync(cancellationToken);
+                if (corrections.Count > 0)
+                {
+                    await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+                    var lockedEmails = corrections
+                        .Select(correction => correction.Email)
+                        .Where(email => email.IsLocked)
+                        .ToList();
+
+                    // PostgreSQL's compliance trigger intentionally blocks changes to locked
+                    // rows. Unlock, repair, and restore the lock in one atomic transaction so
+                    // a failure can never leave protected mail unlocked.
+                    foreach (var email in lockedEmails)
+                        email.IsLocked = false;
+                    if (lockedEmails.Count > 0)
+                        await context.SaveChangesAsync(cancellationToken);
+
+                    foreach (var correction in corrections)
+                        correction.Email.ReceivedDate = correction.CorrectedDate;
+                    await context.SaveChangesAsync(cancellationToken);
+
+                    foreach (var email in lockedEmails)
+                        email.IsLocked = true;
+                    if (lockedEmails.Count > 0)
+                        await context.SaveChangesAsync(cancellationToken);
+
+                    await transaction.CommitAsync(cancellationToken);
+                    repairedCount += corrections.Count;
+                }
+
                 lastId = batch[^1].Id;
                 context.ChangeTracker.Clear();
             }

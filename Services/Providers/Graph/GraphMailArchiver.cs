@@ -160,7 +160,7 @@ namespace MailArchiver.Services.Providers.Graph
                          e.Subject == checkSubject &&
                          Math.Abs((e.SentDate - checkDate).TotalSeconds) < 2)
                     )
-                    .Select(e => new { e.Id, e.FolderName, e.Subject, e.ReceivedDate })
+                    .Select(e => new { e.Id, e.FolderName, e.Subject, e.ReceivedDate, e.IsLocked })
                     .FirstOrDefaultAsync();
 
                 if (existingInfo != null)
@@ -179,12 +179,12 @@ namespace MailArchiver.Services.Providers.Graph
                         var existingEmail = await _context.ArchivedEmails.FindAsync(existingInfo.Id);
                         if (existingEmail != null)
                         {
-                            if (needsFolderUpdate)
-                                existingEmail.FolderName = cleanFolderName;
-                            if (needsReceivedDateUpdate)
-                                existingEmail.ReceivedDate = convertedReceivedDate!.Value;
-
-                            await _context.SaveChangesAsync();
+                            await UpdateExistingEmailMetadataAsync(
+                                existingEmail,
+                                convertedReceivedDate,
+                                cleanFolderName,
+                                needsReceivedDateUpdate,
+                                needsFolderUpdate);
                             _context.ChangeTracker.Clear();
                         }
                     }
@@ -201,6 +201,47 @@ namespace MailArchiver.Services.Providers.Graph
             }
 
             return false;
+        }
+
+        private async Task UpdateExistingEmailMetadataAsync(
+            ArchivedEmail existingEmail,
+            DateTime? receivedDate,
+            string folderName,
+            bool updateReceivedDate,
+            bool updateFolder)
+        {
+            var mustTemporarilyUnlock = updateReceivedDate && existingEmail.IsLocked;
+            if (!mustTemporarilyUnlock)
+            {
+                if (updateReceivedDate)
+                    existingEmail.ReceivedDate = receivedDate!.Value;
+                if (updateFolder)
+                    existingEmail.FolderName = folderName;
+                await _context.SaveChangesAsync();
+                return;
+            }
+
+            await using var transaction = await _context.Database.BeginTransactionAsync();
+            try
+            {
+                existingEmail.IsLocked = false;
+                await _context.SaveChangesAsync();
+
+                existingEmail.ReceivedDate = receivedDate!.Value;
+                if (updateFolder)
+                    existingEmail.FolderName = folderName;
+                await _context.SaveChangesAsync();
+
+                existingEmail.IsLocked = true;
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                _context.ChangeTracker.Clear();
+                throw;
+            }
         }
 
         /// <summary>

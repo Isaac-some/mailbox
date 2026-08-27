@@ -1153,31 +1153,23 @@ namespace MailArchiver.Services.Core
 
             if (existingEmail != null)
             {
-                var hasChanges = false;
-
-                // Keep existing rows correct when a sync revisits mail archived by older versions.
-                if (existingEmail.ReceivedDate != convertedReceivedDate)
-                {
-                    existingEmail.ReceivedDate = convertedReceivedDate;
-                    hasChanges = true;
-                }
-
-                // E-Mail existiert bereits, prüfen ob der Ordner geändert wurde
                 var cleanFolderName = MailContentHelper.CleanText(folderName ?? string.Empty);
-                if (existingEmail.FolderName != cleanFolderName)
-                {
-                    // Ordner hat sich geändert, aktualisieren
-                    var oldFolder = existingEmail.FolderName;
-                    existingEmail.FolderName = cleanFolderName;
-                    hasChanges = true;
+                var needsReceivedDateUpdate = existingEmail.ReceivedDate != convertedReceivedDate;
+                var needsFolderUpdate = existingEmail.FolderName != cleanFolderName;
+                var oldFolder = existingEmail.FolderName;
+
+                if (needsReceivedDateUpdate || needsFolderUpdate)
+                    await UpdateExistingEmailMetadataAsync(
+                        existingEmail,
+                        convertedReceivedDate,
+                        cleanFolderName,
+                        needsReceivedDateUpdate,
+                        needsFolderUpdate);
+
+                if (needsFolderUpdate)
                     _logger.LogInformation("Updated folder for existing email: {Subject} from '{OldFolder}' to '{NewFolder}'",
                         existingEmail.Subject, oldFolder, cleanFolderName);
-                }
 
-                if (hasChanges)
-                {
-                    await _context.SaveChangesAsync();
-                }
                 return false; // E-Mail existiert bereits
             }
 
@@ -1809,6 +1801,47 @@ namespace MailArchiver.Services.Core
             }
 
             return sentDate;
+        }
+
+        private async Task UpdateExistingEmailMetadataAsync(
+            ArchivedEmail existingEmail,
+            DateTime receivedDate,
+            string folderName,
+            bool updateReceivedDate,
+            bool updateFolder)
+        {
+            var mustTemporarilyUnlock = updateReceivedDate && existingEmail.IsLocked;
+            if (!mustTemporarilyUnlock)
+            {
+                if (updateReceivedDate)
+                    existingEmail.ReceivedDate = receivedDate;
+                if (updateFolder)
+                    existingEmail.FolderName = folderName;
+                await _context.SaveChangesAsync();
+                return;
+            }
+
+            await using var transaction = await _context.Database.BeginTransactionAsync();
+            try
+            {
+                existingEmail.IsLocked = false;
+                await _context.SaveChangesAsync();
+
+                existingEmail.ReceivedDate = receivedDate;
+                if (updateFolder)
+                    existingEmail.FolderName = folderName;
+                await _context.SaveChangesAsync();
+
+                existingEmail.IsLocked = true;
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                _context.ChangeTracker.Clear();
+                throw;
+            }
         }
 
         /// <summary>

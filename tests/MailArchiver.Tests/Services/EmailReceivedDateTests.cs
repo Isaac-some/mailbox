@@ -93,6 +93,49 @@ public class EmailReceivedDateTests
     }
 
     [Fact]
+    public async Task Duplicate_sync_corrects_received_date_without_leaving_email_unlocked()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<MailArchiverDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        await using var context = new MailArchiverDbContext(options);
+        await context.Database.EnsureCreatedAsync();
+
+        var account = new MailAccount
+        {
+            Name = "test",
+            EmailAddress = "owner@example.com",
+            Provider = ProviderType.IMAP,
+            IsEnabled = true
+        };
+        context.MailAccounts.Add(account);
+        await context.SaveChangesAsync();
+
+        var sentDate = new DateTimeOffset(2024, 5, 1, 8, 30, 0, TimeSpan.Zero);
+        var message = CreateMessage("locked-duplicate@example.com", "duplicate", sentDate, account.EmailAddress);
+        var service = ServiceFactory.CreateEmailCoreService(context);
+        await service.ArchiveEmailAsync(account, message, false, "INBOX", sentDate);
+
+        var stored = await context.ArchivedEmails.SingleAsync();
+        stored.IsLocked = true;
+        await context.SaveChangesAsync();
+
+        var correctedReceivedDate = sentDate.AddHours(3);
+        var wasNew = await service.ArchiveEmailAsync(
+            account,
+            message,
+            false,
+            "INBOX",
+            correctedReceivedDate);
+
+        Assert.False(wasNew);
+        Assert.Equal(new DateTime(2024, 5, 1, 13, 30, 0), stored.ReceivedDate);
+        Assert.True(stored.IsLocked);
+    }
+
+    [Fact]
     public async Task Inbox_sort_uses_received_date_descending_with_a_stable_tie_breaker()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
@@ -208,6 +251,7 @@ public class EmailReceivedDateTests
         var repaired = await context.ArchivedEmails.OrderBy(email => email.Id).ToListAsync();
         Assert.Equal(new DateTime(2024, 5, 1, 14, 30, 0), repaired[0].ReceivedDate);
         Assert.Equal(sentDate, repaired[1].ReceivedDate);
+        Assert.All(repaired, email => Assert.True(email.IsLocked));
 
         repaired[0].ReceivedDate = new DateTime(2030, 1, 1);
         await context.SaveChangesAsync();
@@ -258,6 +302,7 @@ public class EmailReceivedDateTests
             Bcc = string.Empty,
             SentDate = sentDate,
             ReceivedDate = new DateTime(2026, 8, 27, 10, 0, 0),
+            IsLocked = true,
             FolderName = "INBOX",
             RawHeaders = rawHeaders
         };
