@@ -316,7 +316,8 @@ namespace MailArchiver.Services.Core
                     ""page"" AS (
                         SELECT m.""Id"", m.""{sortColumn}""
                         FROM ""matched"" m
-                        ORDER BY m.""{sortColumn}"" {(sortOrder?.ToLower() == "asc" ? "ASC" : "DESC")}
+                        ORDER BY m.""{sortColumn}"" {(sortOrder?.ToLower() == "asc" ? "ASC" : "DESC")},
+                                 m.""Id"" {(sortOrder?.ToLower() == "asc" ? "ASC" : "DESC")}
                         LIMIT {take} OFFSET {skip}
                     )
                     SELECT e.""Id"", e.""MailAccountId"", e.""MessageId"", e.""Subject"", e.""Body"", e.""HtmlBody"",
@@ -326,7 +327,8 @@ namespace MailArchiver.Services.Core
                     FROM ""page"" p
                     INNER JOIN mail_archiver.""ArchivedEmails"" e ON e.""Id"" = p.""Id""
                     INNER JOIN mail_archiver.""MailAccounts"" ma ON e.""MailAccountId"" = ma.""Id""
-                    ORDER BY p.""{sortColumn}"" {(sortOrder?.ToLower() == "asc" ? "ASC" : "DESC")}";
+                    ORDER BY p.""{sortColumn}"" {(sortOrder?.ToLower() == "asc" ? "ASC" : "DESC")},
+                             p.""Id"" {(sortOrder?.ToLower() == "asc" ? "ASC" : "DESC")}";
             }
             else
             {
@@ -541,7 +543,7 @@ namespace MailArchiver.Services.Core
             };
 
             var direction = sortOrder?.ToLower() == "asc" ? "ASC" : "DESC";
-            return ($@"ORDER BY e.""{columnName}"" {direction}", columnName, isTimestampSort);
+            return ($@"ORDER BY e.""{columnName}"" {direction}, e.""Id"" {direction}", columnName, isTimestampSort);
         }
 
         private List<Npgsql.NpgsqlParameter> CloneParameters(List<Npgsql.NpgsqlParameter> parameters)
@@ -710,6 +712,10 @@ namespace MailArchiver.Services.Core
                     ? searchQuery.OrderBy(email => email.SentDate)
                     : searchQuery.OrderByDescending(email => email.SentDate)
             };
+            orderedQuery = ascending
+                ? orderedQuery.ThenBy(email => email.Id)
+                : orderedQuery.ThenByDescending(email => email.Id);
+
             var emails = await orderedQuery
                 .Include(e => e.MailAccount)
                 .Skip(skip)
@@ -1117,10 +1123,17 @@ namespace MailArchiver.Services.Core
 
         #region Archiving
 
-        public async Task<bool> ArchiveEmailAsync(MailAccount account, MimeMessage message, bool isOutgoing, string? folderName = null)
+        public async Task<bool> ArchiveEmailAsync(
+            MailAccount account,
+            MimeMessage message,
+            bool isOutgoing,
+            string? folderName = null,
+            DateTimeOffset? receivedDate = null)
         {
             // Extract date with fallback handling for malformed Date headers
             var emailDate = ExtractEmailDate(message);
+            var actualReceivedDate = ResolveReceivedDate(message, emailDate, receivedDate);
+            var convertedReceivedDate = _dateTimeHelper.ConvertToDisplayTimeZone(actualReceivedDate);
 
             // Extract raw headers for forensic/compliance purposes
                 var rawHeaders = ExtractRawHeaders(message);
@@ -1140,6 +1153,15 @@ namespace MailArchiver.Services.Core
 
             if (existingEmail != null)
             {
+                var hasChanges = false;
+
+                // Keep existing rows correct when a sync revisits mail archived by older versions.
+                if (existingEmail.ReceivedDate != convertedReceivedDate)
+                {
+                    existingEmail.ReceivedDate = convertedReceivedDate;
+                    hasChanges = true;
+                }
+
                 // E-Mail existiert bereits, prüfen ob der Ordner geändert wurde
                 var cleanFolderName = MailContentHelper.CleanText(folderName ?? string.Empty);
                 if (existingEmail.FolderName != cleanFolderName)
@@ -1147,9 +1169,14 @@ namespace MailArchiver.Services.Core
                     // Ordner hat sich geändert, aktualisieren
                     var oldFolder = existingEmail.FolderName;
                     existingEmail.FolderName = cleanFolderName;
-                    await _context.SaveChangesAsync();
+                    hasChanges = true;
                     _logger.LogInformation("Updated folder for existing email: {Subject} from '{OldFolder}' to '{NewFolder}'",
                         existingEmail.Subject, oldFolder, cleanFolderName);
+                }
+
+                if (hasChanges)
+                {
+                    await _context.SaveChangesAsync();
                 }
                 return false; // E-Mail existiert bereits
             }
@@ -1328,7 +1355,7 @@ namespace MailArchiver.Services.Core
                     CcDisplayNames = string.IsNullOrEmpty(ccDisplayNames) ? null : ccDisplayNames,
                     BccDisplayNames = string.IsNullOrEmpty(bccDisplayNames) ? null : bccDisplayNames,
                     SentDate = convertedSentDate,
-                    ReceivedDate = DateTime.UtcNow,
+                    ReceivedDate = convertedReceivedDate,
                     IsOutgoing = (isOutgoingEmail || isOutgoingFolder) && !isDraftsFolder,
                     HasAttachments = allAttachments.Any(),
                     Body = body,
@@ -1751,6 +1778,37 @@ namespace MailArchiver.Services.Core
                 message.Subject);
             
             return DateTimeOffset.MinValue;
+        }
+
+        /// <summary>
+        /// Resolves when the mailbox actually received a message. The IMAP INTERNALDATE is
+        /// authoritative; the newest Received header is the best portable fallback; the
+        /// sender supplied Date header is used only when neither mailbox value is available.
+        /// </summary>
+        private DateTimeOffset ResolveReceivedDate(
+            MimeMessage message,
+            DateTimeOffset sentDate,
+            DateTimeOffset? serverReceivedDate)
+        {
+            if (serverReceivedDate.HasValue)
+                return serverReceivedDate.Value;
+
+            try
+            {
+                foreach (var header in message.Headers.Where(header => header.Id == HeaderId.Received))
+                {
+                    var parsedDate = ExtractDateFromReceivedHeader(header.Value);
+                    if (parsedDate.HasValue)
+                        return parsedDate.Value;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Could not resolve received time from headers for email Subject={Subject}",
+                    message.Subject);
+            }
+
+            return sentDate;
         }
 
         /// <summary>

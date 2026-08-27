@@ -713,6 +713,7 @@ namespace MailArchiver.Services.Providers.Imap
                         }
 
                         var batch = uids.Skip(i).Take(_batchOptions.BatchSize).ToList();
+                        var receivedDates = await LoadReceivedDatesAsync(folder, batch);
                         _logger.LogInformation("Processing batch of {Count} messages (starting at {Start}) in folder {FolderName} via IMAP",
                             batch.Count, i, folder.FullName);
 
@@ -870,7 +871,13 @@ namespace MailArchiver.Services.Providers.Imap
                                     }
                                 }
 
-                                var isNew = await _coreService.ArchiveEmailAsync(account, message, isOutgoing, folder.FullName);
+                                receivedDates.TryGetValue(uid, out var receivedDate);
+                                var isNew = await _coreService.ArchiveEmailAsync(
+                                    account,
+                                    message,
+                                    isOutgoing,
+                                    folder.FullName,
+                                    receivedDate);
                                 if (isNew)
                                 {
                                     result.NewEmails++;
@@ -974,6 +981,32 @@ namespace MailArchiver.Services.Providers.Imap
             }
 
             return result;
+        }
+
+        private async Task<Dictionary<UniqueId, DateTimeOffset?>> LoadReceivedDatesAsync(
+            IMailFolder folder,
+            IList<UniqueId> uids)
+        {
+            if (uids.Count == 0)
+                return new Dictionary<UniqueId, DateTimeOffset?>();
+
+            try
+            {
+                var summaries = await folder.FetchAsync(
+                    uids,
+                    MessageSummaryItems.UniqueId | MessageSummaryItems.InternalDate);
+
+                return summaries.ToDictionary(
+                    summary => summary.UniqueId,
+                    summary => summary.InternalDate);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Could not read IMAP INTERNALDATE values for folder {FolderName}; falling back to message headers",
+                    folder.FullName);
+                return new Dictionary<UniqueId, DateTimeOffset?>();
+            }
         }
 
         private async Task<IList<UniqueId>> IncludeRecentInboxCandidatesAsync(

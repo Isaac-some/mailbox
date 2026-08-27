@@ -108,6 +108,15 @@ namespace MailArchiver.Services.Providers.Graph
         }
 
         /// <summary>
+        /// Returns the server supplied delivery timestamp, falling back to the sent timestamp
+        /// only when Graph did not provide receivedDateTime.
+        /// </summary>
+        public static DateTimeOffset? ResolveReceivedDate(Message message)
+        {
+            return message.ReceivedDateTime ?? message.SentDateTime;
+        }
+
+        /// <summary>
         /// Generates a deterministic MessageId using SHA-256 over From|To|Subject|Ticks.
         /// </summary>
         public static string GenerateMessageId(Message message)
@@ -151,22 +160,31 @@ namespace MailArchiver.Services.Providers.Graph
                          e.Subject == checkSubject &&
                          Math.Abs((e.SentDate - checkDate).TotalSeconds) < 2)
                     )
-                    .Select(e => new { e.Id, e.FolderName, e.Subject })
+                    .Select(e => new { e.Id, e.FolderName, e.Subject, e.ReceivedDate })
                     .FirstOrDefaultAsync();
 
                 if (existingInfo != null)
                 {
                     var cleanFolderName = MailContentHelper.CleanText(folderName);
-                    if (existingInfo.FolderName != cleanFolderName)
+                    var graphReceivedDate = ResolveReceivedDate(message);
+                    var convertedReceivedDate = graphReceivedDate.HasValue
+                        ? _dateTimeHelper.ConvertToDisplayTimeZone(graphReceivedDate.Value)
+                        : (DateTime?)null;
+                    var needsFolderUpdate = existingInfo.FolderName != cleanFolderName;
+                    var needsReceivedDateUpdate = convertedReceivedDate.HasValue
+                        && existingInfo.ReceivedDate != convertedReceivedDate.Value;
+
+                    if (needsFolderUpdate || needsReceivedDateUpdate)
                     {
                         var existingEmail = await _context.ArchivedEmails.FindAsync(existingInfo.Id);
                         if (existingEmail != null)
                         {
-                            var oldFolder = existingEmail.FolderName;
-                            existingEmail.FolderName = cleanFolderName;
+                            if (needsFolderUpdate)
+                                existingEmail.FolderName = cleanFolderName;
+                            if (needsReceivedDateUpdate)
+                                existingEmail.ReceivedDate = convertedReceivedDate!.Value;
+
                             await _context.SaveChangesAsync();
-                            _logger.LogDebug("Updated folder for existing email: {Subject} from '{OldFolder}' to '{NewFolder}'",
-                                existingEmail.Subject, oldFolder, cleanFolderName);
                             _context.ChangeTracker.Clear();
                         }
                     }
@@ -196,9 +214,11 @@ namespace MailArchiver.Services.Providers.Graph
             bool isOutgoing,
             string folderName)
         {
-            var convertedSentDate = message.SentDateTime.HasValue
-                ? _dateTimeHelper.ConvertToDisplayTimeZone(message.SentDateTime.Value)
-                : _dateTimeHelper.ConvertToDisplayTimeZone(DateTime.UtcNow);
+            var fallbackDate = DateTimeOffset.UtcNow;
+            var convertedSentDate = _dateTimeHelper.ConvertToDisplayTimeZone(
+                message.SentDateTime ?? fallbackDate);
+            var convertedReceivedDate = _dateTimeHelper.ConvertToDisplayTimeZone(
+                ResolveReceivedDate(message) ?? fallbackDate);
 
             var subject = MailContentHelper.CleanText(message.Subject ?? "(No Subject)");
             var from = MailContentHelper.CleanText(message.From?.EmailAddress?.Address ?? string.Empty);
@@ -289,7 +309,7 @@ namespace MailArchiver.Services.Providers.Graph
                 CcDisplayNames = string.IsNullOrEmpty(ccDisplayNames) ? null : ccDisplayNames,
                 BccDisplayNames = string.IsNullOrEmpty(bccDisplayNames) ? null : bccDisplayNames,
                 SentDate = convertedSentDate,
-                ReceivedDate = DateTime.UtcNow,
+                ReceivedDate = convertedReceivedDate,
                 IsOutgoing = isOutgoingEmail || isOutgoing,
                 HasAttachments = false, // Set after attachment loading
                 Body = body,

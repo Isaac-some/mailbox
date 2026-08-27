@@ -139,7 +139,7 @@ namespace MailArchiver.Services.Shared
                     ToDisplayNames = string.IsNullOrEmpty(toDisplayNames) ? null : toDisplayNames,
                     CcDisplayNames = string.IsNullOrEmpty(ccDisplayNames) ? null : ccDisplayNames,
                     BccDisplayNames = string.IsNullOrEmpty(bccDisplayNames) ? null : bccDisplayNames,
-                    SentDate = convertedSentDate, ReceivedDate = DateTime.UtcNow,
+                    SentDate = convertedSentDate, ReceivedDate = convertedSentDate,
                     IsOutgoing = DetermineIfOutgoing(message, account, targetFolder),
                     HasAttachments = allAttachments.Any(), Body = body, HtmlBody = htmlBody,
                     BodyUntruncatedText = null, BodyUntruncatedHtml = null,
