@@ -117,7 +117,7 @@ public sealed class OutboundMailController : Controller
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Outbound mail failed before completion for account {AccountId}", model.AccountId);
-            ModelState.AddModelError(string.Empty, "发送失败，邮件尚未确认发出。请检查授权信息、应用密码和网络后重试。");
+            ModelState.AddModelError(string.Empty, OutboundMailFailurePolicy.ToSafeMessage(ex));
             await PopulateOptionsAsync(model);
             return View(model);
         }

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Net;
 using MailArchiver.Models;
 using Microsoft.Extensions.Options;
 
@@ -9,6 +10,7 @@ namespace MailArchiver.Services
         Task<DeviceCodeResult> StartDeviceCodeAsync(string? clientId);
         Task<MsaPollResult> PollDeviceCodeAsync(string? clientId, string deviceCode, int currentInterval);
         Task<MsaTokenResult> RefreshAccessTokenAsync(string refreshToken, string? clientId, string? clientSecret);
+        Task<MsaTokenResult> RefreshGraphAccessTokenAsync(string refreshToken, string? clientId, string? clientSecret);
         /// <summary>
         /// Returns the configured default ClientId (or null when none is configured).
         /// </summary>
@@ -37,6 +39,27 @@ namespace MailArchiver.Services
         /// the email address the user entered (e.g. secondary aliases).
         /// </summary>
         public string? AuthorizedUsername { get; set; }
+    }
+
+    public sealed class MsaOAuthTokenException : InvalidOperationException
+    {
+        public MsaOAuthTokenException(
+            HttpStatusCode statusCode,
+            string errorCode,
+            string technicalMessage)
+            : base(technicalMessage)
+        {
+            StatusCode = statusCode;
+            ErrorCode = errorCode;
+        }
+
+        public HttpStatusCode StatusCode { get; }
+        public string ErrorCode { get; }
+
+        public bool IsAuthorizationFailure
+            => StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden
+               && ErrorCode is "invalid_grant" or "invalid_scope" or "unauthorized_client"
+                   or "interaction_required" or "consent_required";
     }
 
     public enum MsaPollStatus { Pending, SlowDown, Success }
@@ -190,6 +213,27 @@ namespace MailArchiver.Services
                 ["grant_type"] = "refresh_token",
                 ["client_id"] = resolvedClientId,
                 ["refresh_token"] = refreshToken,
+                // A refresh token can serve multiple consented resources. Always name the
+                // resource here so a token rotated by Graph is never mistaken for an IMAP token.
+                ["scope"] = string.Join(" ", MsaOAuthScopePolicy.ImapRefreshScopes),
+            };
+            if (!string.IsNullOrEmpty(clientSecret))
+                body["client_secret"] = clientSecret;
+            return await PostTokenAsync(body);
+        }
+
+        public async Task<MsaTokenResult> RefreshGraphAccessTokenAsync(
+            string refreshToken,
+            string? clientId,
+            string? clientSecret)
+        {
+            var resolvedClientId = ResolveClientId(clientId);
+            var body = new Dictionary<string, string>
+            {
+                ["grant_type"] = "refresh_token",
+                ["client_id"] = resolvedClientId,
+                ["refresh_token"] = refreshToken,
+                ["scope"] = string.Join(" ", MsaOAuthScopePolicy.GraphRefreshScopes),
             };
             if (!string.IsNullOrEmpty(clientSecret))
                 body["client_secret"] = clientSecret;
@@ -205,7 +249,11 @@ namespace MailArchiver.Services
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogError("MSA token request failed ({Status}): {Body}", response.StatusCode, json);
-                throw new InvalidOperationException($"MSA token request failed: {response.StatusCode} — {json}");
+                var (errorCode, errorDescription) = ReadOAuthError(json, response.StatusCode);
+                throw new MsaOAuthTokenException(
+                    response.StatusCode,
+                    errorCode,
+                    $"MSA token request failed ({(int)response.StatusCode}, {errorCode}): {errorDescription}");
             }
 
             using var doc = JsonDocument.Parse(json);
@@ -227,6 +275,33 @@ namespace MailArchiver.Services
             => tokenResponse.TryGetProperty("scope", out var scope)
                 ? scope.GetString() ?? string.Empty
                 : string.Empty;
+
+        private static (string ErrorCode, string Description) ReadOAuthError(
+            string responseBody,
+            HttpStatusCode statusCode)
+        {
+            try
+            {
+                using var document = JsonDocument.Parse(responseBody);
+                var root = document.RootElement;
+                var code = root.TryGetProperty("error", out var error)
+                    ? error.GetString()
+                    : null;
+                var description = root.TryGetProperty("error_description", out var detail)
+                    ? detail.GetString()
+                    : null;
+                return (
+                    string.IsNullOrWhiteSpace(code) ? $"OAUTH_HTTP_{(int)statusCode}" : code,
+                    Truncate(description ?? responseBody));
+            }
+            catch (JsonException)
+            {
+                return ($"OAUTH_HTTP_{(int)statusCode}", Truncate(responseBody));
+            }
+        }
+
+        private static string Truncate(string value)
+            => value.Length <= 500 ? value : value[..500];
 
         // Extracts the authorized account's primary login name from the id_token in a token
         // response. Best-effort: returns null when no id_token is present or parsing fails.

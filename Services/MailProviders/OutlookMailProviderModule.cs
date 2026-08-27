@@ -1,9 +1,7 @@
 using MailAddress = System.Net.Mail.MailAddress;
 using MailArchiver.Models;
 using MailKit.Net.Imap;
-using MailKit.Net.Smtp;
 using MailKit.Security;
-using Microsoft.Extensions.Options;
 using MimeKit;
 
 namespace MailArchiver.Services.MailProviders;
@@ -16,17 +14,14 @@ public sealed class OutlookMailProviderModule : IMailProviderModule
     };
 
     private readonly IMsaTokenManager _tokenManager;
-    private readonly IOutlookRestMailSender _restMailSender;
-    private readonly OutboundMailOptions _outboundOptions;
+    private readonly IOutlookGraphMailSender _graphMailSender;
 
     public OutlookMailProviderModule(
         IMsaTokenManager tokenManager,
-        IOutlookRestMailSender restMailSender,
-        IOptions<OutboundMailOptions> outboundOptions)
+        IOutlookGraphMailSender graphMailSender)
     {
         _tokenManager = tokenManager;
-        _restMailSender = restMailSender;
-        _outboundOptions = outboundOptions.Value;
+        _graphMailSender = graphMailSender;
     }
 
     public MailProviderKind Kind => MailProviderKind.Outlook;
@@ -105,47 +100,21 @@ public sealed class OutlookMailProviderModule : IMailProviderModule
         if (!Inspect(account).CanSend)
             throw new InvalidOperationException("Outlook 账号没有可用的发件授权。");
 
-        using var client = new SmtpClient();
-        await client.ConnectAsync(
-            _outboundOptions.SmtpHost,
-            _outboundOptions.SmtpPort,
-            SecureSocketOptions.StartTls,
-            cancellationToken);
-        var token = await _tokenManager.GetAccessTokenAsync(account, cancellationToken: cancellationToken);
+        var token = await _tokenManager.GetGraphAccessTokenAsync(
+            account, cancellationToken: cancellationToken);
         try
         {
-            await client.AuthenticateAsync(
-                new SaslMechanismOAuth2(token.Username, token.AccessToken), cancellationToken);
+            await _graphMailSender.SendAsync(message, token.AccessToken, cancellationToken);
         }
-        catch (AuthenticationException ex) when (IsSmtpClientAuthenticationDisabled(ex))
+        catch (OutlookGraphMailException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Unauthorized)
         {
-            await _restMailSender.SendAsync(account, message, token.AccessToken, cancellationToken);
-            return new ProviderSendResult(SentCopySavedByProvider: true);
-        }
-        catch (AuthenticationException)
-        {
-            token = await _tokenManager.GetAccessTokenAsync(
+            token = await _tokenManager.GetGraphAccessTokenAsync(
                 account, forceRefresh: true, cancellationToken: cancellationToken);
-            try
-            {
-                await client.AuthenticateAsync(
-                    new SaslMechanismOAuth2(token.Username, token.AccessToken), cancellationToken);
-            }
-            catch (AuthenticationException ex) when (IsSmtpClientAuthenticationDisabled(ex))
-            {
-                await _restMailSender.SendAsync(account, message, token.AccessToken, cancellationToken);
-                return new ProviderSendResult(SentCopySavedByProvider: true);
-            }
+            await _graphMailSender.SendAsync(message, token.AccessToken, cancellationToken);
         }
 
-        await client.SendAsync(message, cancellationToken);
-        await client.DisconnectAsync(true, cancellationToken);
-        return new ProviderSendResult(SentCopySavedByProvider: false);
+        return new ProviderSendResult(SentCopySavedByProvider: true);
     }
-
-    internal static bool IsSmtpClientAuthenticationDisabled(AuthenticationException exception)
-        => exception.Message.Contains("SmtpClientAuthentication is disabled", StringComparison.OrdinalIgnoreCase)
-           || exception.Message.Contains("5.7.139", StringComparison.OrdinalIgnoreCase);
 
     private static void EnsureIdentity(MailAccount account)
     {

@@ -1,7 +1,6 @@
 using MailArchiver.Models;
 using MailArchiver.Services;
 using MailArchiver.Services.MailProviders;
-using Microsoft.Extensions.Options;
 using MimeKit;
 
 namespace MailArchiver.Tests.Services;
@@ -57,13 +56,13 @@ public class OutboundMailServiceTests
 
         var yahooModule = new YahooMailProviderModule(null!, null!);
         var outlookModule = new OutlookMailProviderModule(
-            null!, null!, Options.Create(new OutboundMailOptions()));
+            null!, null!);
 
         Assert.True(yahooModule.Inspect(yahoo).CanSend);
         Assert.True(outlookModule.Inspect(importedOutlook).CanSend);
 
         importedOutlook.OAuthGrantedScopes = MsaOAuthScopePolicy.Imap;
-        Assert.False(outlookModule.Inspect(importedOutlook).CanSend);
+        Assert.True(outlookModule.Inspect(importedOutlook).CanSend);
     }
 
     [Fact]

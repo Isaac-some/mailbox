@@ -1,7 +1,6 @@
 using MailArchiver.Models;
 using MailArchiver.Services;
 using MailArchiver.Services.MailProviders;
-using Microsoft.Extensions.Options;
 
 namespace MailArchiver.Tests.Services;
 
@@ -12,7 +11,7 @@ public class MailProviderRegistryTests
             new GmailMailProviderModule(null!, null!),
             new YahooMailProviderModule(null!, null!),
             new GmxMailProviderModule(null!, null!),
-            new OutlookMailProviderModule(null!, null!, Options.Create(new OutboundMailOptions()))
+            new OutlookMailProviderModule(null!, null!)
         ]);
 
     [Theory]
@@ -94,6 +93,6 @@ public class MailProviderRegistryTests
         Assert.True(registry.For(gmail).Inspect(gmail).CanSend);
         Assert.False(registry.For(yahoo).Inspect(yahoo).CanSend);
         Assert.False(registry.For(gmx).Inspect(gmx).CanSend);
-        Assert.False(registry.For(outlook).Inspect(outlook).CanSend);
+        Assert.True(registry.For(outlook).Inspect(outlook).CanSend);
     }
 }

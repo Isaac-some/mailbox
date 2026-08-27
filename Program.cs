@@ -181,6 +181,7 @@ builder.Services.AddSingleton<ICredentialEncryptionService, CredentialEncryption
 // Register MSA OAuth options and service for personal Microsoft accounts
 builder.Services.Configure<MsaOAuthOptions>(builder.Configuration.GetSection(MsaOAuthOptions.SectionName));
 builder.Services.AddScoped<MailArchiver.Services.IMsaOAuthService, MailArchiver.Services.MsaOAuthService>();
+builder.Services.AddSingleton<MailArchiver.Services.IMsaGraphTokenCache, MailArchiver.Services.MsaGraphTokenCache>();
 builder.Services.AddScoped<MailArchiver.Services.IMsaTokenManager, MailArchiver.Services.MsaTokenManager>();
 builder.Services.AddScoped<MailArchiver.Services.IExternalOAuthTokenManager, MailArchiver.Services.ExternalOAuthTokenManager>();
 builder.Services.AddScoped<MailArchiver.Services.MailProviders.IMailProviderModule, MailArchiver.Services.MailProviders.GmailMailProviderModule>();
@@ -189,7 +190,7 @@ builder.Services.AddScoped<MailArchiver.Services.MailProviders.IMailProviderModu
 builder.Services.AddScoped<MailArchiver.Services.MailProviders.IMailProviderModule, MailArchiver.Services.MailProviders.OutlookMailProviderModule>();
 builder.Services.AddScoped<MailArchiver.Services.MailProviders.IMailProviderRegistry, MailArchiver.Services.MailProviders.MailProviderRegistry>();
 builder.Services.Configure<OutboundMailOptions>(builder.Configuration.GetSection(OutboundMailOptions.SectionName));
-builder.Services.AddScoped<MailArchiver.Services.IOutlookRestMailSender, MailArchiver.Services.OutlookRestMailSender>();
+builder.Services.AddScoped<MailArchiver.Services.IOutlookGraphMailSender, MailArchiver.Services.OutlookGraphMailSender>();
 builder.Services.AddScoped<MailArchiver.Services.IOutboundMailService, MailArchiver.Services.OutboundMailService>();
 builder.Services.AddHostedService<MailArchiver.Services.OutboundMailTaskWorker>();
 

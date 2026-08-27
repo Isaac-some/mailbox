@@ -111,7 +111,7 @@ public sealed class OutboundMailTaskWorker : BackgroundService
         catch (Exception ex)
         {
             claimedItem.Status = OutboundMailTaskItemStatus.Failed;
-            claimedItem.ErrorMessage = ToSafeError(ex);
+            claimedItem.ErrorMessage = OutboundMailFailurePolicy.ToSafeMessage(ex);
             claimedItem.CompletedAtUtc = DateTime.UtcNow;
             _logger.LogWarning(ex, "Outbound task item {ItemId} failed for account {AccountId}", claimedItem.Id, claimedItem.MailAccountId);
         }
@@ -139,14 +139,4 @@ public sealed class OutboundMailTaskWorker : BackgroundService
         await context.SaveChangesAsync(cancellationToken);
     }
 
-    private static string ToSafeError(Exception exception)
-    {
-        var message = exception switch
-        {
-            MailKit.Security.AuthenticationException => "发件认证失败，请检查 Refresh Token 是否包含 SMTP.Send 权限。",
-            TimeoutException => "连接发件服务器超时。",
-            _ => "发送失败，邮件尚未确认发出。请检查账号授权和网络后重试。"
-        };
-        return message;
-    }
 }

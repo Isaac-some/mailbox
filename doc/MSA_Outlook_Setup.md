@@ -42,7 +42,7 @@ Use this option if your Mail Archiver instance has a default Client ID configure
 6. The device-code authorization page opens automatically. A short code (e.g., `ABCD-EFGH`) is displayed along with a link to `https://microsoft.com/devicelogin` (or the verification URL shown).
 7. On **any device** with a browser, open that URL and sign in with your personal Microsoft account.
 8. Enter the code from step 6.
-9. A consent screen appears, showing **"Mail-Archiver"** requesting IMAP access. Review and approve.
+9. A consent screen appears, showing **"Mail-Archiver"** requesting IMAP receiving and Microsoft Graph `Mail.Send` access. Review and approve.
 10. The Mail Archiver page automatically detects success and redirects to the account edit view.
 11. Done — synchronization starts automatically according to the account settings.
 
@@ -79,7 +79,7 @@ Use this option if you do not want to use the shared default Client ID (e.g., fo
 2. At the bottom, find **Allow public client flows** and set it to **Yes**.
 3. Click **Save**.
 
-> ℹ️ No client secret, no redirect URI, and no API permissions need to be configured manually — the Device Code Flow uses delegated permissions that are requested at runtime via the `IMAP.AccessAsUser.All` scope.
+> ℹ️ No client secret or redirect URI is required. The Device Code Flow requests delegated `IMAP.AccessAsUser.All` and Microsoft Graph `Mail.Send` permissions at runtime.
 
 ### 📧 Configure Mail Archiver
 
@@ -103,7 +103,7 @@ After the initial authorization, Mail Archiver receives:
 - An **access token** (short-lived, ~1 hour)
 - A **refresh token** (long-lived, used to obtain new access tokens automatically)
 
-Mail Archiver automatically refreshes the access token before each sync run. You do not need to re-authorize unless the refresh token expires or is revoked.
+Mail Archiver uses the same refresh token to acquire separate access tokens: an Outlook token for IMAP receiving and a Microsoft Graph token for sending. You do not need to re-authorize unless the refresh token expires, is revoked, or lacks `Mail.Send` consent.
 
 ### Revoking Access
 
