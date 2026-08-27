@@ -73,7 +73,7 @@
                        class="mail-item @(isSelected ? "mail-item--selected" : "")">
                         <div class="mail-item__topline">
                             <strong>@(string.IsNullOrWhiteSpace(email.From) ? "未知发件人" : email.From)</strong>
-                            <time class="utc-timestamp" data-utc-time="@email.ReceivedDate.ToString("yyyy-MM-ddTHH:mm:ss")">@email.ReceivedDate.ToString("MM-dd HH:mm")</time>
+                            <time datetime="@email.ReceivedDate.ToString("yyyy-MM-ddTHH:mm:ss")">@email.ReceivedDate.ToString("MM-dd HH:mm")</time>
                         </div>
                         <div class="mail-item__subject">@(string.IsNullOrWhiteSpace(email.Subject) ? "(无主题)" : email.Subject)</div>
                         <div class="mail-item__preview">@((email.Body ?? string.Empty).Replace("\r", " ").Replace("\n", " ").Trim())</div>
@@ -97,7 +97,7 @@
                     <h2>@(string.IsNullOrWhiteSpace(selectedEmail.Subject) ? "(无主题)" : selectedEmail.Subject)</h2>
                     <p>
                         <strong>@selectedEmail.From</strong>
-                        <span>收件于 <time class="utc-timestamp" data-utc-time="@selectedEmail.ReceivedDate.ToString("yyyy-MM-ddTHH:mm:ss")">@selectedEmail.ReceivedDate.ToString("yyyy-MM-dd HH:mm")</time></span>
+                        <span>收件于 <time datetime="@selectedEmail.ReceivedDate.ToString("yyyy-MM-ddTHH:mm:ss")">@selectedEmail.ReceivedDate.ToString("yyyy-MM-dd HH:mm")</time></span>
                     </p>
                     <a asp-controller="Emails" asp-action="Details" asp-route-id="@selectedEmail.Id" class="mail-viewer__details">
                         打开完整邮件 <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i>

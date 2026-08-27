@@ -68,8 +68,8 @@ public class LocalAppPackagingPolicyTests
     {
         var source = ReadBundledFile("Info.plist");
 
-        Assert.Contains("<string>1.0.13</string>", source, StringComparison.Ordinal);
-        Assert.Contains("<string>14</string>", source, StringComparison.Ordinal);
+        Assert.Contains("<string>1.0.14</string>", source, StringComparison.Ordinal);
+        Assert.Contains("<string>15</string>", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -77,8 +77,8 @@ public class LocalAppPackagingPolicyTests
     {
         var source = ReadBundledFile("KouziMailAssistant.Windows.csproj");
 
-        Assert.Contains("<Version>1.0.13</Version>", source, StringComparison.Ordinal);
-        Assert.Contains("<FileVersion>1.0.13.0</FileVersion>", source, StringComparison.Ordinal);
+        Assert.Contains("<Version>1.0.14</Version>", source, StringComparison.Ordinal);
+        Assert.Contains("<FileVersion>1.0.14.0</FileVersion>", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -255,6 +255,17 @@ public class LocalAppPackagingPolicyTests
         Assert.Contains("mailbox-sync-scan", page, StringComparison.Ordinal);
         Assert.Contains("X-Requested-With", controller, StringComparison.Ordinal);
         Assert.Contains("return Json(new { state = queueStatus.State.ToString() })", controller, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Mailbox_received_dates_are_not_reinterpreted_as_utc_in_the_browser()
+    {
+        var page = ReadBundledFile("EmailsIndex.cshtml");
+
+        Assert.DoesNotContain("class=\"utc-timestamp\"", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("data-utc-time=", page, StringComparison.Ordinal);
+        Assert.Contains("@email.ReceivedDate.ToString(\"MM-dd HH:mm\")", page, StringComparison.Ordinal);
+        Assert.Contains("@selectedEmail.ReceivedDate.ToString(\"yyyy-MM-dd HH:mm\")", page, StringComparison.Ordinal);
     }
 
     [Fact]
