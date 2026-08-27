@@ -709,6 +709,13 @@ using (var scope = app.Services.CreateScope())
             context.Database.ExecuteSqlRaw("CREATE EXTENSION IF NOT EXISTS citext;");
         }
 
+        var receivedDateRepairLogger = services.GetRequiredService<ILogger<Program>>();
+        var dateTimeHelper = services.GetRequiredService<MailArchiver.Utilities.DateTimeHelper>();
+        await MailArchiver.Data.ArchivedEmailReceivedDateRepair.ApplyAsync(
+            context,
+            dateTimeHelper,
+            receivedDateRepairLogger);
+
         var normalizedAccounts = await context.MailAccounts
             .Where(account => account.Provider == ProviderType.IMAP)
             .ToListAsync();

@@ -4,8 +4,11 @@ using MailArchiver.Tests.Infrastructure;
 using MailArchiver.Services.Providers.Graph;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Microsoft.Graph.Models;
 using MimeKit;
+using MailArchiver.Utilities;
 
 namespace MailArchiver.Tests.Services;
 
@@ -164,6 +167,60 @@ public class EmailReceivedDateTests
         Assert.Equal(receivedDate, GraphMailArchiver.ResolveReceivedDate(message));
     }
 
+    [Fact]
+    public async Task Historical_repair_restores_received_headers_once_and_falls_back_to_sent_date()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<MailArchiverDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        await using var context = new MailArchiverDbContext(options);
+        await context.Database.EnsureCreatedAsync();
+
+        var account = new MailAccount
+        {
+            Name = "test",
+            EmailAddress = "owner@example.com",
+            Provider = ProviderType.IMAP,
+            IsEnabled = true
+        };
+        context.MailAccounts.Add(account);
+        await context.SaveChangesAsync();
+
+        var sentDate = new DateTime(2024, 5, 1, 10, 0, 0);
+        context.ArchivedEmails.AddRange(
+            CreateArchivedEmail(
+                account.Id,
+                "repair-header@example.com",
+                sentDate,
+                "Received: from mx.example.com; Wed, 1 May 2024 12:30:00 +0000 (UTC)\r\n"),
+            CreateArchivedEmail(account.Id, "repair-fallback@example.com", sentDate, null));
+        await context.SaveChangesAsync();
+
+        var helper = new DateTimeHelper(Options.Create(
+            new TimeZoneOptions { DisplayTimeZoneId = "Europe/Berlin" }));
+        await ArchivedEmailReceivedDateRepair.ApplyAsync(
+            context,
+            helper,
+            NullLogger.Instance);
+
+        var repaired = await context.ArchivedEmails.OrderBy(email => email.Id).ToListAsync();
+        Assert.Equal(new DateTime(2024, 5, 1, 14, 30, 0), repaired[0].ReceivedDate);
+        Assert.Equal(sentDate, repaired[1].ReceivedDate);
+
+        repaired[0].ReceivedDate = new DateTime(2030, 1, 1);
+        await context.SaveChangesAsync();
+        await ArchivedEmailReceivedDateRepair.ApplyAsync(
+            context,
+            helper,
+            NullLogger.Instance);
+
+        Assert.Equal(
+            new DateTime(2030, 1, 1),
+            (await context.ArchivedEmails.FindAsync(repaired[0].Id))!.ReceivedDate);
+    }
+
     private static MimeMessage CreateMessage(
         string messageId,
         string subject,
@@ -180,5 +237,29 @@ public class EmailReceivedDateTests
         message.From.Add(MailboxAddress.Parse("sender@example.com"));
         message.To.Add(MailboxAddress.Parse(recipient));
         return message;
+    }
+
+    private static ArchivedEmail CreateArchivedEmail(
+        int accountId,
+        string messageId,
+        DateTime sentDate,
+        string? rawHeaders)
+    {
+        return new ArchivedEmail
+        {
+            MailAccountId = accountId,
+            MessageId = messageId,
+            Subject = "historical",
+            Body = "body",
+            HtmlBody = string.Empty,
+            From = "sender@example.com",
+            To = "owner@example.com",
+            Cc = string.Empty,
+            Bcc = string.Empty,
+            SentDate = sentDate,
+            ReceivedDate = new DateTime(2026, 8, 27, 10, 0, 0),
+            FolderName = "INBOX",
+            RawHeaders = rawHeaders
+        };
     }
 }
