@@ -2,7 +2,7 @@ using MailArchiver.Models;
 
 namespace MailArchiver.Services.MailProviders;
 
-public sealed class GmailMailProviderModule : PasswordAndOAuthMailProviderModule
+public class GmailMailProviderModule : PasswordAndOAuthMailProviderModule
 {
     private static readonly ExternalOAuthSettings OAuthSettings = new(
         "Gmail",
@@ -24,4 +24,17 @@ public sealed class GmailMailProviderModule : PasswordAndOAuthMailProviderModule
 
     public override bool SupportsAddress(string emailAddress)
         => DomainOf(emailAddress) is "gmail.com" or "googlemail.com";
+
+    public override string NormalizeAppPassword(string appPassword)
+    {
+        ArgumentNullException.ThrowIfNull(appPassword);
+        var normalized = string.Concat(appPassword.Where(character => !char.IsWhiteSpace(character)));
+        if (normalized.Length != 16)
+        {
+            throw new InvalidOperationException(
+                "Gmail 应用专用密码去除空白后必须恰好是 16 位；请使用 Google 生成的应用专用密码，不是 Google 登录密码。");
+        }
+
+        return normalized;
+    }
 }

@@ -15,6 +15,8 @@
     var emailDeletionSettingsDisplay = Model.Provider == ProviderType.IMPORT ? "none" : "block";
     var tenantImportControlsDisplay = Model.Provider == ProviderType.M365 && Model.ImportEntireTenant ? "block" : "none";
     var tenantImportSettingsDisplay = Model.Provider == ProviderType.M365 && Model.ImportEntireTenant ? "block" : "none";
+    var enteredDomain = Model.EmailAddress?.Split('@').LastOrDefault()?.Trim().ToLowerInvariant();
+    var isGmailAddress = enteredDomain is "gmail.com" or "googlemail.com";
 }
 
 <div class="container">
@@ -133,13 +135,14 @@
                         </div>
 
                         <div class="mb-3">
-                            <label asp-for="Password" class="form-label">邮箱授权码 / 应用专用密码</label>
+                            <label asp-for="Password" class="form-label" id="appPasswordLabel">@(isGmailAddress ? "Google 应用专用密码，不是 Google 登录密码" : "邮箱授权码 / 应用专用密码")</label>
                             <div class="input-group">
-                                <input asp-for="Password" class="form-control" type="password" id="PasswordInput" />
+                                <input asp-for="Password" class="form-control" type="password" id="PasswordInput" placeholder="@(isGmailAddress ? "xxxx xxxx xxxx xxxx" : null)" />
                                 <button type="button" class="btn btn-outline-secondary password-toggle" data-target="PasswordInput" aria-label="@Localizer["ShowPassword"]">
                                     <i class="bi bi-eye"></i>
                                 </button>
                             </div>
+                            <div class="form-text" id="gmailAppPasswordHelp" style="display: @(isGmailAddress ? "block" : "none");">Google 应用专用密码，不是 Google 登录密码。可直接粘贴带空格的 16 位密码，程序会自动删除所有空白。</div>
                             <span asp-validation-for="Password" class="text-danger"></span>
                         </div>
 
@@ -148,7 +151,7 @@
                                 <i class="bi bi-key me-1"></i> 使用 OAuth（高级）
                             </summary>
                             <div class="form-advanced-body">
-                        <div class="form-text mb-3">Gmail 需要 Client ID 和 Refresh Token；Yahoo 还需要 Client Secret 和 Redirect URI。</div>
+                        <div class="form-text mb-3">Gmail 需要 Client ID 和 Refresh Token；Yahoo 还需要 Client Secret 和 Redirect URI。Gmail 的 Token 必须包含支持 IMAP/SMTP 的 <code>https://mail.google.com/</code> 授权范围，仅有 <code>gmail.readonly</code> 不能用于收发件。</div>
                         <div class="mb-3">
                             <label asp-for="ExternalOAuthClientId" class="form-label">OAuth Client ID</label>
                             <input asp-for="ExternalOAuthClientId" class="form-control" autocomplete="off" />
@@ -424,6 +427,9 @@
             const providerDetectionText = document.getElementById('providerDetectionText');
             const providerAuthHeading = document.getElementById('providerAuthHeading');
             const externalOAuthSettings = document.getElementById('externalOAuthSettings');
+            const appPasswordLabel = document.getElementById('appPasswordLabel');
+            const passwordInput = document.getElementById('PasswordInput');
+            const gmailAppPasswordHelp = document.getElementById('gmailAppPasswordHelp');
             const existingAccountSuggestion = document.getElementById('existingAccountSuggestion');
             const existingAccountSelect = document.getElementById('existingAccountSelect');
             const copyCredentialsBtn = document.getElementById('copyCredentialsBtn');
@@ -469,8 +475,17 @@
             }
 
             function applyLocalProviderDetection() {
-                if (!isLocalApp) return;
                 const detected = detectLocalProvider(emailAddressInput.value.trim());
+                const isGmail = detected && detected.name === 'Gmail';
+                if (appPasswordLabel) {
+                    appPasswordLabel.textContent = isGmail
+                        ? 'Google 应用专用密码，不是 Google 登录密码'
+                        : '邮箱授权码 / 应用专用密码';
+                }
+                if (passwordInput) passwordInput.placeholder = isGmail ? 'xxxx xxxx xxxx xxxx' : '';
+                if (gmailAppPasswordHelp) gmailAppPasswordHelp.style.display = isGmail ? 'block' : 'none';
+
+                if (!isLocalApp) return;
                 const hasCompleteAddress = emailAddressInput.value.includes(String.fromCharCode(64));
 
                 if (!detected || !detected.name) {

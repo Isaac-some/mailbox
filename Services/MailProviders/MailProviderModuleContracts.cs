@@ -25,6 +25,11 @@ public interface IMailProviderModule
     string DisplayName { get; }
 
     bool SupportsAddress(string emailAddress);
+    string NormalizeAppPassword(string appPassword)
+    {
+        ArgumentNullException.ThrowIfNull(appPassword);
+        return appPassword;
+    }
     ImapEndpoint GetIncomingEndpoint(MailAccount account);
     void PrepareAccount(MailAccount account);
     MailAccountCapabilities Inspect(MailAccount account);

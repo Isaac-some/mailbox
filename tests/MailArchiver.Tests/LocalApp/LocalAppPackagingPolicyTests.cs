@@ -68,8 +68,8 @@ public class LocalAppPackagingPolicyTests
     {
         var source = ReadBundledFile("Info.plist");
 
-        Assert.Contains("<string>1.0.14</string>", source, StringComparison.Ordinal);
-        Assert.Contains("<string>15</string>", source, StringComparison.Ordinal);
+        Assert.Contains("<string>1.0.15</string>", source, StringComparison.Ordinal);
+        Assert.Contains("<string>16</string>", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -77,8 +77,8 @@ public class LocalAppPackagingPolicyTests
     {
         var source = ReadBundledFile("KouziMailAssistant.Windows.csproj");
 
-        Assert.Contains("<Version>1.0.14</Version>", source, StringComparison.Ordinal);
-        Assert.Contains("<FileVersion>1.0.14.0</FileVersion>", source, StringComparison.Ordinal);
+        Assert.Contains("<Version>1.0.15</Version>", source, StringComparison.Ordinal);
+        Assert.Contains("<FileVersion>1.0.15.0</FileVersion>", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -121,6 +121,34 @@ public class LocalAppPackagingPolicyTests
         Assert.Contains("ParseAccountImportFileAsync(file, model)", controller, StringComparison.Ordinal);
         Assert.Contains("accept=\".csv,text/csv\"", outboundPage, StringComparison.Ordinal);
         Assert.DoesNotContain("multiple required", outboundPage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Gmail_app_password_rule_is_applied_at_every_input_boundary_with_clear_help()
+    {
+        var controller = ReadBundledFile("MailAccountsController.cs");
+        var createAction = controller[
+            controller.IndexOf("public async Task<IActionResult> Create(CreateMailAccountViewModel model)", StringComparison.Ordinal)
+            ..controller.IndexOf("private async Task<IActionResult> CreateM365TenantAccountsAsync", StringComparison.Ordinal)];
+        var editAction = controller[
+            controller.IndexOf("public async Task<IActionResult> Edit(int id, MailAccountViewModel model", StringComparison.Ordinal)
+            ..controller.IndexOf("// GET: MailAccounts/Delete/5", StringComparison.Ordinal)];
+        var importAction = controller[
+            controller.IndexOf("public async Task<IActionResult> ImportCsv", StringComparison.Ordinal)
+            ..controller.IndexOf("private async Task<AccountImportFileParseResult>", StringComparison.Ordinal)];
+
+        Assert.Contains("mailProviderModule.NormalizeAppPassword(model.Password)", createAction, StringComparison.Ordinal);
+        Assert.Contains("mailProviderModule.NormalizeAppPassword(model.Password)", editAction, StringComparison.Ordinal);
+        Assert.Contains("rowModule.NormalizeAppPassword(row.Password)", importAction, StringComparison.Ordinal);
+
+        var createPage = ReadBundledFile("MailAccountsCreate.cshtml");
+        var editPage = ReadBundledFile("MailAccountsEdit.cshtml");
+        var importPage = ReadBundledFile("MailAccountsImportCsv.cshtml");
+        Assert.Contains("Google 应用专用密码，不是 Google 登录密码", createPage, StringComparison.Ordinal);
+        Assert.Contains("xxxx xxxx xxxx xxxx", createPage, StringComparison.Ordinal);
+        Assert.Contains("Google 应用专用密码，不是 Google 登录密码", editPage, StringComparison.Ordinal);
+        Assert.Contains("Gmail 密码可带空格", importPage, StringComparison.Ordinal);
+        Assert.Contains("carol@gmail.com\\tabcd efgh ijkl mnop", controller, StringComparison.Ordinal);
     }
 
     [Fact]

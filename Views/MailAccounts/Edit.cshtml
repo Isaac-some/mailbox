@@ -6,6 +6,8 @@
     var microsoft365SettingsDisplay = Model.Provider == ProviderType.M365 ? "block" : "none";
     var emailDeletionSettingsDisplay = Model.Provider == ProviderType.IMPORT ? "none" : "block";
     var isLocalApp = string.Equals(Environment.GetEnvironmentVariable("KOUZI_LOCAL_APP"), "1", StringComparison.Ordinal);
+    var editDomain = Model.EmailAddress?.Split('@').LastOrDefault()?.Trim().ToLowerInvariant();
+    var isGmailAccount = Model.MailProviderKind == MailProviderKind.Gmail || editDomain is "gmail.com" or "googlemail.com";
 }
 <div class="container">
     <h1>@Localizer["EditEmailAccount"]</h1>
@@ -81,17 +83,17 @@
                             <span asp-validation-for="Username" class="text-danger"></span>
                         </div>
                         <div class="mb-3">
-                            <label asp-for="Password" class="form-label">@Localizer["Password"]</label>
+                            <label asp-for="Password" class="form-label">@(isGmailAccount ? "Google 应用专用密码，不是 Google 登录密码" : Localizer["Password"].Value)</label>
                             <div class="input-group">
-                                <input asp-for="Password" class="form-control" type="password" id="PasswordInput" placeholder="@Localizer["LeaveEmptyToKeepCurrent"]" />
+                                <input asp-for="Password" class="form-control" type="password" id="PasswordInput" placeholder="@(isGmailAccount ? "xxxx xxxx xxxx xxxx" : Localizer["LeaveEmptyToKeepCurrent"].Value)" />
                                 <button type="button" class="btn btn-outline-secondary password-toggle" data-target="PasswordInput" aria-label="@Localizer["ShowPassword"]">
                                     <i class="bi bi-eye"></i>
                                 </button>
                             </div>
-                            <div class="form-text">@Localizer["LeaveEmptyToKeepCurrent"]</div>
+                            <div class="form-text">@(isGmailAccount ? "留空保留现有密码；粘贴新密码时可带空格，程序会自动删除所有空白，去除后必须恰好 16 位。" : Localizer["LeaveEmptyToKeepCurrent"].Value)</div>
                             <span asp-validation-for="Password" class="text-danger"></span>
                         </div>
-                        <div class="alert alert-light border">如需改用或更换 OAuth：Gmail 填 Client ID、Refresh Token；Yahoo 还要填 Client Secret、Redirect URI。敏感项留空则保留现有凭据。</div>
+                        <div class="alert alert-light border">如需改用或更换 OAuth：Gmail 填 Client ID、Refresh Token；Yahoo 还要填 Client Secret、Redirect URI。Gmail 必须使用支持 IMAP/SMTP 的 <code>https://mail.google.com/</code> 授权范围，仅有 <code>gmail.readonly</code> 不能用于收发件。敏感项留空则保留现有凭据。</div>
                         <div class="mb-3">
                             <label asp-for="ExternalOAuthClientId" class="form-label">OAuth Client ID</label>
                             <input asp-for="ExternalOAuthClientId" class="form-control" autocomplete="off" />

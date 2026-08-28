@@ -20,6 +20,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\MailArchiver.csproj" />
     <Compile Include="..\MailArchiver.Tests\Services\CsvImportHeaderPolicyTests.cs" Link="CsvImportHeaderPolicyTests.cs" />
+    <Compile Include="..\MailArchiver.Tests\Services\GmailAppPasswordPolicyTests.cs" Link="GmailAppPasswordPolicyTests.cs" />
     <Compile Include="..\MailArchiver.Tests\Services\MailAccountNamePolicyTests.cs" Link="MailAccountNamePolicyTests.cs" />
     <Compile Include="..\MailArchiver.Tests\Services\MailSyncSchedulePolicyTests.cs" Link="MailSyncSchedulePolicyTests.cs" />
     <Compile Include="..\MailArchiver.Tests\Services\MailSyncTriggerTests.cs" Link="MailSyncTriggerTests.cs" />
@@ -33,11 +34,21 @@
     <None Include="..\..\appsettings.Local.json" Link="appsettings.Local.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\local-app\KouziMailAssistant.swift" Link="KouziMailAssistant.swift" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\local-app\Info.plist" Link="Info.plist" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\local-app\build-dmg.sh" Link="build-dmg.sh" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\windows-app\KouziMailAssistant.Windows.csproj" Link="KouziMailAssistant.Windows.csproj" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Views\MailAccounts\Delete.cshtml" Link="Delete.cshtml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Views\MailAccounts\Index.cshtml" Link="MailAccountsIndex.cshtml" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\Views\MailAccounts\Create.cshtml" Link="MailAccountsCreate.cshtml" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\Views\MailAccounts\Edit.cshtml" Link="MailAccountsEdit.cshtml" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\Views\MailAccounts\ImportCsv.cshtml" Link="MailAccountsImportCsv.cshtml" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\ViewModels\BulkImportImapViewModel.cs" Link="BulkImportImapViewModel.cs" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\ViewModels\ComposeMailViewModel.cs" Link="ComposeMailViewModel.cs" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\Views\OutboundMailTasks\Index.cshtml" Link="OutboundMailTasksIndex.cshtml" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\Views\OutboundMail\Index.cshtml" Link="OutboundMailIndex.cshtml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Views\Emails\Index.cshtml" Link="EmailsIndex.cshtml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Views\LocalMaintenance\Index.cshtml" Link="LocalMaintenanceIndex.cshtml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Controllers\MailAccountsController.cs" Link="MailAccountsController.cs" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\Controllers\OutboundMailController.cs" Link="OutboundMailController.cs" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Controllers\EmailsController.cs" Link="EmailsController.cs" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Services\Core\EmailCoreService.cs" Link="EmailCoreService.cs" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\wwwroot\css\site.css" Link="site.css" CopyToOutputDirectory="PreserveNewest" />

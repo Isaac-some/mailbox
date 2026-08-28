@@ -64,7 +64,7 @@
                     <div class="alert alert-light border mb-3">
                         <strong>支持 Gmail、Yahoo、GMX 的 CSV/TXT，以及 Outlook TXT。</strong>
                         Outlook 可直接上传四列 Tab 分隔的 TXT：<code>邮箱　密码　Client ID　Refresh Token</code>；微软密码不会保存，收发件使用 OAuth Token。
-                        Gmail/Yahoo/GMX 密码模式使用两列：<code>邮箱、SMTP授权码</code>。Gmail OAuth 使用 <code>邮箱、Client ID、Refresh Token</code>；Yahoo OAuth 还必须增加 <code>Client Secret、Redirect URI</code>。TXT 使用相同列顺序并以 Tab 分隔。GMX 官方不支持 OAuth。
+                        Gmail/Yahoo/GMX 密码模式使用两列：<code>邮箱、SMTP授权码</code>。Gmail 密码可带空格，程序会自动删除所有空白，删除后必须恰好 16 位。Gmail OAuth 使用 <code>邮箱、Client ID、Refresh Token</code>；Yahoo OAuth 还必须增加 <code>Client Secret、Redirect URI</code>。TXT 使用相同列顺序并以 Tab 分隔。GMX 官方不支持 OAuth。
                         姓名会自动取邮箱 <code>@@</code> 前去掉数字后的内容，并根据邮箱域名设置收发件服务器和 TLS。
                         <code>名字</code>、<code>分组</code>、<code>密码</code>、<code>辅助邮箱</code>、<code>2fa</code>、序号和使用状态都会被忽略。
                     </div>

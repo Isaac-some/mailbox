@@ -39,6 +39,7 @@
     <None Include="..\..\Views\MailAccounts\Delete.cshtml" Link="Delete.cshtml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Views\MailAccounts\Index.cshtml" Link="MailAccountsIndex.cshtml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Views\MailAccounts\Create.cshtml" Link="MailAccountsCreate.cshtml" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\Views\MailAccounts\Edit.cshtml" Link="MailAccountsEdit.cshtml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Views\MailAccounts\ImportCsv.cshtml" Link="MailAccountsImportCsv.cshtml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Views\OutboundMailTasks\Index.cshtml" Link="OutboundMailTasksIndex.cshtml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\ViewModels\BulkImportImapViewModel.cs" Link="BulkImportImapViewModel.cs" CopyToOutputDirectory="PreserveNewest" />

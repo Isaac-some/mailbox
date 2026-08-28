@@ -360,6 +360,19 @@ namespace MailArchiver.Controllers
             model.DeleteAfterDays = null;
             model.LocalRetentionDays = null;
 
+            if (mailProviderModule is not null && model.Provider == ProviderType.IMAP &&
+                !string.IsNullOrWhiteSpace(model.Password))
+            {
+                try
+                {
+                    model.Password = mailProviderModule.NormalizeAppPassword(model.Password);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    ModelState.AddModelError(nameof(model.Password), ex.Message);
+                }
+            }
+
             // When a default MSA ClientId is configured, per-account ClientId is optional.
             // When it is NOT configured, the per-account ClientId is required (validated below).
             if (model.Provider == ProviderType.MSA && !_msaOptions.HasDefaultClientId
@@ -878,6 +891,10 @@ namespace MailArchiver.Controllers
                 return NotFound();
             }
 
+            IMailProviderModule? mailProviderModule = persistedAccount.MailProviderKind is not null
+                ? _mailProviderRegistry.For(persistedAccount.MailProviderKind.Value)
+                : null;
+
             if (persistedAccount.MailProviderKind is not null)
             {
                 model.MailProviderKind = persistedAccount.MailProviderKind;
@@ -910,6 +927,7 @@ namespace MailArchiver.Controllers
                 }
                 else
                 {
+                    mailProviderModule ??= _mailProviderRegistry.Detect(model.EmailAddress);
                     model.ImapServer = preset.ImapServer;
                     model.ImapPort = preset.ImapPort;
                     model.UseSSL = preset.UseSsl;
@@ -938,6 +956,17 @@ namespace MailArchiver.Controllers
             if (string.IsNullOrEmpty(model.Password))
             {
                 ModelState.Remove("Password");
+            }
+            else if (model.Provider == ProviderType.IMAP && mailProviderModule is not null)
+            {
+                try
+                {
+                    model.Password = mailProviderModule.NormalizeAppPassword(model.Password);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    ModelState.AddModelError(nameof(model.Password), ex.Message);
+                }
             }
 
             ViewBag.MsaHasDefaultClientId = _msaOptions.HasDefaultClientId;
@@ -3326,6 +3355,26 @@ namespace MailArchiver.Controllers
                         continue;
                     }
 
+                    if (!string.IsNullOrWhiteSpace(row.Password))
+                    {
+                        try
+                        {
+                            row.Password = rowModule.NormalizeAppPassword(row.Password);
+                        }
+                        catch (InvalidOperationException ex)
+                        {
+                            result.FailedRows.Add(new CsvImportFailedRow
+                            {
+                                FileName = row.SourceFileName,
+                                LineNumber = row.LineNumber,
+                                Email = row.Email,
+                                Reason = ex.Message
+                            });
+                            result.FailedCount++;
+                            continue;
+                        }
+                    }
+
                     var account = row.Provider == ProviderType.MSA
                         ? OutlookImportedAccountFactory.Create(
                             new OutlookImportedAccount(
@@ -3551,9 +3600,10 @@ namespace MailArchiver.Controllers
         public IActionResult DownloadExampleCsv()
         {
             var csv = "邮箱,SMTP授权码,Client ID,Client Secret,Refresh Token,Redirect URI\r\n"
+                + "carol@gmail.com,abcd efgh ijkl mnop,,,,\r\n"
                 + "alice@gmx.com,示例应用专用密码,,,,\r\n"
                 + "bob123@yahoo.com,示例应用专用密码,,,,\r\n"
-                + "carol@gmail.com,,示例GoogleClientID,,示例RefreshToken,\r\n"
+                + "oauth@gmail.com,,示例GoogleClientID,,示例RefreshToken,\r\n"
                 + "david@yahoo.com,,示例YahooClientID,示例YahooClientSecret,示例RefreshToken,oob\r\n";
             var bytes = System.Text.Encoding.UTF8.GetBytes(csv);
             return File(bytes, "text/csv", "邮箱批量导入示例.csv");
@@ -3562,9 +3612,10 @@ namespace MailArchiver.Controllers
         [HttpGet]
         public IActionResult DownloadExampleTxt()
         {
-            var text = "alice@gmx.com\t示例应用专用密码\r\n"
+            var text = "carol@gmail.com\tabcd efgh ijkl mnop\r\n"
+                + "alice@gmx.com\t示例应用专用密码\r\n"
                 + "bob@yahoo.com\t示例应用专用密码\r\n"
-                + "carol@gmail.com\t示例GoogleClientID\t示例RefreshToken\r\n"
+                + "oauth@gmail.com\t示例GoogleClientID\t示例RefreshToken\r\n"
                 + "david@yahoo.com\t示例YahooClientID\t示例YahooClientSecret\t示例RefreshToken\toob\r\n";
             var bytes = System.Text.Encoding.UTF8.GetBytes(text);
             return File(bytes, "text/plain", "邮箱批量导入示例.txt");

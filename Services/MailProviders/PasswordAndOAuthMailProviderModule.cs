@@ -26,10 +26,17 @@ public abstract class PasswordAndOAuthMailProviderModule : IMailProviderModule
     public abstract ImapEndpoint GetIncomingEndpoint(MailAccount account);
     protected abstract string GetSmtpHost(MailAccount account);
     protected virtual int SmtpPort => 587;
+    protected virtual SecureSocketOptions SmtpSocketOptions => SecureSocketOptions.StartTls;
     protected virtual bool SmtpSavesSentCopy => false;
     protected virtual ExternalOAuthSettings? OAuth => null;
 
     public abstract bool SupportsAddress(string emailAddress);
+
+    public virtual string NormalizeAppPassword(string appPassword)
+    {
+        ArgumentNullException.ThrowIfNull(appPassword);
+        return appPassword;
+    }
 
     public virtual void PrepareAccount(MailAccount account)
     {
@@ -84,7 +91,7 @@ public abstract class PasswordAndOAuthMailProviderModule : IMailProviderModule
             throw new InvalidOperationException($"{DisplayName} 账号没有可用的发件凭据。");
 
         using var client = new SmtpClient();
-        await client.ConnectAsync(GetSmtpHost(account), SmtpPort, SecureSocketOptions.StartTls, cancellationToken);
+        await client.ConnectAsync(GetSmtpHost(account), SmtpPort, SmtpSocketOptions, cancellationToken);
         if (HasOAuth(account))
             await AuthenticateOAuthAsync(client, account, cancellationToken);
         else
@@ -153,8 +160,9 @@ public abstract class PasswordAndOAuthMailProviderModule : IMailProviderModule
         CancellationToken cancellationToken)
     {
         var username = account.Username ?? account.EmailAddress;
-        var password = _credentialEncryption.Decrypt(account.Password
-            ?? throw new InvalidOperationException($"{DisplayName} 账号没有应用专用密码。"));
+        var password = NormalizeAppPassword(
+            _credentialEncryption.Decrypt(account.Password
+                ?? throw new InvalidOperationException($"{DisplayName} 账号没有应用专用密码。")));
 
         if (client.AuthenticationMechanisms.Contains("PLAIN"))
         {
