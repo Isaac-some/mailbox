@@ -23,4 +23,9 @@ public interface IMsaTokenManager
         MailAccount account,
         bool forceRefresh = false,
         CancellationToken cancellationToken = default);
+
+    Task<MsaAccessToken> GetSmtpAccessTokenAsync(
+        MailAccount account,
+        bool forceRefresh = false,
+        CancellationToken cancellationToken = default);
 }

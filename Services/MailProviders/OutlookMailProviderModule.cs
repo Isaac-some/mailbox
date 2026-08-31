@@ -15,13 +15,16 @@ public sealed class OutlookMailProviderModule : IMailProviderModule
 
     private readonly IMsaTokenManager _tokenManager;
     private readonly IOutlookGraphMailSender _graphMailSender;
+    private readonly IOutlookSmtpMailSender? _smtpMailSender;
 
     public OutlookMailProviderModule(
         IMsaTokenManager tokenManager,
-        IOutlookGraphMailSender graphMailSender)
+        IOutlookGraphMailSender graphMailSender,
+        IOutlookSmtpMailSender? smtpMailSender = null)
     {
         _tokenManager = tokenManager;
         _graphMailSender = graphMailSender;
+        _smtpMailSender = smtpMailSender;
     }
 
     public MailProviderKind Kind => MailProviderKind.Outlook;
@@ -100,21 +103,36 @@ public sealed class OutlookMailProviderModule : IMailProviderModule
         if (!Inspect(account).CanSend)
             throw new InvalidOperationException("Outlook 账号没有可用的发件授权。");
 
-        var token = await _tokenManager.GetGraphAccessTokenAsync(
-            account, cancellationToken: cancellationToken);
         try
         {
-            await _graphMailSender.SendAsync(message, token.AccessToken, cancellationToken);
+            var token = await _tokenManager.GetGraphAccessTokenAsync(
+                account, cancellationToken: cancellationToken);
+            try
+            {
+                await _graphMailSender.SendAsync(message, token.AccessToken, cancellationToken);
+            }
+            catch (OutlookGraphMailException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+            {
+                token = await _tokenManager.GetGraphAccessTokenAsync(
+                    account, forceRefresh: true, cancellationToken: cancellationToken);
+                await _graphMailSender.SendAsync(message, token.AccessToken, cancellationToken);
+            }
         }
-        catch (OutlookGraphMailException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+        catch (Exception ex) when (IsGraphAuthorizationFailure(ex) && _smtpMailSender is not null)
         {
-            token = await _tokenManager.GetGraphAccessTokenAsync(
-                account, forceRefresh: true, cancellationToken: cancellationToken);
-            await _graphMailSender.SendAsync(message, token.AccessToken, cancellationToken);
+            var smtpToken = await _tokenManager.GetSmtpAccessTokenAsync(
+                account, cancellationToken: cancellationToken);
+            await _smtpMailSender.SendAsync(account, message, smtpToken, cancellationToken);
+            return new ProviderSendResult(SentCopySavedByProvider: false);
         }
 
         return new ProviderSendResult(SentCopySavedByProvider: true);
     }
+
+    private static bool IsGraphAuthorizationFailure(Exception exception)
+        => exception is OutlookGraphAuthorizationException
+            || exception is OutlookGraphMailException graphException &&
+                graphException.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden;
 
     private static void EnsureIdentity(MailAccount account)
     {

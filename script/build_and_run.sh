@@ -40,15 +40,18 @@ case "$MODE" in
 esac
 
 stop_running_app() {
-  local server_assembly="$APP_BUNDLE/Contents/Resources/server/MailArchiver.dll"
+  local temporary_server_assembly="$APP_BUNDLE/Contents/Resources/server/MailArchiver.dll"
+  local packaged_server_assembly="$ROOT_DIR/local-app/build/$APP_NAME.app/Contents/Resources/server/MailArchiver.dll"
   local pid command
 
   pkill -x "$APP_NAME" >/dev/null 2>&1 || true
 
   # The native wrapper may already be gone while its embedded .NET server is
-  # still listening. Only stop the server belonging to this temporary bundle.
+  # still listening. Stop only servers belonging to this repository's test or
+  # packaged app bundles so a stale build cannot keep port 5180 occupied.
   while read -r pid command; do
-    if [[ "$command" == *"$server_assembly"* ]]; then
+    if [[ "$command" == *"$temporary_server_assembly"* ||
+          "$command" == *"$packaged_server_assembly"* ]]; then
       kill "$pid" >/dev/null 2>&1 || true
     fi
   done < <(ps -ax -o pid=,command=)

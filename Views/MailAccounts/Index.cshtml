@@ -18,6 +18,7 @@
 }
 
 <div class="account-page">
+    <div class="account-sync-notice d-none" id="accountSyncNotice" role="status" aria-live="polite"></div>
     <header class="account-page__header">
         <div>
             <p class="account-page__eyebrow">KOUZI MAIL</p>
@@ -130,6 +131,7 @@
                                 {
                                     <span class="text-muted">尚未同步</span>
                                 }
+                                <div class="account-sync-result d-none" data-sync-result="@item.Id" aria-live="polite"></div>
                             </td>
                             <td>
                                 <div class="account-row-actions">
@@ -140,9 +142,12 @@
                                     </a>
                                     @if (item.Provider != ProviderType.IMPORT)
                                     {
-                                        <form asp-action="Sync" asp-route-id="@item.Id" method="post">
+                                        <form asp-action="Sync" asp-route-id="@item.Id" method="post"
+                                              class="account-sync-form"
+                                              data-account-id="@item.Id"
+                                              data-status-url="@Url.Action("SyncStatus", "MailAccounts", new { id = item.Id })">
                                             @Html.AntiForgeryToken()
-                                            <button type="submit" class="btn btn-outline-secondary btn-sm account-icon-btn" title="刷新收件箱" aria-label="刷新收件箱">
+                                            <button type="submit" class="btn btn-outline-secondary btn-sm account-icon-btn account-sync-button" title="刷新收件箱" aria-label="刷新收件箱">
                                                 <i class="bi bi-arrow-clockwise" aria-hidden="true"></i>
                                             </button>
                                         </form>
@@ -295,6 +300,81 @@
 @section Scripts {
     <script>
         document.addEventListener('DOMContentLoaded', function () {
+            const syncNotice = document.getElementById('accountSyncNotice');
+
+            function showSyncMessage(resultElement, message, tone) {
+                resultElement.textContent = message;
+                resultElement.className = `account-sync-result account-sync-result--${tone}`;
+                syncNotice.textContent = message;
+                syncNotice.className = `account-sync-notice account-sync-notice--${tone}`;
+            }
+
+            async function waitForSync(form, requestedAt) {
+                const accountId = form.dataset.accountId;
+                const resultElement = document.querySelector(`[data-sync-result="${accountId}"]`);
+                const button = form.querySelector('.account-sync-button');
+                const statusUrl = new URL(form.dataset.statusUrl, window.location.origin);
+                if (requestedAt) {
+                    statusUrl.searchParams.set('startedAfter', requestedAt);
+                }
+                const deadline = Date.now() + 2 * 60 * 60 * 1000;
+
+                while (Date.now() < deadline) {
+                    await new Promise(resolve => window.setTimeout(resolve, 1200));
+                    const response = await fetch(statusUrl, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+                    if (!response.ok) throw new Error('无法读取同步状态，请稍后重试。');
+                    const status = await response.json();
+                    const job = status.job;
+
+                    if (job?.status === 'Completed') {
+                        const message = job.newEmails > 0
+                            ? `同步完成，新增 ${job.newEmails.toLocaleString()} 封邮件。`
+                            : '同步完成，未检测到新邮件。';
+                        showSyncMessage(resultElement, message, 'success');
+                        return;
+                    }
+                    if (job?.status === 'Failed' || job?.status === 'Cancelled' || job?.status === 'RateLimited') {
+                        const prefix = job.status === 'RateLimited' ? '同步已暂停' : '同步失败';
+                        showSyncMessage(resultElement, `${prefix}：${job.errorMessage || '请检查邮箱授权后重试。'}`, 'error');
+                        return;
+                    }
+
+                    const runningMessage = status.state === 'Queued'
+                        ? '等待同步，当前邮箱已加入队列。'
+                        : '正在同步邮件…';
+                    showSyncMessage(resultElement, runningMessage, 'progress');
+                }
+
+                throw new Error('同步仍在后台进行，可稍后回来查看邮件。');
+            }
+
+            document.querySelectorAll('.account-sync-form').forEach(form => {
+                form.addEventListener('submit', async event => {
+                    event.preventDefault();
+                    const button = form.querySelector('.account-sync-button');
+                    const resultElement = document.querySelector(`[data-sync-result="${form.dataset.accountId}"]`);
+                    button.disabled = true;
+                    button.classList.add('is-syncing');
+                    showSyncMessage(resultElement, '正在启动同步…', 'progress');
+
+                    try {
+                        const response = await fetch(form.action, {
+                            method: 'POST',
+                            body: new FormData(form),
+                            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                        });
+                        const payload = await response.json();
+                        if (!response.ok) throw new Error(payload.message || '无法启动同步。');
+                        await waitForSync(form, payload.requestedAt);
+                    } catch (error) {
+                        showSyncMessage(resultElement, error.message || '同步失败，请稍后重试。', 'error');
+                    } finally {
+                        button.disabled = false;
+                        button.classList.remove('is-syncing');
+                    }
+                });
+            });
+
             const deleteModal = document.getElementById('deleteAccountModal');
             const deleteForm = document.getElementById('deleteAccountForm');
             const deleteAccountId = document.getElementById('deleteAccountId');

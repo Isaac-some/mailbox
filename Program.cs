@@ -193,6 +193,7 @@ builder.Services.AddScoped<MailArchiver.Services.MailProviders.IMailProviderModu
 builder.Services.AddScoped<MailArchiver.Services.MailProviders.IMailProviderRegistry, MailArchiver.Services.MailProviders.MailProviderRegistry>();
 builder.Services.Configure<OutboundMailOptions>(builder.Configuration.GetSection(OutboundMailOptions.SectionName));
 builder.Services.AddScoped<MailArchiver.Services.IOutlookGraphMailSender, MailArchiver.Services.OutlookGraphMailSender>();
+builder.Services.AddScoped<MailArchiver.Services.IOutlookSmtpMailSender, MailArchiver.Services.OutlookSmtpMailSender>();
 builder.Services.AddScoped<MailArchiver.Services.IOutboundMailService, MailArchiver.Services.OutboundMailService>();
 builder.Services.AddHostedService<MailArchiver.Services.OutboundMailTaskWorker>();
 

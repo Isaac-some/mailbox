@@ -22,7 +22,7 @@ The account import page accepts the vendor format below without a header row. Co
 email@example.com<TAB>password<TAB>client-id<TAB>refresh-token
 ```
 
-The password column is required by the source format but is never retained. The app stores the per-account Client ID and Refresh Token, uses Microsoft OAuth/XOAUTH2 for IMAP receiving, and acquires a separate Microsoft Graph `Mail.Send` access token for sending. Each row is validated independently; malformed rows are reported by line number. Imported accounts are queued for connection validation. Graph sending verifies `Mail.Send` when the first message is sent; SMTP/IMAP server fields are not required in the import file.
+The password column is required by the source format but is never retained. Outlook rows may be mixed with Gmail, Yahoo, and GMX rows in the same tab-separated file. The app stores the per-account Client ID and Refresh Token, uses Microsoft OAuth/XOAUTH2 for IMAP receiving, and acquires separate tokens for Microsoft Graph `Mail.Send` and SMTP OAuth sending. Graph is attempted first; authorization failures fall back to Outlook.com SMTP. Each row is validated independently and malformed rows are reported by line number.
 
 Interactive device-code authorization remains available for accounts without an importable Refresh Token. See [MSA Outlook Setup](MSA_Outlook_Setup.md).
 

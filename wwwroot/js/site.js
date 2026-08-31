@@ -41,28 +41,6 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }, 5000);
     
-    // Theme Toggle Funktionalität
-    const themeToggle = document.getElementById('theme-toggle');
-    const currentTheme = document.documentElement.getAttribute('data-theme') === 'dark'
-        ? 'dark'
-        : (localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
-    
-    if (themeToggle) {
-        themeToggle.innerHTML = currentTheme === 'dark' ? '<i class="bi bi-sun"></i>' : '<i class="bi bi-moon"></i>';
-        themeToggle.addEventListener('click', function() {
-            const newTheme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-            
-            if (newTheme === 'dark') {
-                document.documentElement.setAttribute('data-theme', 'dark');
-            } else {
-                document.documentElement.removeAttribute('data-theme');
-            }
-            localStorage.setItem('theme', newTheme);
-            
-            // Aktualisiere das Icon
-            this.innerHTML = newTheme === 'dark' ? '<i class="bi bi-sun"></i>' : '<i class="bi bi-moon"></i>';
-        });
-    }
 });
 
 // Funktion zum Formatieren von Dateigröße

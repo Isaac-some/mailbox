@@ -33,10 +33,46 @@ public class OutlookMailProviderModuleTests
         Assert.True(result.SentCopySavedByProvider);
     }
 
+    [Fact]
+    public async Task SendAsync_falls_back_to_SMTP_OAuth_when_Graph_authorization_is_rejected()
+    {
+        var tokens = new FakeTokenManager();
+        var graph = new FakeGraphSender
+        {
+            Failure = new OutlookGraphMailException(
+                System.Net.HttpStatusCode.Forbidden,
+                "Authorization_RequestDenied",
+                "denied",
+                "denied")
+        };
+        var smtp = new FakeSmtpSender();
+        var module = new OutlookMailProviderModule(tokens, graph, smtp);
+        var account = CreateAccount();
+        var message = new MimeMessage { Body = new TextPart("plain") { Text = "body" } };
+        message.To.Add(MailboxAddress.Parse("target@example.com"));
+
+        var result = await module.SendAsync(account, message);
+
+        Assert.Equal(1, tokens.SmtpRequests);
+        Assert.Equal("smtp-access", smtp.AccessToken);
+        Assert.False(result.SentCopySavedByProvider);
+    }
+
+    private static MailAccount CreateAccount() => new()
+    {
+        Id = 42,
+        EmailAddress = "sender@outlook.com",
+        Username = "sender@outlook.com",
+        Provider = ProviderType.MSA,
+        MailProviderKind = MailProviderKind.Outlook,
+        OAuthRefreshToken = "refresh"
+    };
+
     private sealed class FakeTokenManager : IMsaTokenManager
     {
         public int GraphRequests { get; private set; }
         public int ImapRequests { get; private set; }
+        public int SmtpRequests { get; private set; }
 
         public Task<MsaAccessToken> GetAccessTokenAsync(
             MailAccount account,
@@ -55,11 +91,21 @@ public class OutlookMailProviderModuleTests
             GraphRequests++;
             return Task.FromResult(new MsaAccessToken(account.EmailAddress, "graph-access"));
         }
+
+        public Task<MsaAccessToken> GetSmtpAccessTokenAsync(
+            MailAccount account,
+            bool forceRefresh = false,
+            CancellationToken cancellationToken = default)
+        {
+            SmtpRequests++;
+            return Task.FromResult(new MsaAccessToken(account.EmailAddress, "smtp-access"));
+        }
     }
 
     private sealed class FakeGraphSender : IOutlookGraphMailSender
     {
         public string? AccessToken { get; private set; }
+        public Exception? Failure { get; init; }
 
         public Task SendAsync(
             MimeMessage message,
@@ -67,6 +113,23 @@ public class OutlookMailProviderModuleTests
             CancellationToken cancellationToken)
         {
             AccessToken = accessToken;
+            if (Failure is not null)
+                throw Failure;
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class FakeSmtpSender : IOutlookSmtpMailSender
+    {
+        public string? AccessToken { get; private set; }
+
+        public Task SendAsync(
+            MailAccount account,
+            MimeMessage message,
+            MsaAccessToken token,
+            CancellationToken cancellationToken)
+        {
+            AccessToken = token.AccessToken;
             return Task.CompletedTask;
         }
     }

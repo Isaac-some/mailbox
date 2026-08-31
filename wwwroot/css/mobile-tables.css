@@ -589,33 +589,6 @@
     }
 }
 
-/* Dark Mode Support (falls gewünscht) */
-@media (prefers-color-scheme: dark) {
-    .email-card {
-        background: #2d3748;
-        border-color: #4a5568;
-        color: #e2e8f0;
-    }
-    .email-card-title {
-        color: #e2e8f0;
-    }
-    .email-card-meta {
-        color: #a0aec0;
-    }
-    .table-mobile tr {
-        background: #2d3748;
-        color: #e2e8f0;
-    }
-    .email-text-break {
-        color: #e2e8f0;
-    }
-    .email-card-mobile {
-        background: #2d3748;
-        border-color: #4a5568;
-        color: #e2e8f0;
-    }
-}
-
 /* Accessibility Verbesserungen */
 @media (prefers-reduced-motion: reduce) {
     /* Reduzierte Animationen für Nutzer mit Motion-Sensitivity */

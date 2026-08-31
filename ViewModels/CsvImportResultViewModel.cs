@@ -38,6 +38,7 @@ namespace MailArchiver.Models.ViewModels
         public string Email { get; set; } = string.Empty;
         public string Password { get; set; } = string.Empty;
         public ProviderType Provider { get; set; } = ProviderType.IMAP;
+        public MailProviderKind MailProviderKind { get; set; }
         public string? ClientId { get; set; }
         public string? ClientSecret { get; set; }
         public string? OAuthRefreshToken { get; set; }

@@ -152,5 +152,17 @@ public class MsaTokenManagerTests
                 GrantedScopes = MsaOAuthScopePolicy.GraphMailSend
             });
         }
+
+        public Task<MsaTokenResult> RefreshSmtpAccessTokenAsync(
+            string refreshToken,
+            string? clientId,
+            string? clientSecret)
+            => Task.FromResult(new MsaTokenResult
+            {
+                AccessToken = "smtp-access",
+                RefreshToken = "smtp-refresh",
+                Expiry = DateTime.UtcNow.AddHours(1),
+                GrantedScopes = MsaOAuthScopePolicy.SmtpSend
+            });
     }
 }

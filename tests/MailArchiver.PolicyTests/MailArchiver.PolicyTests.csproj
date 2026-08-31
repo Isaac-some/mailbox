@@ -35,6 +35,7 @@
     <None Include="..\..\local-app\KouziMailAssistant.swift" Link="KouziMailAssistant.swift" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\local-app\Info.plist" Link="Info.plist" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\local-app\build-dmg.sh" Link="build-dmg.sh" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\script\build_and_run.sh" Link="build_and_run.sh" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\windows-app\KouziMailAssistant.Windows.csproj" Link="KouziMailAssistant.Windows.csproj" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Views\MailAccounts\Delete.cshtml" Link="Delete.cshtml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Views\MailAccounts\Index.cshtml" Link="MailAccountsIndex.cshtml" CopyToOutputDirectory="PreserveNewest" />

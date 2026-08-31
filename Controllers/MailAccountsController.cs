@@ -1491,6 +1491,7 @@ namespace MailArchiver.Controllers
                 Request.Headers["X-Requested-With"],
                 "XMLHttpRequest",
                 StringComparison.OrdinalIgnoreCase);
+            var requestedAt = DateTime.UtcNow;
 
             // Use proper authentication service
             if (!await HasAccessToAccountAsync(id))
@@ -1507,8 +1508,19 @@ namespace MailArchiver.Controllers
             // Prevent sync for import-only accounts
             if (account.Provider == ProviderType.IMPORT)
             {
+                if (isMailboxRefresh)
+                    return BadRequest(new { message = _localizer["ImportOnlyAccountNoSync"].Value });
                 TempData["ErrorMessage"] = _localizer["ImportOnlyAccountNoSync"].Value;
                 return RedirectToAction("Index", "Emails", new { SelectedAccountId = id });
+            }
+
+            if (!account.IsEnabled)
+            {
+                const string message = "该邮箱已停用，请先启用后再同步。";
+                if (isMailboxRefresh)
+                    return BadRequest(new { message });
+                TempData["ErrorMessage"] = message;
+                return RedirectToAction(nameof(Index));
             }
 
             // MSA accounts require OAuth authorization before they can sync.
@@ -1516,6 +1528,8 @@ namespace MailArchiver.Controllers
             // deep in the IMAP connection factory with a cryptic exception.
             if (account.Provider == ProviderType.MSA && string.IsNullOrEmpty(account.OAuthRefreshToken))
             {
+                if (isMailboxRefresh)
+                    return BadRequest(new { message = _localizer["MsaNotAuthorizedSync"].Value });
                 TempData["ErrorMessage"] = _localizer["MsaNotAuthorizedSync"].Value;
                 return RedirectToAction(nameof(Edit), new { id });
             }
@@ -1523,7 +1537,13 @@ namespace MailArchiver.Controllers
             var queueStatus = _onDemandSyncQueue.Enqueue(id, MailSyncRequestPriority.Interactive);
             if (isMailboxRefresh)
             {
-                return Json(new { state = queueStatus.State.ToString() });
+                return Json(new
+                {
+                    state = queueStatus.State.ToString(),
+                    requestedAt = queueStatus.State == MailSyncQueueState.Running
+                        ? null
+                        : requestedAt.ToString("O")
+                });
             }
 
             TempData["SuccessMessage"] = queueStatus.State == MailSyncQueueState.Running
@@ -1555,13 +1575,32 @@ namespace MailArchiver.Controllers
         }
 
         [HttpGet]
-        public async Task<IActionResult> SyncStatus(int id)
+        public async Task<IActionResult> SyncStatus(int id, DateTime? startedAfter = null)
         {
             if (!await HasAccessToAccountAsync(id))
                 return NotFound();
 
             var status = _onDemandSyncQueue.GetStatus(id);
-            return Json(new { state = status.State.ToString(), kind = status.Kind?.ToString() });
+            var latestJob = _syncJobService.GetAllJobs()
+                .Where(job => job.MailAccountId == id &&
+                    (!startedAfter.HasValue || job.Started >= startedAfter.Value.ToUniversalTime()))
+                .OrderByDescending(job => job.Started)
+                .FirstOrDefault();
+
+            return Json(new
+            {
+                state = status.State.ToString(),
+                kind = status.Kind?.ToString(),
+                job = latestJob is null ? null : new
+                {
+                    status = latestJob.Status.ToString(),
+                    latestJob.NewEmails,
+                    latestJob.ProcessedEmails,
+                    latestJob.FailedEmails,
+                    latestJob.ErrorMessage,
+                    completed = latestJob.Completed?.ToString("O")
+                }
+            });
         }
 
         [HttpPost]
@@ -3336,11 +3375,7 @@ namespace MailArchiver.Controllers
                     IMailProviderModule rowModule;
                     try
                     {
-                        rowModule = row.Provider == ProviderType.MSA
-                            ? _mailProviderRegistry.For(MailProviderKind.Outlook)
-                            : _mailProviderRegistry.Detect(row.Email);
-                        if (row.Provider == ProviderType.IMAP && rowModule.Kind == MailProviderKind.Outlook)
-                            throw new NotSupportedException("Outlook 请上传四列 Tab 分隔的 TXT。");
+                        rowModule = _mailProviderRegistry.For(row.MailProviderKind);
                     }
                     catch (Exception ex) when (ex is NotSupportedException or InvalidOperationException)
                     {
@@ -3481,36 +3516,18 @@ namespace MailArchiver.Controllers
                 .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
                 .FirstOrDefault(line => !string.IsNullOrWhiteSpace(line));
 
-            if (OutlookAccountTextParser.LooksLikeFormat(firstNonEmptyLine))
-            {
-                using var outlookReader = new StringReader(uploadedText);
-                var parsed = OutlookAccountTextParser.Parse(outlookReader);
-                rows.AddRange(parsed.Accounts.Select(account => new CsvParsedRow
-                {
-                    LineNumber = account.LineNumber,
-                    Email = account.Email,
-                    Provider = ProviderType.MSA,
-                    ClientId = account.ClientId,
-                    OAuthRefreshToken = account.RefreshToken
-                }));
-                failedRows.AddRange(parsed.Errors.Select(error => new CsvImportFailedRow
-                {
-                    LineNumber = error.LineNumber,
-                    Email = string.Empty,
-                    Reason = error.Reason
-                }));
-            }
-            else if (firstNonEmptyLine?.Contains('\t') == true &&
+            if (firstNonEmptyLine?.Contains('\t') == true &&
                 !firstNonEmptyLine.Split('\t')[0].Trim().Equals("邮箱", StringComparison.OrdinalIgnoreCase) &&
                 !firstNonEmptyLine.Split('\t')[0].Trim().Equals("email", StringComparison.OrdinalIgnoreCase))
             {
-                using var externalReader = new StringReader(uploadedText);
-                var parsed = ExternalMailAccountTextParser.Parse(externalReader);
+                using var unifiedReader = new StringReader(uploadedText);
+                var parsed = UnifiedMailAccountTextParser.Parse(unifiedReader);
                 rows.AddRange(parsed.Accounts.Select(account => new CsvParsedRow
                 {
                     LineNumber = account.LineNumber,
                     Email = account.Email,
-                    Provider = ProviderType.IMAP,
+                    Provider = account.Provider == MailProviderKind.Outlook ? ProviderType.MSA : ProviderType.IMAP,
+                    MailProviderKind = account.Provider,
                     Password = account.AppPassword ?? string.Empty,
                     ClientId = account.ClientId,
                     ClientSecret = account.ClientSecret,
@@ -3604,6 +3621,8 @@ namespace MailArchiver.Controllers
                 + "alice@gmx.com,示例应用专用密码,,,,\r\n"
                 + "bob123@yahoo.com,示例应用专用密码,,,,\r\n"
                 + "oauth@gmail.com,,示例GoogleClientID,,示例RefreshToken,\r\n"
+                + "both@gmail.com,abcd efgh ijkl mnop,示例GoogleClientID,,示例RefreshToken,\r\n"
+                + "outlook@outlook.com,,11111111-2222-3333-4444-555555555555,,示例RefreshToken,\r\n"
                 + "david@yahoo.com,,示例YahooClientID,示例YahooClientSecret,示例RefreshToken,oob\r\n";
             var bytes = System.Text.Encoding.UTF8.GetBytes(csv);
             return File(bytes, "text/csv", "邮箱批量导入示例.csv");
@@ -3615,13 +3634,15 @@ namespace MailArchiver.Controllers
             var text = "carol@gmail.com\tabcd efgh ijkl mnop\r\n"
                 + "alice@gmx.com\t示例应用专用密码\r\n"
                 + "bob@yahoo.com\t示例应用专用密码\r\n"
+                + "outlook@outlook.com\t密码占位不保存\t11111111-2222-3333-4444-555555555555\t示例RefreshToken\r\n"
                 + "oauth@gmail.com\t示例GoogleClientID\t示例RefreshToken\r\n"
+                + "both@gmail.com\tabcd efgh ijkl mnop\t示例GoogleClientID\t\t示例RefreshToken\t\r\n"
                 + "david@yahoo.com\t示例YahooClientID\t示例YahooClientSecret\t示例RefreshToken\toob\r\n";
             var bytes = System.Text.Encoding.UTF8.GetBytes(text);
             return File(bytes, "text/plain", "邮箱批量导入示例.txt");
         }
 
-        private static CsvParsedRow? ParseCsvRow(string[] fields, Dictionary<string, int> headerIndex,
+        private CsvParsedRow? ParseCsvRow(string[] fields, Dictionary<string, int> headerIndex,
             BulkImportImapViewModel model, int lineNumber, List<CsvImportFailedRow> failedRows,
             IStringLocalizer<SharedResource> localizer)
         {
@@ -3707,6 +3728,22 @@ namespace MailArchiver.Controllers
                 return null;
             }
 
+            IMailProviderModule providerModule;
+            try
+            {
+                providerModule = _mailProviderRegistry.Detect(email);
+            }
+            catch (Exception exception) when (exception is NotSupportedException or InvalidOperationException)
+            {
+                failedRows.Add(new CsvImportFailedRow
+                {
+                    LineNumber = lineNumber,
+                    Email = email,
+                    Reason = exception.Message
+                });
+                return null;
+            }
+
             var hasPassword = !string.IsNullOrWhiteSpace(password);
             var hasAnyOAuthValue = !string.IsNullOrWhiteSpace(clientId)
                 || !string.IsNullOrWhiteSpace(clientSecret)
@@ -3722,7 +3759,24 @@ namespace MailArchiver.Controllers
                 return null;
             }
 
-            if (!hasPassword)
+            if (providerModule.Kind == MailProviderKind.Outlook)
+            {
+                if (string.IsNullOrWhiteSpace(clientId) ||
+                    !Guid.TryParseExact(clientId.Trim(), "D", out _) ||
+                    string.IsNullOrWhiteSpace(refreshToken))
+                {
+                    failedRows.Add(new CsvImportFailedRow
+                    {
+                        LineNumber = lineNumber,
+                        Email = email,
+                        Reason = "Outlook 必须提供格式正确的 Client ID 和 Refresh Token；密码列不会保存。"
+                    });
+                    return null;
+                }
+
+                password = string.Empty;
+            }
+            else if (hasAnyOAuthValue)
             {
                 if (!ExternalOAuthProviderPolicy.TryResolve(email, out var oauthProvider))
                 {
@@ -3755,6 +3809,8 @@ namespace MailArchiver.Controllers
                 LineNumber = lineNumber,
                 Email = email,
                 Password = password,
+                Provider = providerModule.Kind == MailProviderKind.Outlook ? ProviderType.MSA : ProviderType.IMAP,
+                MailProviderKind = providerModule.Kind,
                 ClientId = clientId,
                 ClientSecret = clientSecret,
                 OAuthRefreshToken = refreshToken,

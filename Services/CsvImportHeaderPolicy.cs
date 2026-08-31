@@ -2,8 +2,8 @@ namespace MailArchiver.Services;
 
 /// <summary>
 /// Defines the only CSV column mappings accepted by the local archive.
-/// Provider connection settings never come from the file; only the address,
-/// and read-only IMAP credential do.
+/// Provider connection settings never come from the file; only the address and
+/// provider-specific app-password or OAuth credentials do.
 /// </summary>
 public static class CsvImportHeaderPolicy
 {

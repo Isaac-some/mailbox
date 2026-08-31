@@ -76,13 +76,12 @@ public abstract class PasswordAndOAuthMailProviderModule : IMailProviderModule
         EnsureIdentity(account);
         RemoveUnsupportedMechanisms(client);
 
-        if (HasOAuth(account))
-        {
-            await AuthenticateOAuthAsync(client, account, cancellationToken);
-            return;
-        }
-
-        await AuthenticatePasswordAsync(client, account, cancellationToken);
+        await MailCredentialFallback.AuthenticateAsync(
+            HasOAuth(account),
+            HasPassword(account),
+            () => AuthenticateOAuthAsync(client, account, cancellationToken),
+            () => AuthenticatePasswordAsync(client, account, cancellationToken),
+            cancellationToken);
     }
 
     public async Task<ProviderSendResult> SendAsync(
@@ -99,10 +98,12 @@ public abstract class PasswordAndOAuthMailProviderModule : IMailProviderModule
         client.ServerCertificateValidationCallback = static (_, _, chain, errors) =>
             MailCertificatePolicy.IsAccepted(errors, chain);
         await client.ConnectAsync(GetSmtpHost(account), SmtpPort, SmtpSocketOptions, cancellationToken);
-        if (HasOAuth(account))
-            await AuthenticateOAuthAsync(client, account, cancellationToken);
-        else
-            await AuthenticatePasswordAsync(client, account, cancellationToken);
+        await MailCredentialFallback.AuthenticateAsync(
+            HasOAuth(account),
+            HasPassword(account),
+            () => AuthenticateOAuthAsync(client, account, cancellationToken),
+            () => AuthenticatePasswordAsync(client, account, cancellationToken),
+            cancellationToken);
 
         await client.SendAsync(message, cancellationToken);
         await client.DisconnectAsync(true, cancellationToken);

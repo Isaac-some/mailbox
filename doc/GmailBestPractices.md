@@ -12,6 +12,8 @@ Gmail accounts can be integrated with the Mail Archiver application using IMAP w
 2. Generate an App Password specifically for the Mail Archiver application
 3. Use the App Password instead of your regular Gmail password when configuring the account in Mail Archiver
 
+For the complete click-by-click setup, including the Google login/2FA hand-off and the path to the App Password page, see [Gmail 前置授权操作指南（2FA + 应用专用密码）](Gmail_PreLogin_AppPassword_Guide.md).
+
 ## 🏷️ Gmail Label Settings
 
 It is strongly recommended to adjust your Gmail label settings to prevent the "All Mail" label from being exposed via IMAP:

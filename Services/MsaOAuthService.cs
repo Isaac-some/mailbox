@@ -11,6 +11,7 @@ namespace MailArchiver.Services
         Task<MsaPollResult> PollDeviceCodeAsync(string? clientId, string deviceCode, int currentInterval);
         Task<MsaTokenResult> RefreshAccessTokenAsync(string refreshToken, string? clientId, string? clientSecret);
         Task<MsaTokenResult> RefreshGraphAccessTokenAsync(string refreshToken, string? clientId, string? clientSecret);
+        Task<MsaTokenResult> RefreshSmtpAccessTokenAsync(string refreshToken, string? clientId, string? clientSecret);
         /// <summary>
         /// Returns the configured default ClientId (or null when none is configured).
         /// </summary>
@@ -234,6 +235,24 @@ namespace MailArchiver.Services
                 ["client_id"] = resolvedClientId,
                 ["refresh_token"] = refreshToken,
                 ["scope"] = string.Join(" ", MsaOAuthScopePolicy.GraphRefreshScopes),
+            };
+            if (!string.IsNullOrEmpty(clientSecret))
+                body["client_secret"] = clientSecret;
+            return await PostTokenAsync(body);
+        }
+
+        public async Task<MsaTokenResult> RefreshSmtpAccessTokenAsync(
+            string refreshToken,
+            string? clientId,
+            string? clientSecret)
+        {
+            var resolvedClientId = ResolveClientId(clientId);
+            var body = new Dictionary<string, string>
+            {
+                ["grant_type"] = "refresh_token",
+                ["client_id"] = resolvedClientId,
+                ["refresh_token"] = refreshToken,
+                ["scope"] = string.Join(" ", MsaOAuthScopePolicy.SmtpRefreshScopes),
             };
             if (!string.IsNullOrEmpty(clientSecret))
                 body["client_secret"] = clientSecret;

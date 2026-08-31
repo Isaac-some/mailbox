@@ -128,6 +128,7 @@ public class GmailAppPasswordPolicyTests
         Assert.Equal("abcdefghijklmnop", await receivedPassword);
     }
 
+
     private static async Task<string> CaptureImapPasswordAsync(TcpListener listener)
     {
         using var connection = await listener.AcceptTcpClientAsync();
@@ -236,6 +237,7 @@ public class GmailAppPasswordPolicyTests
         return receivedPassword ?? throw new InvalidOperationException("SMTP server did not receive a password.");
     }
 
+
     private sealed class PassthroughCredentialEncryptionService : ICredentialEncryptionService
     {
         public string Encrypt(string plaintext) => plaintext;
@@ -252,8 +254,10 @@ public class GmailAppPasswordPolicyTests
             _port = port;
         }
 
+
         protected override string GetSmtpHost(MailAccount account) => IPAddress.Loopback.ToString();
         protected override int SmtpPort => _port;
         protected override SecureSocketOptions SmtpSocketOptions => SecureSocketOptions.None;
     }
+
 }

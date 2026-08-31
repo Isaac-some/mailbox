@@ -3,16 +3,20 @@ namespace MailArchiver.Services;
 public static class MsaOAuthScopePolicy
 {
     public const string Imap = "https://outlook.office.com/IMAP.AccessAsUser.All";
+    public const string SmtpSend = "https://outlook.office.com/SMTP.Send";
     public const string GraphMailSend = "https://graph.microsoft.com/Mail.Send";
 
     public static readonly string[] RequestedScopes =
-        [Imap, GraphMailSend, "offline_access", "openid", "profile", "email"];
+        [Imap, SmtpSend, GraphMailSend, "offline_access", "openid", "profile", "email"];
 
     public static readonly string[] ImapRefreshScopes =
         [Imap, "offline_access"];
 
     public static readonly string[] GraphRefreshScopes =
         [GraphMailSend, "offline_access"];
+
+    public static readonly string[] SmtpRefreshScopes =
+        [SmtpSend, "offline_access"];
 
     public static bool CanSend(string? grantedScopes)
     {

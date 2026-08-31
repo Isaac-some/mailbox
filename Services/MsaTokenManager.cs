@@ -103,6 +103,40 @@ public sealed class MsaTokenManager : IMsaTokenManager
         }
     }
 
+    public async Task<MsaAccessToken> GetSmtpAccessTokenAsync(
+        MailAccount account,
+        bool forceRefresh = false,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateAccount(account);
+        var accountLock = AccountLocks.GetOrAdd(account.Id, _ => new SemaphoreSlim(1, 1));
+        await accountLock.WaitAsync(cancellationToken);
+        try
+        {
+            var tracked = await _dbContext.MailAccounts
+                .FirstOrDefaultAsync(candidate => candidate.Id == account.Id, cancellationToken)
+                ?? account;
+            var refreshed = await _oauth.RefreshSmtpAccessTokenAsync(
+                tracked.OAuthRefreshToken!, tracked.ClientId, tracked.ClientSecret);
+
+            if (!string.IsNullOrWhiteSpace(refreshed.RefreshToken))
+            {
+                tracked.OAuthRefreshToken = refreshed.RefreshToken;
+                account.OAuthRefreshToken = refreshed.RefreshToken;
+                if (_dbContext.Entry(tracked).State != EntityState.Detached)
+                    await _dbContext.SaveChangesAsync(cancellationToken);
+            }
+
+            return new MsaAccessToken(
+                tracked.Username ?? tracked.EmailAddress,
+                refreshed.AccessToken);
+        }
+        finally
+        {
+            accountLock.Release();
+        }
+    }
+
     public async Task<MsaAccessToken> GetAccessTokenAsync(
         MailAccount account,
         bool forceRefresh = false,

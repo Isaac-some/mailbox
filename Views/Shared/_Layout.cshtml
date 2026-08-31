@@ -7,11 +7,9 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <script>
-        (function() {
-            var t = localStorage.getItem('theme');
-            if (!t) t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-            if (t === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
-        })();
+        // The desktop app uses the light theme only.
+        document.documentElement.removeAttribute('data-theme');
+        try { localStorage.setItem('theme', 'light'); } catch (_) { }
     </script>
     <title>@ViewData["Title"] - 邮箱助手</title>
     <link rel="stylesheet" href="~/lib/bootstrap/dist/css/bootstrap.min.css" />
@@ -19,7 +17,6 @@
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
     <link rel="stylesheet" href="~/css/mailbox.css" asp-append-version="true" />
     <link rel="stylesheet" href="~/css/mobile-tables.css" asp-append-version="true" />
-    <link rel="stylesheet" href="~/css/dark-mode.css" asp-append-version="true" />
     <link rel="icon" type="image/png" href="~/icons/icon-192x192.png">
     <link rel="manifest" href="~/manifest.json">
     <!-- Apple touch icons for iOS home screen -->

@@ -58,6 +58,29 @@ public class MsaOAuthServiceTests
         Assert.DoesNotContain("https://outlook.office.com/SMTP.Send", scopes);
     }
 
+    [Fact]
+    public async Task Smtp_refresh_requests_only_SMTP_Send_and_offline_access()
+    {
+        var handler = new CapturingHandler(MsaOAuthScopePolicy.SmtpSend);
+        var service = new MsaOAuthService(
+            new SingleClientFactory(new HttpClient(handler)),
+            NullLogger<MsaOAuthService>.Instance,
+            Options.Create(new MsaOAuthOptions
+            {
+                DefaultClientId = "default-client",
+                Authority = "https://login.example.test/oauth2/v2.0"
+            }));
+
+        var result = await service.RefreshSmtpAccessTokenAsync("vendor-refresh", "vendor-client", null);
+
+        Assert.Equal(MsaOAuthScopePolicy.SmtpSend, result.GrantedScopes);
+        var scopes = handler.Form["scope"].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        Assert.Contains(MsaOAuthScopePolicy.SmtpSend, scopes);
+        Assert.Contains("offline_access", scopes);
+        Assert.DoesNotContain(MsaOAuthScopePolicy.Imap, scopes);
+        Assert.DoesNotContain(MsaOAuthScopePolicy.GraphMailSend, scopes);
+    }
+
     private sealed class SingleClientFactory(HttpClient client) : IHttpClientFactory
     {
         public HttpClient CreateClient(string name) => client;

@@ -1,8 +1,8 @@
 # 蔻姿邮箱助手源码
 
-本地版支持 Gmail、Yahoo、GMX 和 Outlook 个人邮箱收发件。写信支持纯文本、抄送和多个附件（默认最多 10 个、合计 10MB）。Gmail、Yahoo 支持 OAuth 或应用专用密码，GMX 使用应用专用密码，Outlook 使用 OAuth。
+本地版支持 Gmail、Yahoo、GMX 和 Outlook 个人邮箱收发件。写信支持纯文本、抄送和多个附件（默认最多 10 个、合计 10MB）。Gmail、Yahoo 支持 OAuth 或应用专用密码，并在同时提供时按 OAuth → 应用专用密码回退；GMX 使用应用专用密码；Outlook 收件使用 IMAP OAuth，发件优先使用 Microsoft Graph，授权失败时回退到 SMTP OAuth。
 
-Outlook 不保存微软密码。可逐个授权，也可批量导入 `邮箱<TAB>密码<TAB>Client ID<TAB>Refresh Token` 格式的 TXT；导入时密码列只做格式校验，不会保存。收件使用 IMAP OAuth，发件使用 Microsoft Graph `Mail.Send`，不依赖邮箱是否开启 SMTP AUTH。浏览器部署版默认关闭发件；Windows/macOS 本地版默认开启。
+Outlook 不保存微软密码。可逐个授权，也可与其他服务商混合导入 `邮箱<TAB>密码占位列<TAB>Client ID<TAB>Refresh Token` 格式的 TXT；程序逐行识别，密码占位列只做格式校验。收件使用 IMAP OAuth，发件优先使用 Microsoft Graph `Mail.Send`，Graph 授权失败时尝试 SMTP OAuth。浏览器部署版默认关闭发件；Windows/macOS 本地版默认开启。
 
 ## 源码开发（.NET 10）
 

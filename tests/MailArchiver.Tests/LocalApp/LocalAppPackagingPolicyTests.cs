@@ -68,8 +68,8 @@ public class LocalAppPackagingPolicyTests
     {
         var source = ReadBundledFile("Info.plist");
 
-        Assert.Contains("<string>1.0.15</string>", source, StringComparison.Ordinal);
-        Assert.Contains("<string>16</string>", source, StringComparison.Ordinal);
+        Assert.Contains("<string>1.0.16</string>", source, StringComparison.Ordinal);
+        Assert.Contains("<string>17</string>", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -77,8 +77,8 @@ public class LocalAppPackagingPolicyTests
     {
         var source = ReadBundledFile("KouziMailAssistant.Windows.csproj");
 
-        Assert.Contains("<Version>1.0.15</Version>", source, StringComparison.Ordinal);
-        Assert.Contains("<FileVersion>1.0.15.0</FileVersion>", source, StringComparison.Ordinal);
+        Assert.Contains("<Version>1.0.16</Version>", source, StringComparison.Ordinal);
+        Assert.Contains("<FileVersion>1.0.16.0</FileVersion>", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -134,6 +134,44 @@ public class LocalAppPackagingPolicyTests
         Assert.Contains("ParseAccountImportFileAsync(file, model)", controller, StringComparison.Ordinal);
         Assert.Contains("accept=\".csv,text/csv\"", outboundPage, StringComparison.Ordinal);
         Assert.DoesNotContain("multiple required", outboundPage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Mixed_csv_import_detects_each_row_and_explains_the_automatic_fallback()
+    {
+        var page = ReadBundledFile("MailAccountsImportCsv.cshtml");
+        var controller = ReadBundledFile("MailAccountsController.cs");
+
+        Assert.Contains("同一个文件可混放 Gmail、Yahoo、GMX 和 Outlook", page, StringComparison.Ordinal);
+        Assert.Contains("两种都有时会自动依次尝试", page, StringComparison.Ordinal);
+        Assert.Contains("providerModule = _mailProviderRegistry.Detect(email)", controller, StringComparison.Ordinal);
+        Assert.Contains("MailProviderKind = providerModule.Kind", controller, StringComparison.Ordinal);
+        Assert.Contains("outlook@outlook.com", controller, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Account_list_refresh_always_exposes_progress_and_a_terminal_result()
+    {
+        var page = ReadBundledFile("MailAccountsIndex.cshtml");
+
+        Assert.Contains("account-sync-button", page, StringComparison.Ordinal);
+        Assert.Contains("button.classList.add('is-syncing')", page, StringComparison.Ordinal);
+        Assert.Contains("button.classList.remove('is-syncing')", page, StringComparison.Ordinal);
+        Assert.Contains("同步完成，未检测到新邮件。", page, StringComparison.Ordinal);
+        Assert.Contains("同步完成，新增", page, StringComparison.Ordinal);
+        Assert.Contains("同步失败", page, StringComparison.Ordinal);
+        Assert.Contains("aria-live=\"polite\"", page, StringComparison.Ordinal);
+        Assert.Contains("if (requestedAt)", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Local_test_runner_stops_stale_servers_from_test_and_packaged_bundles()
+    {
+        var source = ReadBundledFile("build_and_run.sh");
+
+        Assert.Contains("temporary_server_assembly", source, StringComparison.Ordinal);
+        Assert.Contains("packaged_server_assembly", source, StringComparison.Ordinal);
+        Assert.Contains("$ROOT_DIR/local-app/build/$APP_NAME.app", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -308,7 +346,9 @@ public class LocalAppPackagingPolicyTests
         Assert.Contains("X-Requested-With", page, StringComparison.Ordinal);
         Assert.Contains("mailbox-sync-scan", page, StringComparison.Ordinal);
         Assert.Contains("X-Requested-With", controller, StringComparison.Ordinal);
-        Assert.Contains("return Json(new { state = queueStatus.State.ToString() })", controller, StringComparison.Ordinal);
+        Assert.Contains("state = queueStatus.State.ToString()", controller, StringComparison.Ordinal);
+        Assert.Contains("queueStatus.State == MailSyncQueueState.Running", controller, StringComparison.Ordinal);
+        Assert.Contains("requestedAt.ToString(\"O\")", controller, StringComparison.Ordinal);
     }
 
     [Fact]

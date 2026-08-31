@@ -16,11 +16,11 @@
         <div class="d-flex align-items-start">
             <i class="bi bi-info-circle-fill me-2 mt-1"></i>
             <div>
-                <strong>@Localizer["CsvImportInformation"]</strong>
+                <strong>一次上传，自动识别邮箱和登录方式。</strong>
                 <ul class="mb-2 mt-1">
-                    <li>@Localizer["CsvImportFormatHelp"]</li>
-                    <li>@Localizer["CsvImportCommonServerHelp"]</li>
-                    <li>@Localizer["CsvImportNoConnectionTest"]</li>
+                    <li>同一个文件可混放 Gmail、Yahoo、GMX 和 Outlook，程序会逐行识别，无需先选协议。</li>
+                    <li>每行只需提供该账号现有的应用专用密码或 OAuth 凭证；两种都有时会自动依次尝试。</li>
+                    <li>导入后会验证收件登录；首次刷新时再同步最近 30 天邮件。</li>
                     <li>@Localizer["CsvImportAdminOnlyNote"]</li>
                 </ul>
                 <a asp-action="DownloadExampleCsv" class="btn btn-sm btn-outline-info">
@@ -58,13 +58,14 @@
 
                 <div class="form-section">
                     <div class="form-section-header">
-                        <i class="bi bi-server me-1"></i> @Localizer["CommonServerSettings"]
+                        <i class="bi bi-server me-1"></i> 自动识别和登录方式
                     </div>
 
                     <div class="alert alert-light border mb-3">
-                        <strong>支持 Gmail、Yahoo、GMX 的 CSV/TXT，以及 Outlook TXT。</strong>
-                        Outlook 可直接上传四列 Tab 分隔的 TXT：<code>邮箱　密码　Client ID　Refresh Token</code>；微软密码不会保存，收发件使用 OAuth Token。
+                        <strong>一个文件可以混放 Gmail、Yahoo、GMX 和 Outlook，程序会逐行自动识别。</strong>
+                        Outlook 使用四列 Tab 分隔格式：<code>邮箱　密码占位列　Client ID　Refresh Token</code>；微软密码不会保存，收发件优先使用 OAuth。
                         Gmail/Yahoo/GMX 密码模式使用两列：<code>邮箱、SMTP授权码</code>。Gmail 密码可直接粘贴 Google 显示的分组格式；程序会自动删除空格和复制时混入的不可见分隔符，清理后必须恰好 16 位。Gmail OAuth 使用 <code>邮箱、Client ID、Refresh Token</code>；Yahoo OAuth 还必须增加 <code>Client Secret、Redirect URI</code>。TXT 使用相同列顺序并以 Tab 分隔。GMX 官方不支持 OAuth。
+                        Gmail/Yahoo 同时提供应用专用密码和 OAuth 时，收件与发件都会先试 OAuth，授权失效再自动尝试应用专用密码。
                         姓名会自动取邮箱 <code>@@</code> 前去掉数字后的内容，并根据邮箱域名设置收发件服务器和 TLS。
                         <code>名字</code>、<code>分组</code>、<code>密码</code>、<code>辅助邮箱</code>、<code>2fa</code>、序号和使用状态都会被忽略。
                     </div>

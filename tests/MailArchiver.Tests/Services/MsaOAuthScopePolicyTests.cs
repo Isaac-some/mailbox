@@ -5,15 +5,16 @@ namespace MailArchiver.Tests.Services;
 public class MsaOAuthScopePolicyTests
 {
     [Fact]
-    public void Requested_scopes_include_IMAP_Graph_send_and_offline_access()
+    public void Requested_scopes_include_IMAP_SMTP_Graph_send_and_offline_access()
     {
         Assert.Contains(MsaOAuthScopePolicy.Imap, MsaOAuthScopePolicy.RequestedScopes);
         Assert.Contains(MsaOAuthScopePolicy.GraphMailSend, MsaOAuthScopePolicy.RequestedScopes);
-        Assert.DoesNotContain("https://outlook.office.com/SMTP.Send", MsaOAuthScopePolicy.RequestedScopes);
+        Assert.Contains(MsaOAuthScopePolicy.SmtpSend, MsaOAuthScopePolicy.RequestedScopes);
         Assert.Contains("offline_access", MsaOAuthScopePolicy.RequestedScopes);
         Assert.Equal(MsaOAuthScopePolicy.Imap, MsaOAuthScopePolicy.RequestedScopes[0]);
         Assert.Contains(MsaOAuthScopePolicy.Imap, MsaOAuthScopePolicy.ImapRefreshScopes);
         Assert.DoesNotContain(MsaOAuthScopePolicy.GraphMailSend, MsaOAuthScopePolicy.ImapRefreshScopes);
+        Assert.Equal([MsaOAuthScopePolicy.SmtpSend, "offline_access"], MsaOAuthScopePolicy.SmtpRefreshScopes);
     }
 
     [Theory]
