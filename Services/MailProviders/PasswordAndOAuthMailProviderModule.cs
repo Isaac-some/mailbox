@@ -4,6 +4,7 @@ using MailArchiver.Models;
 using MailKit.Net.Imap;
 using MailKit.Net.Smtp;
 using MailKit.Security;
+using Microsoft.Extensions.Options;
 using MimeKit;
 
 namespace MailArchiver.Services.MailProviders;
@@ -12,13 +13,16 @@ public abstract class PasswordAndOAuthMailProviderModule : IMailProviderModule
 {
     private readonly IExternalOAuthTokenManager _tokenManager;
     private readonly ICredentialEncryptionService _credentialEncryption;
+    private readonly MailProxyOptions _mailProxyOptions;
 
     protected PasswordAndOAuthMailProviderModule(
         IExternalOAuthTokenManager tokenManager,
-        ICredentialEncryptionService credentialEncryption)
+        ICredentialEncryptionService credentialEncryption,
+        IOptions<MailProxyOptions>? mailProxyOptions = null)
     {
         _tokenManager = tokenManager;
         _credentialEncryption = credentialEncryption;
+        _mailProxyOptions = mailProxyOptions?.Value ?? new MailProxyOptions();
     }
 
     public abstract MailProviderKind Kind { get; }
@@ -91,6 +95,9 @@ public abstract class PasswordAndOAuthMailProviderModule : IMailProviderModule
             throw new InvalidOperationException($"{DisplayName} 账号没有可用的发件凭据。");
 
         using var client = new SmtpClient();
+        MailProxyClientFactory.Apply(client, _mailProxyOptions);
+        client.ServerCertificateValidationCallback = static (_, _, chain, errors) =>
+            MailCertificatePolicy.IsAccepted(errors, chain);
         await client.ConnectAsync(GetSmtpHost(account), SmtpPort, SmtpSocketOptions, cancellationToken);
         if (HasOAuth(account))
             await AuthenticateOAuthAsync(client, account, cancellationToken);

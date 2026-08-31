@@ -32,15 +32,15 @@ public class GmailAppPasswordPolicyTests
             () => CreateGmailModule().NormalizeAppPassword(password));
 
         Assert.Equal(
-            "Gmail 应用专用密码去除空白后必须恰好是 16 位；请使用 Google 生成的应用专用密码，不是 Google 登录密码。",
+            "Gmail 应用专用密码去除空白和不可见格式字符后必须恰好是 16 位；请使用 Google 生成的应用专用密码，不是 Google 登录密码。",
             exception.Message);
     }
 
     [Fact]
-    public void Gmail_removes_all_whitespace_before_validating_the_app_password()
+    public void Gmail_removes_unicode_spacing_and_invisible_format_characters_before_validating()
     {
         var normalized = CreateGmailModule().NormalizeAppPassword(
-            "\tabcd\u00a0efgh\u2003ijkl\r\nmnop ");
+            "\tabcd\u00a0efgh\u2003\u200bijkl\ufeff\u2060\r\nmnop ");
 
         Assert.Equal("abcdefghijklmnop", normalized);
     }

@@ -232,10 +232,32 @@ public sealed class OutboundMailTasksController : Controller
     [HttpGet]
     public IActionResult DownloadTemplate()
     {
+        return File(
+            BuildDownloadTemplate(DateTime.UtcNow, _displayTimeZone),
+            "text/csv; charset=utf-8",
+            "发件任务模板.csv");
+    }
+
+    internal static byte[] BuildDownloadTemplate(DateTime utcNow, TimeZoneInfo displayTimeZone)
+    {
+        ArgumentNullException.ThrowIfNull(displayTimeZone);
+
+        var firstSendAt = TimeZoneInfo.ConvertTimeFromUtc(
+            DateTime.SpecifyKind(utcNow, DateTimeKind.Utc).AddMinutes(10),
+            displayTimeZone);
+        firstSendAt = new DateTime(
+            firstSendAt.Year,
+            firstSendAt.Month,
+            firstSendAt.Day,
+            firstSendAt.Hour,
+            firstSendAt.Minute,
+            0,
+            DateTimeKind.Unspecified);
+        var secondSendAt = firstSendAt.AddMinutes(1);
         var content = "\uFEFF时间,发件邮箱,收件邮箱,主题,正文\r\n" +
-                      "2026-08-24 15:30:00,sender1@outlook.com,target@gmx.com,测试邮件 01,这是第 1 封测试邮件。\r\n" +
-                      "2026-08-24 15:31:00,sender2@outlook.com,target@gmx.com,测试邮件 02,\"正文可以包含逗号，也可以每行不同。\"\r\n";
-        return File(Encoding.UTF8.GetBytes(content), "text/csv; charset=utf-8", "发件任务模板.csv");
+                      $"{firstSendAt:yyyy-MM-dd HH:mm:ss},sender1@outlook.com,target@gmx.com,测试邮件 01,这是第 1 封测试邮件。\r\n" +
+                      $"{secondSendAt:yyyy-MM-dd HH:mm:ss},sender2@outlook.com,target@gmx.com,测试邮件 02,\"正文可以包含逗号，也可以每行不同。\"\r\n";
+        return Encoding.UTF8.GetBytes(content);
     }
 
     [HttpPost]

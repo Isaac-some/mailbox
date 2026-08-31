@@ -82,12 +82,14 @@ namespace MailArchiver.Services
                     if (batchIds.Count == 0)
                         break;
 
-                    // Batch UPDATE via raw SQL with IN-list.
-                    var idList = string.Join(",", batchIds);
-                    var rowsAffected = await context.Database.ExecuteSqlRawAsync(
-                        $@"UPDATE mail_archiver.""ArchivedEmails"" SET ""IsLocked"" = {targetLiteral}
-                           WHERE ""Id"" IN ({idList});",
-                        stoppingToken);
+                    // Use EF's set-based update so the same policy application works
+                    // against PostgreSQL in the browser edition and SQLite in the
+                    // packaged macOS/Windows apps.
+                    var rowsAffected = await context.ArchivedEmails
+                        .Where(email => batchIds.Contains(email.Id))
+                        .ExecuteUpdateAsync(
+                            setters => setters.SetProperty(email => email.IsLocked, targetLocked),
+                            stoppingToken);
 
                     totalUpdated += rowsAffected;
                     batches++;

@@ -484,8 +484,8 @@ namespace MailArchiver.Controllers
             if (attachment.ContentType == "application/pdf")
             {
                 // Add headers to ensure PDF can be displayed inline
-                Response.Headers.Add("Content-Disposition", "inline");
-                Response.Headers.Add("X-Content-Type-Options", "nosniff");
+                Response.Headers["Content-Disposition"] = "inline";
+                Response.Headers["X-Content-Type-Options"] = "nosniff";
             }
 
             // Return the attachment content without forcing download
@@ -533,7 +533,6 @@ namespace MailArchiver.Controllers
                 var zipBytes = memoryStream.ToArray();
                 var fileName = $"attachments-{email.Id}-{DateTime.Now:yyyyMMdd-HHmmss}.zip";
 
-                Response.Headers.Add("Content-Disposition", $"attachment; filename=\"{fileName}\"");
                 return File(zipBytes, "application/zip", fileName);
             }
         }
@@ -602,7 +601,6 @@ namespace MailArchiver.Controllers
                         break;
                 }
 
-                Response.Headers.Add("Content-Disposition", $"attachment; filename=\"{fileName}\"");
                 return File(fileBytes, contentType, fileName);
             }
             catch (Exception ex)
@@ -2525,6 +2523,9 @@ namespace MailArchiver.Controllers
             return sanitizer;
         }
 
+        internal static string SanitizeHtmlFragmentForDisplay(string html)
+            => _htmlSanitizer.Sanitize(html);
+
         // Hilfsmethode zur Bereinigung von HTML für die sichere Darstellung
         private string SanitizeHtml(string html, bool blockExternalResources = false)
         {
@@ -2534,7 +2535,7 @@ namespace MailArchiver.Controllers
             // Allowlist-based sanitization (removes scripts, on* handlers, javascript: URIs,
             // <iframe>, <object>, <embed>, <form>, etc.) — robust against bypass vectors that
             // defeated the previous regex approach.
-            html = _htmlSanitizer.Sanitize(html);
+            html = SanitizeHtmlFragmentForDisplay(html);
 
             // Block external resources if configured
             if (blockExternalResources)

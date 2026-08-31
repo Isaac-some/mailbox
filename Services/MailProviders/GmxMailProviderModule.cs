@@ -1,4 +1,5 @@
 using MailArchiver.Models;
+using Microsoft.Extensions.Options;
 
 namespace MailArchiver.Services.MailProviders;
 
@@ -6,8 +7,9 @@ public sealed class GmxMailProviderModule : PasswordAndOAuthMailProviderModule
 {
     public GmxMailProviderModule(
         IExternalOAuthTokenManager tokenManager,
-        ICredentialEncryptionService credentialEncryption)
-        : base(tokenManager, credentialEncryption) { }
+        ICredentialEncryptionService credentialEncryption,
+        IOptions<MailProxyOptions>? mailProxyOptions = null)
+        : base(tokenManager, credentialEncryption, mailProxyOptions) { }
 
     public override MailProviderKind Kind => MailProviderKind.Gmx;
     public override string DisplayName => "GMX";

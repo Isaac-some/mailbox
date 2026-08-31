@@ -68,7 +68,9 @@
     <script>
         document.getElementById('composeForm')?.addEventListener('submit', function () {
             const button = document.getElementById('sendButton');
-            if (!button || !this.checkValidity()) return;
+            if (!button ||
+                (window.jQuery && !window.jQuery(this).valid()) ||
+                !this.checkValidity()) return;
             button.disabled = true;
             button.innerHTML = '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span> 正在发送';
         });

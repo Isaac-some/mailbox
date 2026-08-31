@@ -1,4 +1,5 @@
 using MailArchiver.Models;
+using Microsoft.Extensions.Options;
 
 namespace MailArchiver.Services.MailProviders;
 
@@ -12,8 +13,9 @@ public sealed class YahooMailProviderModule : PasswordAndOAuthMailProviderModule
 
     public YahooMailProviderModule(
         IExternalOAuthTokenManager tokenManager,
-        ICredentialEncryptionService credentialEncryption)
-        : base(tokenManager, credentialEncryption) { }
+        ICredentialEncryptionService credentialEncryption,
+        IOptions<MailProxyOptions>? mailProxyOptions = null)
+        : base(tokenManager, credentialEncryption, mailProxyOptions) { }
 
     public override MailProviderKind Kind => MailProviderKind.Yahoo;
     public override string DisplayName => "Yahoo";

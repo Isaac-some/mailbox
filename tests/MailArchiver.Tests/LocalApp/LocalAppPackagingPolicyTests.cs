@@ -96,6 +96,19 @@ public class LocalAppPackagingPolicyTests
     }
 
     [Fact]
+    public void Compose_validation_runs_before_disabling_the_send_button()
+    {
+        var page = ReadBundledFile("OutboundMailIndex.cshtml");
+        const string unobtrusiveValidation = "window.jQuery(this).valid()";
+        const string disableButton = "button.disabled = true";
+
+        Assert.Contains(unobtrusiveValidation, page, StringComparison.Ordinal);
+        Assert.True(
+            page.IndexOf(unobtrusiveValidation, StringComparison.Ordinal) <
+            page.IndexOf(disableButton, StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Dmg_build_uses_the_app_version_in_its_only_output_name()
     {
         var source = ReadBundledFile("build-dmg.sh");
@@ -147,8 +160,21 @@ public class LocalAppPackagingPolicyTests
         Assert.Contains("Google 应用专用密码，不是 Google 登录密码", createPage, StringComparison.Ordinal);
         Assert.Contains("xxxx xxxx xxxx xxxx", createPage, StringComparison.Ordinal);
         Assert.Contains("Google 应用专用密码，不是 Google 登录密码", editPage, StringComparison.Ordinal);
-        Assert.Contains("Gmail 密码可带空格", importPage, StringComparison.Ordinal);
+        Assert.Contains("复制时混入的不可见分隔符", importPage, StringComparison.Ordinal);
         Assert.Contains("carol@gmail.com\\tabcd efgh ijkl mnop", controller, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Mac_launcher_forwards_an_active_GW_local_proxy_to_the_mail_server()
+    {
+        var launcher = ReadBundledFile("KouziMailAssistant.swift");
+
+        Assert.Contains("Application Support/gw/vortex.json", launcher, StringComparison.Ordinal);
+        Assert.Contains("proxy_port", launcher, StringComparison.Ordinal);
+        Assert.Contains("MailProxy__Enabled", launcher, StringComparison.Ordinal);
+        Assert.Contains("MailProxy__Type", launcher, StringComparison.Ordinal);
+        Assert.Contains("MailProxy__Host", launcher, StringComparison.Ordinal);
+        Assert.Contains("MailProxy__Port", launcher, StringComparison.Ordinal);
     }
 
     [Fact]

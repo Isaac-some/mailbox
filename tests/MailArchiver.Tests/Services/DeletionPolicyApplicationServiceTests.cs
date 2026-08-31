@@ -2,6 +2,7 @@ using MailArchiver.Data;
 using MailArchiver.Models;
 using MailArchiver.Services;
 using MailArchiver.Tests.Infrastructure;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -12,9 +13,8 @@ namespace MailArchiver.Tests.Services;
 
 /// <summary>
 /// Integration tests for <see cref="DeletionPolicyApplicationService"/>.
-/// The service uses raw SQL (ExecuteSqlRawAsync) on the EF context, so it participates in
-/// the transaction. However, it applies a 10-second startup delay and runs as a background
-/// service, so tests must start it, poll for the expected change, then stop it cleanly.
+/// The service applies a 10-second startup delay and runs as a background service,
+/// so tests must start it, poll for the expected change, then stop it cleanly.
 /// </summary>
 [Collection(TestDbFixture.CollectionName)]
 public class DeletionPolicyApplicationServiceTests
@@ -79,7 +79,6 @@ public class DeletionPolicyApplicationServiceTests
         using var cts = new CancellationTokenSource(timeout);
         await svc.StartAsync(cts.Token);
 
-        bool reached = false;
         var deadline = DateTime.UtcNow + timeout;
         try
         {
@@ -87,7 +86,7 @@ public class DeletionPolicyApplicationServiceTests
             {
                 ctx.ChangeTracker.Clear();
                 var current = await ctx.ArchivedEmails.AsNoTracking().FirstAsync(e => e.Id == emailId);
-                if (current.IsLocked == expectedLocked) { reached = true; break; }
+                if (current.IsLocked == expectedLocked) break;
                 await Task.Delay(500);
             }
         }
@@ -102,32 +101,78 @@ public class DeletionPolicyApplicationServiceTests
         return final.IsLocked;
     }
 
-    [Fact(Skip = "Cannot reliably test against a Dev DB with existing locked emails: the service's " +
-                  "ExecuteSqlRawAsync uses FormattableString interpolation for the IN-list, which " +
-                  "produces WHERE \"Id\" IN (@p0) with a single comma-joined string parameter instead " +
-                  "of a proper SQL IN-list. When the batch contains more than one ID (which happens " +
-                  "when real emails exist in the Dev DB alongside the test email), the UPDATE fails " +
-                  "and no rows are changed. This is a production code limitation, not a test issue.")]
-    public async Task ExecuteAsync_DeletionAllowedTrue_SetsIsLockedFalse()
+    [Fact]
+    public async Task ExecuteAsync_DeletionAllowedTrue_UnlocksMultipleEmailsInSameBatch()
     {
         var ctx = _fixture.CreateContext();
         try
         {
             var acct = await SeedAccountAsync(ctx);
-            var email = BuildEmail(acct, isLocked: true);
-            ctx.ArchivedEmails.Add(email);
+            var emails = new[]
+            {
+                BuildEmail(acct, isLocked: true),
+                BuildEmail(acct, isLocked: true)
+            };
+            ctx.ArchivedEmails.AddRange(emails);
             await ctx.SaveChangesAsync();
-            var emailId = email.Id;
 
-            var finalLocked = await RunAndWaitForLockStateAsync(ctx, emailId,
+            var finalLocked = await RunAndWaitForLockStateAsync(ctx, emails[0].Id,
                 deletionAllowed: true, expectedLocked: false, timeout: TimeSpan.FromSeconds(30));
             Assert.False(finalLocked);
+
+            ctx.ChangeTracker.Clear();
+            var lockStates = await ctx.ArchivedEmails.AsNoTracking()
+                .Where(email => emails.Select(candidate => candidate.Id).Contains(email.Id))
+                .Select(email => email.IsLocked)
+                .ToListAsync();
+            Assert.Equal(2, lockStates.Count);
+            Assert.All(lockStates, Assert.False);
         }
         finally
         {
             await CleanupTestAccountAsync(ctx);
             await ctx.DisposeAsync();
         }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_LocalSqlite_UnlocksMultipleEmailsInSameBatch()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var options = new DbContextOptionsBuilder<MailArchiverDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        await using (var seedContext = new MailArchiverDbContext(options))
+        {
+            await seedContext.Database.EnsureCreatedAsync();
+            var account = await SeedAccountAsync(seedContext);
+            seedContext.ArchivedEmails.AddRange(
+                BuildEmail(account, isLocked: true),
+                BuildEmail(account, isLocked: true));
+            await seedContext.SaveChangesAsync();
+        }
+
+        var services = new ServiceCollection();
+        services.AddDbContext<MailArchiverDbContext>(builder => builder.UseSqlite(connection));
+        await using var provider = services.BuildServiceProvider();
+        var service = new DeletionPolicyApplicationService(
+            NullLogger<DeletionPolicyApplicationService>.Instance,
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            Options.Create(new DeletionPolicyOptions { DeletionAllowed = true }));
+
+        await service.StartAsync(CancellationToken.None);
+        await Task.Delay(TimeSpan.FromSeconds(12));
+        await service.StopAsync(new CancellationTokenSource(TimeSpan.FromSeconds(5)).Token);
+
+        await using var verifyContext = new MailArchiverDbContext(options);
+        var lockStates = await verifyContext.ArchivedEmails.AsNoTracking()
+            .Select(email => email.IsLocked)
+            .ToListAsync();
+        Assert.Equal(2, lockStates.Count);
+        Assert.All(lockStates, Assert.False);
     }
 
     [Fact]

@@ -20,17 +20,20 @@ namespace MailArchiver.Services.Providers.Imap
         private readonly MailSyncOptions _mailSyncOptions;
         private readonly BatchOperationOptions _batchOptions;
         private readonly IMailProviderRegistry _mailProviderRegistry;
+        private readonly MailProxyOptions _mailProxyOptions;
 
         public ImapConnectionFactory(
             ILogger<ImapConnectionFactory> logger,
             IOptions<MailSyncOptions> mailSyncOptions,
             IOptions<BatchOperationOptions> batchOptions,
-            IMailProviderRegistry mailProviderRegistry)
+            IMailProviderRegistry mailProviderRegistry,
+            IOptions<MailProxyOptions>? mailProxyOptions = null)
         {
             _logger = logger;
             _mailSyncOptions = mailSyncOptions.Value;
             _batchOptions = batchOptions.Value;
             _mailProviderRegistry = mailProviderRegistry;
+            _mailProxyOptions = mailProxyOptions?.Value ?? new MailProxyOptions();
         }
 
         /// <summary>
@@ -38,7 +41,9 @@ namespace MailArchiver.Services.Providers.Imap
         /// </summary>
         public ImapClient CreateImapClient(string accountName)
         {
-            return new ImapClient();
+            var client = new ImapClient();
+            MailProxyClientFactory.Apply(client, _mailProxyOptions);
+            return client;
         }
 
         /// <summary>
@@ -151,8 +156,9 @@ namespace MailArchiver.Services.Providers.Imap
         /// </summary>
         public bool ServerCertificateValidationCallback(object sender, X509Certificate certificate, X509Chain chain, SslPolicyErrors sslPolicyErrors)
         {
-            // If there are no SSL policy errors, the certificate is valid
-            if (sslPolicyErrors == SslPolicyErrors.None)
+            // A trusted certificate remains acceptable when only the online revocation
+            // service is unavailable. Name mismatches and trust-chain errors stay blocked.
+            if (MailCertificatePolicy.IsAccepted(sslPolicyErrors, chain))
             {
                 return true;
             }

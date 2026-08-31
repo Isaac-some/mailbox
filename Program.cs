@@ -111,6 +111,8 @@ builder.Services.Configure<TenantManagementOptions>(
 // Add Mail Sync Options
 builder.Services.Configure<MailSyncOptions>(
     builder.Configuration.GetSection(MailSyncOptions.MailSync));
+builder.Services.Configure<MailProxyOptions>(
+    builder.Configuration.GetSection(MailProxyOptions.SectionName));
 
 // Add Upload Options
 builder.Services.Configure<UploadOptions>(
