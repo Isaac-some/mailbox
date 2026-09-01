@@ -81,6 +81,13 @@ else
     -p:PublishTrimmed=false
 fi
 
+# ASP.NET's static-web-assets manifest can point back to the source checkout
+# when publishing from a prepared output directory. Bundle the actual assets so
+# the installed app never depends on the build machine's wwwroot path.
+if [[ -d "$PROJECT_DIR/wwwroot" && ! -d "$APP_BUILD_PATH/Contents/Resources/server/wwwroot" ]]; then
+  ditto "$PROJECT_DIR/wwwroot" "$APP_BUILD_PATH/Contents/Resources/server/wwwroot"
+fi
+
 for excluded_directory in local-app tests; do
   if [[ -e "$APP_BUILD_PATH/Contents/Resources/server/$excluded_directory" ]]; then
     print -u2 "服务发布物错误包含目录：$excluded_directory"

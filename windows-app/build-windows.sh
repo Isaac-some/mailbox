@@ -28,6 +28,12 @@ mkdir -p "$SERVER_DIR"
   -p:PublishSingleFile=false \
   -p:PublishTrimmed=false
 
+# Keep static assets beside the server binaries. The generated static-web-assets
+# manifest may otherwise reference the source checkout instead of this package.
+if [[ -d "$PROJECT_DIR/wwwroot" ]]; then
+  ditto "$PROJECT_DIR/wwwroot" "$SERVER_DIR/wwwroot"
+fi
+
 "$DOTNET_COMMAND" publish "$SCRIPT_DIR/KouziMailAssistant.Windows.csproj" \
   --configuration Release \
   --runtime win-x64 \
