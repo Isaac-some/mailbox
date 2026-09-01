@@ -38,4 +38,18 @@ public class CsvImportHeaderPolicyTests
             ["邮箱", "Client ID", "Client Secret", "Refresh Token", "Redirect URI"], out var columns));
         Assert.Equal(4, columns["redirect_uri"]);
     }
+
+    [Fact]
+    public void TryCreateCanonicalIndex_accepts_minimal_upstream_contract_with_optional_client_id()
+    {
+        var accepted = CsvImportHeaderPolicy.TryCreateCanonicalIndex(
+            ["邮箱（必填）", "授权凭据（必填）", "域名（可选）", "Client ID（可选：Outlook OAuth2 Refresh Token 必填）"],
+            out var columns);
+
+        Assert.True(accepted);
+        Assert.Equal(0, columns["email"]);
+        Assert.Equal(1, columns["app_password"]);
+        Assert.Equal(2, columns["domain"]);
+        Assert.Equal(3, columns["client_id"]);
+    }
 }

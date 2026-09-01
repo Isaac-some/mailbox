@@ -69,7 +69,9 @@ public class EmailsApiController : ApiControllerBase
             return BadRequest();
         }
 
-        var allowed = await GetAllowedAccountIdsAsync();
+        var allowedUserId = User.IsInRole("Admin") ? (int?)null : GetCurrentUserId();
+        if (!User.IsInRole("Admin") && !allowedUserId.HasValue)
+            return Forbid();
         bool? isOutgoingValue = isOutgoing switch
         {
             DirectionParseResult.Incoming => false,
@@ -86,9 +88,10 @@ public class EmailsApiController : ApiControllerBase
             isOutgoingValue,
             skip,
             pageSize,
-            allowed,
-            canonicalSortBy,
-            canonicalSortOrder);
+            allowedAccountIds: null,
+            sortBy: canonicalSortBy,
+            sortOrder: canonicalSortOrder,
+            allowedUserId: allowedUserId);
 
         var result = new PagedResultDto<EmailSummaryDto>
         {
@@ -110,12 +113,16 @@ public class EmailsApiController : ApiControllerBase
     [HttpGet("{id:int}")]
     public async Task<ActionResult<EmailDetailDto>> GetMessage(int id)
     {
-        var allowed = await GetAllowedAccountIdsAsync();
+        var currentUserId = GetCurrentUserId();
+        var isAdmin = User.IsInRole("Admin");
         var email = await _context.ArchivedEmails
             .Include(e => e.Attachments)
-            .FirstOrDefaultAsync(e => e.Id == id);
+            .FirstOrDefaultAsync(e => e.Id == id &&
+                (isAdmin ||
+                 (currentUserId.HasValue && _context.UserMailAccounts.Any(link =>
+                     link.UserId == currentUserId.Value && link.MailAccountId == e.MailAccountId))));
 
-        if (email == null || !allowed.Contains(email.MailAccountId))
+        if (email == null)
         {
             return NotFound();
         }
@@ -138,13 +145,17 @@ public class EmailsApiController : ApiControllerBase
             return Problem(statusCode: 403, title: "Attachment downloads are disabled.");
         }
 
-        var allowed = await GetAllowedAccountIdsAsync();
+        var currentUserId = GetCurrentUserId();
+        var isAdmin = User.IsInRole("Admin");
         var att = await _context.EmailAttachments
             .Include(a => a.AttachmentContent)
             .Include(a => a.ArchivedEmail)
-            .FirstOrDefaultAsync(a => a.Id == attachmentId && a.ArchivedEmailId == id);
+            .FirstOrDefaultAsync(a => a.Id == attachmentId && a.ArchivedEmailId == id &&
+                (isAdmin ||
+                 (currentUserId.HasValue && _context.UserMailAccounts.Any(link =>
+                     link.UserId == currentUserId.Value && link.MailAccountId == a.ArchivedEmail.MailAccountId))));
 
-        if (att == null || !allowed.Contains(att.ArchivedEmail.MailAccountId))
+        if (att == null)
         {
             return NotFound();
         }

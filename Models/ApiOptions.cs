@@ -1,7 +1,7 @@
 namespace MailArchiver.Models
 {
     /// <summary>
-    /// Configuration for the read-only REST API, bound from the "Api" section.
+    /// Configuration for the REST API, bound from the "Api" section.
     /// The API is disabled by default — a safe default for upstream.
     /// </summary>
     public class ApiOptions

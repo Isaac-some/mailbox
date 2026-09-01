@@ -19,6 +19,9 @@ public interface IOutlookSmtpMailSender
         MimeMessage message,
         string password,
         CancellationToken cancellationToken);
+
+    Task<bool> TestAsync(MailAccount account, MsaAccessToken token, CancellationToken cancellationToken);
+    Task<bool> TestWithPasswordAsync(MailAccount account, string password, CancellationToken cancellationToken);
 }
 
 public sealed class OutlookSmtpMailSender : IOutlookSmtpMailSender
@@ -63,5 +66,47 @@ public sealed class OutlookSmtpMailSender : IOutlookSmtpMailSender
         await client.AuthenticateAsync(account.Username ?? account.EmailAddress, password, cancellationToken);
         await client.SendAsync(message, cancellationToken);
         await client.DisconnectAsync(true, cancellationToken);
+    }
+
+    public async Task<bool> TestAsync(MailAccount account, MsaAccessToken token, CancellationToken cancellationToken)
+    {
+        using var client = new SmtpClient();
+        try
+        {
+            MailProxyClientFactory.Apply(client, _mailProxyOptions);
+            client.ServerCertificateValidationCallback = static (_, _, chain, errors) =>
+                MailCertificatePolicy.IsAccepted(errors, chain);
+            await client.ConnectAsync("smtp-mail.outlook.com", 587, SecureSocketOptions.StartTls, cancellationToken);
+            client.AuthenticationMechanisms.Remove("GSSAPI");
+            client.AuthenticationMechanisms.Remove("NEGOTIATE");
+            await client.AuthenticateAsync(new SaslMechanismOAuth2(token.Username, token.AccessToken), cancellationToken);
+            await client.DisconnectAsync(true, cancellationToken);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public async Task<bool> TestWithPasswordAsync(MailAccount account, string password, CancellationToken cancellationToken)
+    {
+        using var client = new SmtpClient();
+        try
+        {
+            MailProxyClientFactory.Apply(client, _mailProxyOptions);
+            client.ServerCertificateValidationCallback = static (_, _, chain, errors) =>
+                MailCertificatePolicy.IsAccepted(errors, chain);
+            await client.ConnectAsync("smtp-mail.outlook.com", 587, SecureSocketOptions.StartTls, cancellationToken);
+            client.AuthenticationMechanisms.Remove("GSSAPI");
+            client.AuthenticationMechanisms.Remove("NEGOTIATE");
+            await client.AuthenticateAsync(account.Username ?? account.EmailAddress, password, cancellationToken);
+            await client.DisconnectAsync(true, cancellationToken);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 }

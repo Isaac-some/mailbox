@@ -44,7 +44,8 @@ Use this option if your Mail Archiver instance has a default Client ID configure
 8. Enter the code from step 6.
 9. A consent screen appears, showing **"Mail-Archiver"** requesting IMAP receiving and Microsoft Graph `Mail.Send` access. Review and approve.
 10. The Mail Archiver page automatically detects success and redirects to the account edit view.
-11. Done — synchronization starts automatically according to the account settings.
+11. Done — the account is authorized. Mail content is not downloaded automatically;
+    it is fetched when you open the mailbox or click **Refresh Mail**.
 
 > ⚠️ **Unverified Publisher Warning**: The consent screen may show a warning that "Mail-Archiver" is an unverified publisher. This is expected — publisher verification requires a business identity (Microsoft Partner Network account) and is not needed for the flow to work. The app functions normally without it.
 

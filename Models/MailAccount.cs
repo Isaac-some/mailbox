@@ -12,6 +12,11 @@ public class MailAccount
     public string? Username { get; set; }
     public string? Password { get; set; }
     public bool UseSSL { get; set; }
+    public string? SmtpServer { get; set; }
+    public int? SmtpPort { get; set; }
+    public bool? SmtpUseSSL { get; set; }
+    public string? EndpointDiscoveryStatus { get; set; }
+    public DateTime? EndpointDiscoveryLastCheckedAt { get; set; }
     public DateTime LastSync { get; set; }
     public bool IsEnabled { get; set; } = true;
     
@@ -43,6 +48,14 @@ public class MailAccount
     public DateTime? OAuthTokenExpiry { get; set; }
     public string? OAuthGrantedScopes { get; set; }
     public string? OAuthRedirectUri { get; set; }
+
+    // Credential intake metadata. The raw credential remains encrypted in Password
+    // or stored in the existing OAuth fields; these fields describe the last
+    // classification/verification result and are safe to expose to the API caller.
+    public MailCredentialKind CredentialKind { get; set; } = MailCredentialKind.Unknown;
+    public MailCredentialScope CredentialScope { get; set; } = MailCredentialScope.Unknown;
+    public string? CredentialDetectionStatus { get; set; }
+    public DateTime? CredentialLastCheckedAt { get; set; }
 
     // Per-account sync scheduling
     public int? SyncIntervalMinutes { get; set; }

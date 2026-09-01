@@ -189,6 +189,24 @@ public class OutlookMailProviderModuleTests
             Password = password;
             return Task.CompletedTask;
         }
+
+        public Task<bool> TestAsync(
+            MailAccount account,
+            MsaAccessToken token,
+            CancellationToken cancellationToken)
+        {
+            AccessToken = token.AccessToken;
+            return Task.FromResult(true);
+        }
+
+        public Task<bool> TestWithPasswordAsync(
+            MailAccount account,
+            string password,
+            CancellationToken cancellationToken)
+        {
+            Password = password;
+            return Task.FromResult(true);
+        }
     }
 
     private sealed class PassthroughEncryption : ICredentialEncryptionService

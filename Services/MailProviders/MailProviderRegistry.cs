@@ -12,6 +12,7 @@ public sealed class MailProviderRegistry : IMailProviderRegistry
         _modules = materialized.ToDictionary(module => module.Kind);
 
         var missing = Enum.GetValues<MailProviderKind>()
+            .Where(kind => kind != MailProviderKind.Custom)
             .Where(kind => !_modules.ContainsKey(kind))
             .ToList();
         if (missing.Count > 0)
@@ -38,11 +39,12 @@ public sealed class MailProviderRegistry : IMailProviderRegistry
             .Where(module => module.SupportsAddress(emailAddress))
             .ToList();
 
-        return matches.Count switch
-        {
-            1 => matches[0],
-            0 => throw new NotSupportedException("目前只支持 Gmail、Yahoo、GMX 和 Outlook 邮箱。"),
-            _ => throw new InvalidOperationException($"邮箱“{emailAddress}”匹配到多个邮箱模块。")
-        };
+        if (matches.Count == 1)
+            return matches[0];
+        if (matches.Count == 0 && _modules.TryGetValue(MailProviderKind.Custom, out var custom))
+            return custom;
+        if (matches.Count == 0)
+            throw new NotSupportedException("目前没有可用的自定义域名邮箱模块。");
+        throw new InvalidOperationException($"邮箱“{emailAddress}”匹配到多个邮箱模块。");
     }
 }

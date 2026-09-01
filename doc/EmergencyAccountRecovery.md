@@ -128,7 +128,6 @@ services:
       - Authentication__Password=TempEmergencyPass2026!
       
       # Other settings remain unchanged...
-      - MailSync__IntervalMinutes=15
       - TimeZone__DisplayTimeZoneId=Europe/Berlin
       # ... rest of configuration
     ports:

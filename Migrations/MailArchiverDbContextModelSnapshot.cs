@@ -48,6 +48,30 @@ namespace MailArchiver.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("CredentialKind")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("CredentialScope")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("CredentialDetectionStatus")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTime?>("CredentialLastCheckedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("EndpointDiscoveryStatus")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTime?>("EndpointDiscoveryLastCheckedAt")
+                        .HasColumnType("timestamp without time zone");
+
                     b.Property<int?>("FullSyncIntervalHours")
                         .HasColumnType("integer");
 
@@ -99,6 +123,15 @@ namespace MailArchiver.Migrations
 
                     b.Property<string>("Password")
                         .HasColumnType("text");
+
+                    b.Property<int?>("SmtpPort")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("SmtpServer")
+                        .HasColumnType("text");
+
+                    b.Property<bool?>("SmtpUseSSL")
+                        .HasColumnType("boolean");
 
                     b.Property<string>("Provider")
                         .HasMaxLength(10)

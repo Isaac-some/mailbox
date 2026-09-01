@@ -14,7 +14,7 @@ public static class MailProviderCredentialPolicy
         => provider switch
         {
             MailProviderKind.Outlook => MailCredentialPreference.OAuthFirst,
-            MailProviderKind.Gmail or MailProviderKind.Yahoo or MailProviderKind.Gmx
+            MailProviderKind.Gmail or MailProviderKind.Yahoo or MailProviderKind.Gmx or MailProviderKind.Custom
                 => MailCredentialPreference.AppPasswordFirst,
             _ => throw new NotSupportedException($"不支持邮箱服务商 {provider}。")
         };

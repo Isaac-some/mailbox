@@ -67,7 +67,7 @@
                             <label for="ProviderDisplay" class="form-label">@Localizer["Provider"]</label>
                         }
                         <select id="ProviderDisplay" class="form-select @(isLocalApp ? "d-none" : null)" aria-hidden="@(isLocalApp ? "true" : null)" tabindex="@(isLocalApp ? "-1" : null)">
-                            <option value="IMAP" selected="@(visualProvider == "IMAP")">Gmail / Yahoo / GMX</option>
+                            <option value="IMAP" selected="@(visualProvider == "IMAP")">IMAP / 自定义域名</option>
                             <option value="MSA" selected="@(visualProvider == "MSA")">Outlook 个人邮箱</option>
                             @if (!isLocalApp)
                             {
@@ -91,7 +91,7 @@
                             </style>
                             <label asp-for="Provider" class="form-label">@Localizer["Provider"]</label>
                             <select asp-for="Provider" class="form-select">
-                                <option value="IMAP" selected="@(Model.Provider == ProviderType.IMAP)">Gmail / Yahoo / GMX</option>
+                                <option value="IMAP" selected="@(Model.Provider == ProviderType.IMAP)">IMAP / 自定义域名</option>
                                 <option value="MSA" selected="@(Model.Provider == ProviderType.MSA)">Outlook 个人邮箱</option>
                             </select>
                             <span asp-validation-for="Provider" class="text-danger"></span>
@@ -357,27 +357,6 @@
                     </details>
                 </div>
 
-                @* Advanced: Sync Scheduling (collapsible) *@
-                <details class="form-advanced mt-3">
-                    <summary class="form-advanced-summary">
-                        <i class="bi bi-clock-history me-1"></i> @Localizer["SyncScheduling"]
-                    </summary>
-                    <div class="form-advanced-body">
-                        <div class="mb-3">
-                            <label asp-for="SyncIntervalMinutes" class="form-label">@Localizer["SyncIntervalMinutes"]</label>
-                            <input asp-for="SyncIntervalMinutes" class="form-control" type="number" min="1" placeholder="@Localizer["SyncIntervalMinutesPlaceholder"]" />
-                            <div class="form-text">@Localizer["SyncIntervalMinutesInfo"]</div>
-                            <span asp-validation-for="SyncIntervalMinutes" class="text-danger"></span>
-                        </div>
-                        <div class="mb-3">
-                            <label asp-for="FullSyncIntervalHours" class="form-label">@Localizer["FullSyncIntervalHours"]</label>
-                            <input asp-for="FullSyncIntervalHours" class="form-control" type="number" min="1" placeholder="@Localizer["FullSyncIntervalHoursPlaceholder"]" />
-                            <div class="form-text">@Localizer["FullSyncIntervalHoursInfo"]</div>
-                            <span asp-validation-for="FullSyncIntervalHours" class="text-danger"></span>
-                        </div>
-                    </div>
-                </details>
-
                 <div class="mt-4 d-flex gap-2">
                     <button type="submit" class="btn btn-primary" id="saveBtn">
                         <i class="bi bi-check-circle"></i> @(isLocalApp ? "添加账号" : Localizer["Save"].Value)
@@ -471,7 +450,7 @@
                 if (domain === 'outlook.com' || domain === 'hotmail.com' || domain === 'live.com' || domain === 'msn.com') {
                     return { name: 'Outlook', value: 'MSA', oauth: false };
                 }
-                return { name: null, value: null, oauth: false };
+                return { name: '自定义域名', value: 'IMAP', oauth: false };
             }
 
             function applyLocalProviderDetection() {
@@ -494,7 +473,7 @@
                         ? 'badge provider-detection__badge provider-detection__badge--unsupported'
                         : 'badge provider-detection__badge provider-detection__badge--pending';
                     providerDetectionText.textContent = hasCompleteAddress
-                        ? '目前支持 Gmail、Yahoo、GMX 和 Outlook'
+                        ? '按域名尝试 imap.<域名> 和 smtp.<域名>'
                         : '输入邮箱地址后自动识别';
                     imapSettings.style.display = 'none';
                     if (msaSettings) msaSettings.style.display = 'none';

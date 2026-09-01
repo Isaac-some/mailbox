@@ -26,7 +26,11 @@ public static class CsvImportHeaderPolicy
         }
 
         AddAnyIfPresent(headers, columns, "email", "邮箱", "email");
-        AddAnyIfPresent(headers, columns, "app_password", "SMTP授权码", "应用专用密码", "app_password");
+        AddAnyIfPresent(headers, columns, "app_password", "SMTP授权码", "应用专用密码", "授权凭据", "credential", "app_password");
+        // The upstream minimal contract may include a domain column. It is
+        // intentionally accepted as metadata; provider settings still come from
+        // the email domain and the fixed provider policy.
+        AddAnyIfPresent(headers, columns, "domain", "域名", "域名（可选）", "domain");
         AddAnyIfPresent(headers, columns, "client_id", "Client ID", "client_id", "客户端ID");
         AddAnyIfPresent(headers, columns, "client_secret", "Client Secret", "client_secret", "客户端密钥");
         AddAnyIfPresent(headers, columns, "refresh_token", "Refresh Token", "refresh_token", "刷新令牌");
@@ -45,7 +49,11 @@ public static class CsvImportHeaderPolicy
     {
         var index = headers
             .Select((header, position) => new { Header = header.Trim(), Position = position })
-            .FirstOrDefault(item => aliases.Contains(item.Header, StringComparer.OrdinalIgnoreCase))
+            .FirstOrDefault(item => aliases.Contains(item.Header, StringComparer.OrdinalIgnoreCase)
+                || (canonicalHeader == "email" && item.Header.StartsWith("邮箱", StringComparison.OrdinalIgnoreCase))
+                || (canonicalHeader == "app_password" && item.Header.StartsWith("授权凭据", StringComparison.OrdinalIgnoreCase))
+                || (canonicalHeader == "domain" && item.Header.StartsWith("域名", StringComparison.OrdinalIgnoreCase))
+                || (canonicalHeader == "client_id" && item.Header.StartsWith("Client ID", StringComparison.OrdinalIgnoreCase)))
             ?.Position;
 
         if (index.HasValue)

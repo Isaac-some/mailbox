@@ -33,7 +33,7 @@ services:
       - Authentication__CookieName=MailArchiverAuth
       - Authentication__CookieSameSite=Lax
 
-      # REST API Settings (read-only, disabled by default)
+      # REST API Settings (disabled by default)
       - Api__Enabled=false
       - Api__AllowAttachmentDownloads=true
       - Api__EnableSwaggerUi=true
@@ -41,16 +41,12 @@ services:
       - Api__MaxPageSize=100
       - Api__RateLimitPerMinute=120
 
-      # MailSync Settings
-      - MailSync__IntervalMinutes=15
+      # On-demand mail refresh settings
       - MailSync__TimeoutMinutes=60
       - MailSync__ConnectionTimeoutSeconds=180
       - MailSync__CommandTimeoutSeconds=300
-      - MailSync__AlwaysForceFullSync=false
       - MailSync__IgnoreSelfSignedCert=false
       - MailSync__MaxConcurrentSyncs=1
-      - MailSync__InterAccountDelaySeconds=0
-      - MailSync__FullSyncIntervalHours=24
 
       # BatchRestore Settings
       - BatchRestore__AsyncThreshold=50
@@ -93,7 +89,7 @@ services:
       - LocalImport__AllowedPaths__0=/data/import
 
       # CSV Import Settings (for bulk IMAP account import)
-      - CsvImport__MaxRows=5000
+      - CsvImport__MaxRows=0
       - CsvImport__MaxFileSizeBytes=10000000
 
       # Deletion Policy Settings (Optional - controls whether email deletion is allowed)
@@ -226,28 +222,22 @@ docker compose restart
   - `None`: Cookies are sent with all requests. Requires HTTPS and the `Secure` attribute. Only use this if you have specific cross-site requirements and understand the security implications.
 
 ### 🔌 REST API Settings
-The optional read-only REST API is **disabled by default**. See the [REST API guide](API.md) for the full reference.
-- `Api__Enabled`: Master switch for the read-only REST API (default `false`). When `false`, all `/api/*` routes return `404`.
+The optional REST API is **disabled by default**. See the [REST API guide](API.md) for the full reference.
+- `Api__Enabled`: Master switch for the REST API (default `false`). When `false`, all `/api/*` routes return `404`.
 - `Api__AllowAttachmentDownloads`: Allow downloading attachment bytes through the API (default `true`). When `false`, the attachment endpoint returns `403`.
 - `Api__EnableSwaggerUi`: Expose Swagger UI at `/apidocs` and the OpenAPI document at `/apidocs/spec/v1.json` (default `true`). Both require a logged-in browser session.
 - `Api__DefaultPageSize`: Default page size for list endpoints when not specified (default `20`).
 - `Api__MaxPageSize`: Maximum allowed page size; larger requests are clamped (default `100`).
 - `Api__RateLimitPerMinute`: Fixed-window request budget per API key per minute (default `120`).
 
-### 📨 MailSync Settings
-- `MailSync__IntervalSeconds`: The global quick-sync interval in seconds. The local Docker default is `21600` (six hours), which is intended to avoid a connection storm with thousands of accounts. Manual refresh from an account inbox remains immediate.
-- `MailSync__PollIntervalSeconds`: How often the scheduler checks for due accounts. The local Docker default is `30`.
+### 📨 On-demand Mail Refresh Settings
 - `MailSync__LookbackDays`: Maximum age of messages fetched during the initial sync. The default is `30`; set to `0` only if historical full-mailbox imports are explicitly required.
 - `MailSync__SyncInboxOnly`: Sync only the inbox. The local Docker default is `true`, which matches the lightweight mailbox UI and avoids scanning every remote folder.
-- `MailSync__FullSyncIntervalHours`: Optional global default for automatic full resyncs, in hours. When unset (the default), no automatic full sync runs unless a per-account `FullSyncIntervalHours` value is set on the Create/Edit page. Per-account values override this global default.
 - `MailSync__TimeoutMinutes`: The timeout for the sync operation in minutes.
 - `MailSync__ConnectionTimeoutSeconds`: The connection timeout for IMAP connections in seconds.
 - `MailSync__CommandTimeoutSeconds`: The command timeout for IMAP commands in seconds.
-- `MailSync__AlwaysForceFullSync`: Whether to always force a full sync (true/false).
 - `MailSync__IgnoreSelfSignedCert`: Whether to ignore self-signed certificates (true/false).
 - `MailSync__MaxConcurrentSyncs`: Maximum number of account syncs that may run in parallel within one poll cycle. The local Docker default is `4`; increase only after checking provider rate limits and local resource usage.
-- `MailSync__InterAccountDelaySeconds`: Optional stagger delay in seconds applied at the end of each account sync task. Default `0` (no delay). Useful to avoid burst-starts when `MaxConcurrentSyncs > 1`.
-- `MailSync__StartupStaggerSeconds`: Spread newly scheduled accounts across this many seconds after an application restart. The local Docker default is `21600`.
 
 ### 📤 BatchRestore Settings
 - `BatchRestore__AsyncThreshold`: The number of emails that triggers async processing.
@@ -257,7 +247,7 @@ The optional read-only REST API is **disabled by default**. See the [REST API gu
 - `BatchRestore__DefaultBatchSize`: The default batch size for email operations.
 
 ### 🏢 Tenant Management Settings
-- `TenantManagement__MaxSelectedMailboxes`: Maximum number of mailboxes that can be added in a single Tenant Management operation. Default is `1000`. Increase this for very large tenants, or lower it to prevent accidental mass imports. When the limit is exceeded, the operation is rejected with a validation error and no accounts are created. See [M365 Tenant Import Guide](M365TenantImport.md) for details.
+- `TenantManagement__MaxSelectedMailboxes`: Maximum number of mailboxes that can be added in a single Tenant Management operation. Default is `1000`. This limit belongs only to the legacy M365 Tenant Management workflow; the upstream credential API and CSV credential import use their own bounded batch controls. See [M365 Tenant Import Guide](M365TenantImport.md) for details.
 
 ### 📦 BatchOperation Settings
 - `BatchOperation__BatchSize`: The batch size for email operations.
@@ -313,7 +303,7 @@ The optional read-only REST API is **disabled by default**. See the [REST API gu
   - See [CLI Local Import Guide](CLI-Local-Import.md) for detailed usage instructions.
 
 ### 📄 CSV Import Settings
-- `CsvImport__MaxRows`: Maximum number of CSV rows (mailboxes) processed in a single bulk import. Default is `5000`. Increase this value for very large deployments; lower it to limit the impact of a single import run on database load.
+- `CsvImport__MaxRows`: Legacy optional cap for CSV rows. Default is `0`, meaning no artificial mailbox-count cap; file size and controlled processing batches still protect memory and database load.
 - `CsvImport__MaxFileSizeBytes`: Maximum allowed size (in bytes) of the uploaded CSV file. Default is `10000000` (10 MB). Adjust this value to match your upload limits if needed.
 - See [Account Import Guide](Account%20Import.md) for detailed usage instructions on bulk IMAP account import via CSV.
 
@@ -527,12 +517,10 @@ POSTGRES_PASSWORD=change_me_db_password
 MAILARCHIVE_ADMIN_USERNAME=admin
 MAILARCHIVE_ADMIN_PASSWORD=change_me_admin_password
 
-# --- Sync defaults ---
-MAILARCHIVE_SYNC_INTERVAL_SECONDS=21600
+# --- On-demand sync defaults ---
 MAILARCHIVE_SYNC_LOOKBACK_DAYS=30
 MAILARCHIVE_SYNC_INBOX_ONLY=true
 MAILARCHIVE_SYNC_MAX_CONCURRENT=4
-MAILARCHIVE_SYNC_STARTUP_STAGGER_SECONDS=21600
 
 # --- OIDC / OAuth ---
 OAUTH_CLIENT_SECRET=change_me_client_secret

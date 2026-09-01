@@ -14,12 +14,9 @@ services:
       Authentication__CookieSameSite: "Lax"
       DataProtection__KeyPath: "/app/DataProtection-Keys"
       TimeZone__DisplayTimeZoneId: "${MAILARCHIVE_TIME_ZONE:-Asia/Shanghai}"
-      MailSync__Enabled: "true"
-      MailSync__IntervalSeconds: "${MAILARCHIVE_SYNC_INTERVAL_SECONDS:-21600}"
       MailSync__LookbackDays: "${MAILARCHIVE_SYNC_LOOKBACK_DAYS:-30}"
       MailSync__SyncInboxOnly: "${MAILARCHIVE_SYNC_INBOX_ONLY:-true}"
       MailSync__MaxConcurrentSyncs: "${MAILARCHIVE_SYNC_MAX_CONCURRENT:-4}"
-      MailSync__StartupStaggerSeconds: "${MAILARCHIVE_SYNC_STARTUP_STAGGER_SECONDS:-21600}"
       CredentialEncryption__KeyFilePath: "/run/secrets/credential_encryption_key"
     volumes:
       - app_logs:/app/logs

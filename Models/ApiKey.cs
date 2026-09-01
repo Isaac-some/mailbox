@@ -4,7 +4,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 namespace MailArchiver.Models
 {
     /// <summary>
-    /// A per-user API key for the read-only REST API. The plaintext key is shown
+    /// A per-user API key for the REST API. The plaintext key is shown
     /// to the user exactly once at creation; only a non-reversible SHA-256 hash
     /// (and a short plaintext prefix for identification) is persisted.
     /// </summary>

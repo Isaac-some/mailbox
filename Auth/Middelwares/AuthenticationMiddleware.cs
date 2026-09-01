@@ -30,7 +30,7 @@ namespace MailArchiver.Auth.Middlewares
         {
             var path = context.Request.Path.Value?.ToLower() ?? string.Empty;
 
-            // Read-only REST API branch: API keys only, never a login redirect.
+            // REST API branch: API keys only, never a login redirect.
             if (path.StartsWith("/api/"))
             {
                 await HandleApiRequestAsync(context, apiOptions.Value);

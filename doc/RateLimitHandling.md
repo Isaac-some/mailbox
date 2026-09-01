@@ -168,7 +168,7 @@ retry strategy:
    - If `BandwidthTracking` is enabled, checkpoints are preserved so the next
      sync run resumes from the last successfully processed message.
    - The job is marked as rate-limited.
-   - The next scheduled sync will resume automatically.
+   - The next user-triggered sync will resume automatically from the checkpoint.
 
 ### Mitigation
 
@@ -201,4 +201,3 @@ trigger the retry/pause logic.
 
 - [DatabaseMaintenance.md](DatabaseMaintenance.md) - Database cleanup procedures
 - [GmailBestPractices.md](GmailBestPractices.md) - Gmail-specific configuration
-

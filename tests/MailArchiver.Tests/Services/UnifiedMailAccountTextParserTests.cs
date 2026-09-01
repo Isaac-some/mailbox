@@ -59,7 +59,7 @@ public class UnifiedMailAccountTextParserTests
     }
 
     [Theory]
-    [InlineData("person@example.com\tpassword")]
+    [InlineData("person@\tpassword")]
     [InlineData("person@gmx.com\tclient\trefresh")]
     [InlineData("person@outlook.com\tpassword\tnot-a-guid\trefresh")]
     public void Parse_rejects_unsupported_or_incomplete_rows_without_affecting_other_rows(string badRow)

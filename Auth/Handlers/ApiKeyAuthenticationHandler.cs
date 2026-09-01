@@ -9,7 +9,7 @@ using Microsoft.Extensions.Options;
 namespace MailArchiver.Auth.Handlers
 {
     /// <summary>
-    /// Authenticates read-only REST API requests via an <c>Authorization: Bearer ma_...</c>
+    /// Authenticates REST API requests via an <c>Authorization: Bearer ma_...</c>
     /// header. On success it builds a <see cref="ClaimsPrincipal"/> with the exact claim
     /// shape that cookie login issues (see CookieAuthenticationService.StartUserSessionAsync),
     /// so all existing IAuthenticationService / allowedAccountIds logic works unchanged.

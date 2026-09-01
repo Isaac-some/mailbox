@@ -45,7 +45,7 @@ public static class UnifiedMailAccountTextParser
             var email = fields[0].Trim();
             if (!TryDetectProvider(email, out var provider))
             {
-                errors.Add(new(lineNumber, "目前只支持 Gmail、Yahoo、GMX 和 Outlook 邮箱。"));
+                errors.Add(new(lineNumber, "邮箱地址格式不正确。"));
                 continue;
             }
 
@@ -130,6 +130,12 @@ public static class UnifiedMailAccountTextParser
             return;
         }
 
+        if (provider == MailProviderKind.Custom)
+        {
+            errors.Add(new(lineNumber, "自定义域名请先提供 IMAP/SMTP 密码；OAuth2 需要先配置该域名的 Token 地址。"));
+            return;
+        }
+
         string? appPassword = null;
         string clientId;
         string? clientSecret;
@@ -192,7 +198,7 @@ public static class UnifiedMailAccountTextParser
             else if (domain.StartsWith("yahoo.", StringComparison.Ordinal)) provider = MailProviderKind.Yahoo;
             else if (domain is "gmx.com" or "gmx.net" or "gmx.de") provider = MailProviderKind.Gmx;
             else if (domain is "outlook.com" or "hotmail.com" or "live.com" or "msn.com") provider = MailProviderKind.Outlook;
-            else return false;
+            else provider = MailProviderKind.Custom;
             return true;
         }
         catch (FormatException)

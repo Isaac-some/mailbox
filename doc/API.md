@@ -1,22 +1,23 @@
-# Read-Only REST API (v1)
+# REST API (v1)
 
-Mail Archiver ships an optional, **read-only** REST API for programmatic access
-to archived mail. It is designed for automation and integration use cases
-(reporting, e-discovery exports, monitoring) without going through the web UI.
+Mail Archiver ships an optional REST API for programmatic access to archived
+mail and for receiving mailbox credentials from an upstream system.
 
 The point is to let a script or AI agent read archived mail **without ever
 exposing mailbox credentials or talking to the mail provider.** A scoped
-per-user API key is a capability to *read the archive*, not a credential to *be
-the mailbox* — it inherits only its owner's mailbox permissions, grants no write
-path, and can be revoked instantly without touching the underlying mail account.
+per-user API key inherits only its owner's mailbox permissions. Archive-reading
+routes are read-only; the separate credential-intake route is the explicitly
+scoped write path for upstream mailbox ingestion. Keys can be revoked instantly
+without touching the underlying mail account.
 
 > ⚠️ **The API is disabled by default.** It must be explicitly enabled in
 > configuration (see [Enabling the API](#enabling-the-api)). When disabled,
 > every `/api/*` route returns `404 Not Found`.
 
-The API is **read-only by design**: it exposes accounts, folders, message
-search, message detail and attachment downloads. It never creates, modifies or
-deletes data.
+Archive-reading endpoints never expose mailbox credentials. The credential
+intake endpoint is the deliberate exception: it accepts only the minimal
+upstream fields `email`, `credential`, optional `domain`, and optional
+`clientId`, then encrypts and stores the credential for that user.
 
 ## Table of contents
 
@@ -33,6 +34,7 @@ deletes data.
   - [Rate limiting](#rate-limiting)
 - [Endpoints](#endpoints)
   - [List accounts](#list-accounts)
+  - [Sync mailbox credentials](#sync-mailbox-credentials)
   - [List folders](#list-folders)
   - [Search messages](#search-messages)
   - [Get message](#get-message)
@@ -239,16 +241,67 @@ curl -H "Authorization: Bearer $KEY" https://host/api/v1/accounts
 ```
 
 ```json
-[
-  {
-    "id": 1,
-    "name": "Support Mailbox",
-    "emailAddress": "support@example.com",
-    "provider": "IMAP",
-    "isEnabled": true,
-    "lastSync": "2026-06-11T08:15:00Z"
-  }
-]
+{
+  "items": [
+    {
+      "id": 1,
+      "name": "Support Mailbox",
+      "emailAddress": "support@example.com",
+      "provider": "IMAP",
+      "isEnabled": true,
+      "lastSync": "2026-06-11T08:15:00Z",
+      "credentialKind": "SharedMailPassword",
+      "credentialScope": "ImapAndSmtp",
+      "credentialDetectionStatus": "ImapSmtpVerified"
+    }
+  ],
+  "page": 1,
+  "pageSize": 20,
+  "totalItems": 137,
+  "totalPages": 7
+}
+```
+
+`page` and `pageSize` are optional query parameters. The server always applies
+database pagination, so a large mailbox inventory is never materialized in one
+response. `pageSize` defaults to `Api:DefaultPageSize` and is clamped to
+`Api:MaxPageSize`.
+
+For an unknown custom-domain row with no explicit OAuth metadata, the initial
+`credentialKind` may be `Unknown`; it is resolved to an IMAP password, SMTP
+password, or shared password only after a user-triggered capability check.
+
+### Sync mailbox credentials
+
+```
+POST /api/v1/mailbox-credentials/sync
+```
+
+Accepts up to 500 rows per request. Send larger upstream datasets in bounded
+batches; there is no total mailbox-count cap. `credential` may be an IMAP
+password, SMTP password, one password covering both, Google app password, or
+OAuth2 refresh token. `domain` may be omitted and is then derived from the
+email address. For an Outlook OAuth2 refresh token, `clientId` is required and
+must be a GUID. Unknown domains use a custom-domain module: passwords try
+`imap.<domain>` and `smtp.<domain>`, while OAuth tokens remain marked
+`OAuthConfigurationRequired` until that domain's token endpoint is configured.
+The endpoint stores credentials but does not connect to the mail provider or
+download messages. The first user-triggered validation/sync may read a bounded
+Mozilla Autoconfig document for a custom domain to discover its IMAP/SMTP
+endpoints; it still does not read mailbox content until the sync operation.
+
+```json
+{
+  "isEnabled": true,
+  "items": [
+    {
+      "email": "both@outlook.com",
+      "credential": "<refresh-token>",
+      "domain": "outlook.com",
+      "clientId": "11111111-2222-3333-4444-555555555555"
+    }
+  ]
+}
 ```
 
 ### List folders
@@ -365,8 +418,17 @@ curl -H "Authorization: Bearer $KEY" -OJ \
 | `name` | string | |
 | `emailAddress` | string | |
 | `provider` | string | `IMAP`, `M365`, … |
+| `mailProvider` | string? | Detected provider module, such as `Gmail`, `Outlook`, or `Custom` |
+| `imapServer` / `imapPort` | string / int? | Effective incoming endpoint; no credential is included |
+| `smtpServer` / `smtpPort` | string / int? | Effective outgoing endpoint; no credential is included |
+| `endpointDiscoveryStatus` | string? | `Discovered`, `Fallback`, or `InvalidDomain` for custom domains |
+| `endpointDiscoveryLastCheckedAt` | datetime? | UTC time of the latest custom-domain discovery attempt |
 | `isEnabled` | bool | |
 | `lastSync` | datetime | UTC |
+| `credentialKind` | string | Mechanism classification; never the secret itself |
+| `credentialScope` | string | `Unknown`, `Imap`, `Smtp`, or `ImapAndSmtp` |
+| `credentialDetectionStatus` | string | Pending, verified, or configuration-required state |
+| `credentialLastCheckedAt` | datetime? | UTC time of the latest IMAP/SMTP capability check |
 
 No credential fields are ever serialized.
 

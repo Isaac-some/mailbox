@@ -156,6 +156,12 @@
         if (!page || !page.dataset.mailboxSyncAccount || !token || !status) return;
 
         const accountId = page.dataset.mailboxSyncAccount;
+        const openSync = new URLSearchParams(window.location.search).get('autoSync') === 'true';
+        if (openSync) {
+            const cleanUrl = new URL(window.location.href);
+            cleanUrl.searchParams.delete('autoSync');
+            window.history.replaceState({}, document.title, cleanUrl.toString());
+        }
         let sawActiveSync = '@syncState' === 'Queued' || '@syncState' === 'Running';
 
         const setStatus = (active, message = '正在扫描新邮件，当前页面可继续查看。') => {
@@ -189,6 +195,14 @@
                 refreshButton.disabled = false;
             }
         });
+
+        // The account list marks a deliberate mailbox open with autoSync=true.
+        // Remove that one-shot marker before the queue completes so its reload
+        // cannot start a second sync. Direct links and search/pagination remain
+        // read-only until the user presses Refresh.
+        if (openSync && !sawActiveSync && refreshForm) {
+            refreshForm.requestSubmit();
+        }
 
         const watch = async () => {
             try {

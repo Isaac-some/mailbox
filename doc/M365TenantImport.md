@@ -135,7 +135,7 @@ When checked, saving the form renames every matching account — including the s
 
 ### Mailbox limit
 
-A single Tenant Management operation can add at most `TenantManagement__MaxSelectedMailboxes` mailboxes at once (default `1000`). This protects against accidental mass imports and excessive Microsoft Graph / database load. If you need to import more mailboxes, run the operation multiple times. See the [Setup Guide](Setup.md#-tenant-management-settings) for how to adjust this limit.
+A single Tenant Management operation can add at most `TenantManagement__MaxSelectedMailboxes` mailboxes at once (default `1000`). This safety limit belongs to the legacy M365 Tenant Management workflow; the upstream credential API and CSV credential import use bounded request/file processing instead. See the [Setup Guide](Setup.md#-tenant-management-settings) for how to configure this option.
 
 ### Permissions required
 

@@ -22,8 +22,6 @@
     <Compile Include="..\MailArchiver.Tests\Services\CsvImportHeaderPolicyTests.cs" Link="CsvImportHeaderPolicyTests.cs" />
     <Compile Include="..\MailArchiver.Tests\Services\GmailAppPasswordPolicyTests.cs" Link="GmailAppPasswordPolicyTests.cs" />
     <Compile Include="..\MailArchiver.Tests\Services\MailAccountNamePolicyTests.cs" Link="MailAccountNamePolicyTests.cs" />
-    <Compile Include="..\MailArchiver.Tests\Services\MailSyncSchedulePolicyTests.cs" Link="MailSyncSchedulePolicyTests.cs" />
-    <Compile Include="..\MailArchiver.Tests\Services\MailSyncTriggerTests.cs" Link="MailSyncTriggerTests.cs" />
     <Compile Include="..\MailArchiver.Tests\Services\OnDemandMailSyncQueueTests.cs" Link="OnDemandMailSyncQueueTests.cs" />
     <Compile Include="..\MailArchiver.Tests\Services\MailSyncOptionsTests.cs" Link="MailSyncOptionsTests.cs" />
     <Compile Include="..\MailArchiver.Tests\Services\WhitelistDeletionParserTests.cs" Link="WhitelistDeletionParserTests.cs" />

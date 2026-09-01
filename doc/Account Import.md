@@ -22,7 +22,7 @@ The account import page accepts the vendor format below without a header row. Co
 email@example.com<TAB>password<TAB>client-id<TAB>refresh-token
 ```
 
-The password column is required by the source format but is never retained. Outlook rows may be mixed with Gmail, Yahoo, and GMX rows in the same tab-separated file. The app stores the per-account Client ID and Refresh Token, uses Microsoft OAuth/XOAUTH2 for IMAP receiving, and acquires separate tokens for Microsoft Graph `Mail.Send` and SMTP OAuth sending. Graph is attempted first; authorization failures fall back to Outlook.com SMTP. Each row is validated independently and malformed rows are reported by line number.
+The credential column is required by the source format and is encrypted at rest. Outlook rows may be mixed with Gmail, Yahoo, GMX, and custom-domain rows in the same file. The app stores the per-account Client ID and Refresh Token, uses Microsoft OAuth/XOAUTH2 for IMAP receiving, and acquires separate tokens for Microsoft Graph `Mail.Send` and SMTP OAuth sending. Graph is attempted first; authorization failures fall back to Outlook.com SMTP. Each row is validated independently and malformed rows are reported by line number.
 
 Interactive device-code authorization remains available for accounts without an importable Refresh Token. See [MSA Outlook Setup](MSA_Outlook_Setup.md).
 
@@ -77,18 +77,18 @@ A downloadable example file is available on the import page via the **Download e
 | **Use SSL** | Common SSL toggle (default on). |
 | **Name prefix** | Prefix for auto-generated account names. Default: `IMAP`. |
 | **Skip existing mailboxes** | When enabled, rows whose email already exists as an IMAP account are skipped (counted as "skipped", not as errors). When disabled, they are treated as failures. |
-| **Account enabled** | Whether the created accounts should be enabled for background sync. |
+| **Account enabled** | Whether the created accounts should be eligible for on-demand refresh. |
 | **Delete After Days / Local Retention Days** | Optional retention settings applied to every created account. See [Retention Policies](RetentionPolicies.md). |
 
 ### Processing
 
-1. The CSV file is parsed and each row is validated (email format, password present, port range, SSL value).
+1. The CSV file is parsed and each row is validated (email format, credential present, optional domain, port range, SSL value).
 2. Duplicate emails within the file are removed (first occurrence wins).
 3. Existing IMAP accounts with the same email address are detected; depending on the **Skip existing** toggle they are either skipped or reported as failures.
 4. All new accounts are inserted in a single database batch.
 5. An access log entry is written summarising the run.
 
-No IMAP connection test is performed during import — accounts are saved immediately. Authentication issues will only surface during the first background sync. This keeps the import fast even for hundreds of mailboxes.
+No IMAP or SMTP connection test is performed during import — accounts are saved immediately. Authentication and endpoint discovery are performed only after the user opens a mailbox or clicks refresh. This keeps the import fast even for large mailbox sets.
 
 ### Result Page
 
@@ -106,7 +106,7 @@ The following limits can be configured via `appsettings.json` / environment vari
 
 | Setting | Default | Description |
 |---|---|---|
-| `CsvImport__MaxRows` | 5000 | Maximum rows processed per upload. |
+| `CsvImport__MaxRows` | 0 | No artificial mailbox-count cap. Upload size remains bounded, and database lookups are chunked to keep memory and query parameters bounded. |
 | `CsvImport__MaxFileSizeBytes` | 10000000 (10 MB) | Maximum uploaded file size. |
 
 ### Security Note

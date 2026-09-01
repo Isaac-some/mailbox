@@ -5,5 +5,6 @@ public enum MailProviderKind
     Gmail,
     Yahoo,
     Gmx,
-    Outlook
+    Outlook,
+    Custom
 }

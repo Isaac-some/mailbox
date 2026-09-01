@@ -29,13 +29,33 @@ public class SupportedMailProviderPolicyTests
     }
 
     [Theory]
-    [InlineData("reader@outlook.com")]
-    [InlineData("reader@example.com")]
     [InlineData("not-an-email")]
     public void TryResolve_rejects_unsupported_or_invalid_addresses(string email)
     {
         var resolved = SupportedMailProviderPolicy.TryResolve(email, out _);
 
         Assert.False(resolved);
+    }
+
+    [Fact]
+    public void TryResolve_uses_outlook_hosts_for_microsoft_consumer_domains()
+    {
+        var resolved = SupportedMailProviderPolicy.TryResolve("reader@outlook.com", out var preset);
+
+        Assert.True(resolved);
+        Assert.Equal("Outlook", preset.Provider);
+        Assert.Equal("outlook.office365.com", preset.ImapServer);
+        Assert.Equal("smtp-mail.outlook.com", preset.SmtpServer);
+    }
+
+    [Fact]
+    public void TryResolve_uses_conventional_hosts_for_custom_domains()
+    {
+        var resolved = SupportedMailProviderPolicy.TryResolve("reader@corp.example", out var preset);
+
+        Assert.True(resolved);
+        Assert.Equal("自定义域名", preset.Provider);
+        Assert.Equal("imap.corp.example", preset.ImapServer);
+        Assert.Equal("smtp.corp.example", preset.SmtpServer);
     }
 }

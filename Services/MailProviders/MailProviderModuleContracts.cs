@@ -39,6 +39,10 @@ public interface IMailProviderModule
         MailAccount account,
         CancellationToken cancellationToken = default);
 
+    Task<bool> TestOutgoingConnectionAsync(
+        MailAccount account,
+        CancellationToken cancellationToken = default);
+
     Task<ProviderSendResult> SendAsync(
         MailAccount account,
         MimeMessage message,

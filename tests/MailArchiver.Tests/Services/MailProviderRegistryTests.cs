@@ -11,7 +11,8 @@ public class MailProviderRegistryTests
             new GmailMailProviderModule(null!, null!),
             new YahooMailProviderModule(null!, null!),
             new GmxMailProviderModule(null!, null!),
-            new OutlookMailProviderModule(null!, null!)
+            new OutlookMailProviderModule(null!, null!),
+            new CustomDomainMailProviderModule(null!, null!)
         ]);
 
     [Theory]
@@ -20,6 +21,7 @@ public class MailProviderRegistryTests
     [InlineData("one@yahoo.co.jp", MailProviderKind.Yahoo)]
     [InlineData("one@gmx.de", MailProviderKind.Gmx)]
     [InlineData("one@outlook.com", MailProviderKind.Outlook)]
+    [InlineData("one@corp.example", MailProviderKind.Custom)]
     public void Detect_routes_supported_addresses_to_one_module(string email, MailProviderKind expected)
         => Assert.Equal(expected, CreateRegistry().Detect(email).Kind);
 
@@ -94,5 +96,17 @@ public class MailProviderRegistryTests
         Assert.False(registry.For(yahoo).Inspect(yahoo).CanSend);
         Assert.False(registry.For(gmx).Inspect(gmx).CanSend);
         Assert.True(registry.For(outlook).Inspect(outlook).CanSend);
+    }
+
+    [Fact]
+    public void Custom_module_uses_conventional_endpoints_until_discovery_overrides_them()
+    {
+        var account = new MailAccount { EmailAddress = "one@corp.example", UseSSL = true };
+
+        CreateRegistry().For(MailProviderKind.Custom).PrepareAccount(account);
+
+        Assert.Equal("imap.corp.example", account.ImapServer);
+        Assert.Equal(993, account.ImapPort);
+        Assert.True(account.UseSSL);
     }
 }

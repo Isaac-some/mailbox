@@ -3,7 +3,7 @@ using MailArchiver.Models;
 namespace MailArchiver.Services
 {
     /// <summary>
-    /// Lifecycle and validation for per-user API keys (read-only REST API).
+    /// Lifecycle and validation for per-user API keys.
     /// </summary>
     public interface IApiKeyService
     {

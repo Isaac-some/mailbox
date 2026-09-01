@@ -487,28 +487,9 @@ namespace MailArchiver.Controllers
                     _logger.LogInformation("Creating new account: {Name}, Provider: {Provider}",
                         model.Name, model.Provider);
 
-                    // Test connection before saving (only for IMAP; M365 and MSA use OAuth and can't be tested this way)
-                    if (account.Provider == ProviderType.IMAP)
-                    {
-                        _logger.LogInformation("Testing connection for account: {Name}, Server: {Server}:{Port}",
-                            model.Name, model.ImapServer, model.ImapPort);
-                        var imapService = HttpContext.RequestServices.GetService<MailArchiver.Services.Providers.ImapEmailService>();
-                        var connectionResult = await imapService.TestConnectionAsync(account);
-                        if (!connectionResult)
-                        {
-                            _logger.LogWarning("Connection test failed for account {Name}", model.Name);
-                            ModelState.AddModelError("", _localizer["EmailAccountError"]);
-                            return View(model);
-                        }
-                    }
-
                     _logger.LogInformation("Saving account to database");
                     _context.MailAccounts.Add(account);
                     await _context.SaveChangesAsync();
-                    if (account.IsEnabled && account.Provider == ProviderType.IMAP)
-                    {
-                        _onDemandSyncQueue.Enqueue(account.Id, MailSyncRequestPriority.Bulk, MailSyncRequestKind.ValidateConnection);
-                    }
 
                     // Every account is owned by the user who adds it.
                     var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
@@ -921,19 +902,20 @@ namespace MailArchiver.Controllers
 
             if (model.Provider == ProviderType.IMAP)
             {
-                if (!SupportedMailProviderPolicy.TryResolve(model.EmailAddress, out var preset))
-                {
-                    ModelState.AddModelError(nameof(model.EmailAddress), "IMAP 收件目前仅支持 Gmail、Yahoo 和 GMX 邮箱。");
-                }
-                else
+                try
                 {
                     mailProviderModule ??= _mailProviderRegistry.Detect(model.EmailAddress);
-                    model.ImapServer = preset.ImapServer;
-                    model.ImapPort = preset.ImapPort;
-                    model.UseSSL = preset.UseSsl;
+                    var endpoint = mailProviderModule.GetIncomingEndpoint(new MailAccount { EmailAddress = model.EmailAddress });
+                    model.ImapServer = endpoint.Host;
+                    model.ImapPort = endpoint.Port;
+                    model.UseSSL = endpoint.UseSsl;
                     model.Username = model.EmailAddress.Trim();
                     model.Name = MailAccountNamePolicy.Derive(model.EmailAddress);
                     ModelState.Remove(nameof(model.Name));
+                }
+                catch (Exception ex) when (ex is NotSupportedException or InvalidOperationException)
+                {
+                    ModelState.AddModelError(nameof(model.EmailAddress), ex.Message);
                 }
             }
             else if (model.Provider == ProviderType.MSA)
@@ -1140,25 +1122,7 @@ namespace MailArchiver.Controllers
                         return View(model);
                     }
 
-                    // Test connection before saving (only for IMAP accounts)
-                    if (!string.IsNullOrEmpty(model.Password) && account.Provider == ProviderType.IMAP)
-                    {
-                        var provider = await _providerFactory.GetServiceForAccountAsync(account.Id);
-
-                        var connectionResult = await provider.TestConnectionAsync(account);
-                        if (!connectionResult)
-                        {
-                            ModelState.AddModelError("", _localizer["EmailAccountError"]);
-                            return View(model);
-                        }
-                    }
-
                     await _context.SaveChangesAsync();
-                    if (account.IsEnabled && (account.Provider == ProviderType.IMAP ||
-                        (account.Provider == ProviderType.MSA && !string.IsNullOrEmpty(account.OAuthRefreshToken))))
-                    {
-                        _onDemandSyncQueue.Enqueue(account.Id, MailSyncRequestPriority.Bulk, MailSyncRequestKind.ValidateConnection);
-                    }
                     
                     // Log the account update action
                     var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
@@ -1523,10 +1487,12 @@ namespace MailArchiver.Controllers
                 return RedirectToAction(nameof(Index));
             }
 
-            // MSA accounts require OAuth authorization before they can sync.
-            // Block the sync early with a helpful redirect instead of letting it fail
-            // deep in the IMAP connection factory with a cryptic exception.
-            if (account.Provider == ProviderType.MSA && string.IsNullOrEmpty(account.OAuthRefreshToken))
+            // MSA accounts need either OAuth or an explicitly imported password
+            // fallback. Do not block password-only Outlook rows before the provider
+            // module gets a chance to authenticate them over IMAP/SMTP.
+            if (account.Provider == ProviderType.MSA &&
+                string.IsNullOrEmpty(account.OAuthRefreshToken) &&
+                string.IsNullOrEmpty(account.Password))
             {
                 if (isMailboxRefresh)
                     return BadRequest(new { message = _localizer["MsaNotAuthorizedSync"].Value });
@@ -1601,31 +1567,6 @@ namespace MailArchiver.Controllers
                     completed = latestJob.Completed?.ToString("O")
                 }
             });
-        }
-
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> SyncAll()
-        {
-            var authService = HttpContext.RequestServices.GetRequiredService<IAuthenticationService>();
-            var userId = authService.GetCurrentUserId(HttpContext);
-            if (!userId.HasValue)
-                return Forbid();
-
-            var accountIds = await _context.MailAccounts
-                .AsNoTracking()
-                .Where(a =>
-                    a.IsEnabled &&
-                    a.Provider != ProviderType.IMPORT &&
-                    a.UserMailAccounts.Any(ownership => ownership.UserId == userId.Value))
-                .Select(a => a.Id)
-                .ToListAsync();
-
-            foreach (var accountId in accountIds)
-                _onDemandSyncQueue.Enqueue(accountId, MailSyncRequestPriority.Bulk);
-
-            TempData["SuccessMessage"] = $"已将 {accountIds.Count} 个邮箱加入同步全部队列。正在查看的邮箱会优先执行。";
-            return RedirectToAction(nameof(Index));
         }
 
         // POST: MailAccounts/Resync/5
@@ -2613,9 +2554,6 @@ namespace MailArchiver.Controllers
                 }
                 await _context.SaveChangesAsync();
 
-                if (account.IsEnabled)
-                    _onDemandSyncQueue.Enqueue(account.Id, MailSyncRequestPriority.Interactive, MailSyncRequestKind.ValidateConnection);
-
                 var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
                 var currentUsername = authService?.GetCurrentUserDisplayName(HttpContext);
                 if (!string.IsNullOrEmpty(currentUsername))
@@ -3285,7 +3223,7 @@ namespace MailArchiver.Controllers
                     return View("CsvImportResult", result);
                 }
 
-                if (rows.Count > _csvImportOptions.MaxRows)
+                if (_csvImportOptions.MaxRows > 0 && rows.Count > _csvImportOptions.MaxRows)
                 {
                     result.FailedRows.Insert(0, new CsvImportFailedRow
                     {
@@ -3449,6 +3387,7 @@ namespace MailArchiver.Controllers
                         };
 
                     rowModule.PrepareAccount(account);
+                    ApplyImportedCredentialClassification(account, rowModule, row);
 
                     accountsToCreate.Add(account);
                     result.CreatedRows.Add(new CsvImportCreatedRow
@@ -3474,10 +3413,8 @@ namespace MailArchiver.Controllers
                     MailAccountId = account.Id
                 }));
                 await _context.SaveChangesAsync();
-                foreach (var account in accountsToCreate.Where(account => account.IsEnabled))
-                {
-                    _onDemandSyncQueue.Enqueue(account.Id, MailSyncRequestPriority.Bulk, MailSyncRequestKind.ValidateConnection);
-                }
+                // Import only persists credentials. It does not open remote mailboxes
+                // or trigger a connection check; verification happens on explicit refresh.
 
                 result.CreatedCount = accountsToCreate.Count;
                 result.SkippedCount = result.SkippedRows.Count;
@@ -3621,16 +3558,15 @@ namespace MailArchiver.Controllers
         [HttpGet]
         public IActionResult DownloadExampleCsv()
         {
-            var csv = "邮箱,SMTP授权码,Client ID,Client Secret,Refresh Token,Redirect URI\r\n"
-                + "carol@gmail.com,abcd efgh ijkl mnop,,,,\r\n"
-                + "alice@gmx.com,示例应用专用密码,,,,\r\n"
-                + "bob123@yahoo.com,示例应用专用密码,,,,\r\n"
-                + "oauth@gmail.com,,示例GoogleClientID,,示例RefreshToken,\r\n"
-                + "both@gmail.com,abcd efgh ijkl mnop,示例GoogleClientID,,示例RefreshToken,\r\n"
-                + "outlook@outlook.com,,11111111-2222-3333-4444-555555555555,,示例RefreshToken,\r\n"
-                + "david@yahoo.com,,示例YahooClientID,示例YahooClientSecret,示例RefreshToken,oob\r\n";
+            var csv = "邮箱（必填）,授权凭据（必填）,域名（可选）,Client ID（可选：Outlook OAuth2 Refresh Token 必填）\r\n"
+                + "alice@gmail.com,xxxx xxxx xxxx xxxx,gmail.com,\r\n"
+                + "reader@yahoo.com,上游接口返回的授权码,yahoo.com,\r\n"
+                + "sender@gmx.com,上游接口返回的授权码,gmx.com,\r\n"
+                + "both@outlook.com,示例 Outlook OAuth2 Refresh Token,outlook.com,11111111-2222-3333-4444-555555555555\r\n"
+                + "oauth@gmail.com,示例 OAuth2 Refresh Token,gmail.com,示例GoogleClientID\r\n"
+                + "unknown@yahoo.com,上游只提供的授权码,,\r\n";
             var bytes = System.Text.Encoding.UTF8.GetBytes(csv);
-            return File(bytes, "text/csv", "邮箱批量导入示例.csv");
+            return File(bytes, "text/csv", "邮箱授权识别-最小接口标准示例.csv");
         }
 
         [HttpGet]
@@ -3667,6 +3603,29 @@ namespace MailArchiver.Controllers
             {
                 email = GetFieldValue(fields, headerIndex, "email");
                 password = GetFieldValueRaw(fields, headerIndex, "app_password");
+                var suppliedDomain = GetFieldValueOrNull(fields, headerIndex, "domain");
+                if (!string.IsNullOrWhiteSpace(suppliedDomain))
+                {
+                    try
+                    {
+                        var actualDomain = new System.Net.Mail.MailAddress(email.Trim()).Host;
+                        var normalizedDomain = suppliedDomain.Trim().TrimStart('@');
+                        if (!actualDomain.Equals(normalizedDomain, StringComparison.OrdinalIgnoreCase))
+                        {
+                            failedRows.Add(new CsvImportFailedRow
+                            {
+                                LineNumber = lineNumber,
+                                Email = email,
+                                Reason = "CSV 中的域名与邮箱地址不一致。"
+                            });
+                            return null;
+                        }
+                    }
+                    catch (FormatException)
+                    {
+                        // The normal email validation below reports the canonical error.
+                    }
+                }
                 clientId = GetFieldValueOrNull(fields, headerIndex, "client_id");
                 clientSecret = GetFieldValueOrNull(fields, headerIndex, "client_secret");
                 refreshToken = GetFieldValueOrNull(fields, headerIndex, "refresh_token");
@@ -3710,6 +3669,28 @@ namespace MailArchiver.Controllers
                         return null;
                     }
                 }
+
+                // Minimal upstream contract: a single credential column may carry
+                // an OAuth2 refresh token. Keep it as OAuth metadata instead of
+                // sending it through provider password validation.
+                if (string.IsNullOrWhiteSpace(clientId) &&
+                    string.IsNullOrWhiteSpace(refreshToken) &&
+                    LooksLikeOAuthRefreshToken(password))
+                {
+                    refreshToken = password.Trim();
+                    password = string.Empty;
+                }
+
+                // In the minimal four-column contract, Client ID disambiguates
+                // the single credential column as an OAuth2 refresh token. This
+                // is mandatory for Outlook OAuth and optional for other providers.
+                if (!string.IsNullOrWhiteSpace(clientId) &&
+                    string.IsNullOrWhiteSpace(refreshToken) &&
+                    !string.IsNullOrWhiteSpace(password))
+                {
+                    refreshToken = password.Trim();
+                    password = string.Empty;
+                }
             }
             else
             {
@@ -3729,6 +3710,24 @@ namespace MailArchiver.Controllers
                     LineNumber = lineNumber,
                     Email = string.Empty,
                     Reason = localizer["CsvImportMissingEmail", lineNumber].Value
+                });
+                return null;
+            }
+
+            try
+            {
+                var parsedEmail = new System.Net.Mail.MailAddress(email.Trim());
+                if (!string.Equals(parsedEmail.Address, email.Trim(), StringComparison.OrdinalIgnoreCase))
+                    throw new FormatException();
+                email = parsedEmail.Address;
+            }
+            catch (FormatException)
+            {
+                failedRows.Add(new CsvImportFailedRow
+                {
+                    LineNumber = lineNumber,
+                    Email = email,
+                    Reason = "邮箱地址格式不正确。"
                 });
                 return null;
             }
@@ -3766,6 +3765,17 @@ namespace MailArchiver.Controllers
 
             if (providerModule.Kind == MailProviderKind.Outlook)
             {
+                if (!string.IsNullOrWhiteSpace(refreshToken) && string.IsNullOrWhiteSpace(clientId))
+                {
+                    failedRows.Add(new CsvImportFailedRow
+                    {
+                        LineNumber = lineNumber,
+                        Email = email,
+                        Reason = "Outlook OAuth2 Refresh Token 必须同时提供 Client ID。"
+                    });
+                    return null;
+                }
+
                 var hasCompleteOAuth = !string.IsNullOrWhiteSpace(clientId)
                     && Guid.TryParseExact(clientId.Trim(), "D", out _)
                     && !string.IsNullOrWhiteSpace(refreshToken);
@@ -3789,17 +3799,28 @@ namespace MailArchiver.Controllers
             {
                 if (!ExternalOAuthProviderPolicy.TryResolve(email, out var oauthProvider))
                 {
-                    failedRows.Add(new CsvImportFailedRow
+                    if (providerModule.Kind == MailProviderKind.Custom &&
+                        !string.IsNullOrWhiteSpace(clientId) && !string.IsNullOrWhiteSpace(refreshToken))
                     {
-                        LineNumber = lineNumber,
-                        Email = email,
-                        Reason = "GMX 官方不支持 OAuth，请提供应用专用密码。"
-                    });
-                    return null;
+                        // Keep the token metadata. The provider-specific token
+                        // endpoint can be configured later before verification.
+                    }
+                    else
+                    {
+                        failedRows.Add(new CsvImportFailedRow
+                        {
+                            LineNumber = lineNumber,
+                            Email = email,
+                            Reason = providerModule.Kind == MailProviderKind.Custom
+                                ? "自定义域名 OAuth 必须同时提供 Client ID 和 Refresh Token。"
+                                : "该邮箱服务商暂无 OAuth 令牌配置，请提供 IMAP/SMTP 密码。"
+                        });
+                        return null;
+                    }
                 }
-                if (string.IsNullOrWhiteSpace(clientId) || string.IsNullOrWhiteSpace(refreshToken) ||
+                if (oauthProvider is not null && (string.IsNullOrWhiteSpace(clientId) || string.IsNullOrWhiteSpace(refreshToken) ||
                     (oauthProvider.RequiresClientSecret && string.IsNullOrWhiteSpace(clientSecret)) ||
-                    (oauthProvider.RequiresRedirectUri && string.IsNullOrWhiteSpace(redirectUri)))
+                    (oauthProvider.RequiresRedirectUri && string.IsNullOrWhiteSpace(redirectUri))))
                 {
                     failedRows.Add(new CsvImportFailedRow
                     {
@@ -3830,6 +3851,47 @@ namespace MailArchiver.Controllers
                 ImapPort = imapPort,
                 UseSSL = useSsl
             };
+        }
+
+        private static bool LooksLikeOAuthRefreshToken(string value)
+            => value.TrimStart().StartsWith("1//", StringComparison.Ordinal)
+                || value.TrimStart().StartsWith("ya29.", StringComparison.OrdinalIgnoreCase)
+                || value.TrimStart().StartsWith("M.", StringComparison.Ordinal);
+
+        private static void ApplyImportedCredentialClassification(
+            MailAccount account,
+            IMailProviderModule provider,
+            CsvParsedRow row)
+        {
+            if (!string.IsNullOrWhiteSpace(row.OAuthRefreshToken))
+            {
+                account.CredentialKind = MailCredentialKind.OAuth2RefreshToken;
+                account.CredentialScope = MailCredentialScope.Unknown;
+                account.CredentialDetectionStatus = string.IsNullOrWhiteSpace(row.ClientId)
+                    ? "OAuthConfigurationRequired"
+                    : "PendingVerification";
+            }
+            else if (provider.Kind == MailProviderKind.Gmail &&
+                     !string.IsNullOrWhiteSpace(row.Password))
+            {
+                account.CredentialKind = MailCredentialKind.GoogleAppPassword;
+                account.CredentialScope = MailCredentialScope.Unknown;
+                account.CredentialDetectionStatus = "PendingVerification";
+            }
+            else if (provider.Kind is MailProviderKind.Custom or MailProviderKind.Outlook)
+            {
+                account.CredentialKind = MailCredentialKind.Unknown;
+                account.CredentialScope = MailCredentialScope.Unknown;
+                account.CredentialDetectionStatus = "PendingVerification";
+            }
+            else
+            {
+                account.CredentialKind = MailCredentialKind.SharedMailPassword;
+                account.CredentialScope = MailCredentialScope.Unknown;
+                account.CredentialDetectionStatus = "PendingVerification";
+            }
+
+            account.CredentialLastCheckedAt = null;
         }
 
         private static string GetFieldValue(string[] fields, Dictionary<string, int> headerIndex, string name)

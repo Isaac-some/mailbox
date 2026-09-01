@@ -53,7 +53,8 @@ namespace MailArchiver.Services.Core
             List<int> allowedAccountIds = null,
             string sortBy = "SentDate",
             string sortOrder = "desc",
-            bool useReceivedDateForRange = false)
+            bool useReceivedDateForRange = false,
+            int? allowedUserId = null)
         {
             var startTime = DateTime.UtcNow;
 
@@ -75,12 +76,13 @@ namespace MailArchiver.Services.Core
                     allowedAccountIds,
                     sortBy,
                     sortOrder,
-                    useReceivedDateForRange);
+                    useReceivedDateForRange,
+                    allowedUserId);
             }
 
             try
             {
-                return await SearchEmailsOptimizedAsync(searchTerm, fromDate, toDate, accountId, folderName, isOutgoing, skip, take, allowedAccountIds, sortBy, sortOrder, useReceivedDateForRange);
+                return await SearchEmailsOptimizedAsync(searchTerm, fromDate, toDate, accountId, folderName, isOutgoing, skip, take, allowedAccountIds, sortBy, sortOrder, useReceivedDateForRange, allowedUserId);
             }
             catch (Exception ex)
             {
@@ -97,7 +99,8 @@ namespace MailArchiver.Services.Core
                     allowedAccountIds,
                     sortBy,
                     sortOrder,
-                    useReceivedDateForRange);
+                    useReceivedDateForRange,
+                    allowedUserId);
             }
         }
 
@@ -113,7 +116,8 @@ namespace MailArchiver.Services.Core
             List<int> allowedAccountIds = null,
             string sortBy = "SentDate",
             string sortOrder = "desc",
-            bool useReceivedDateForRange = false)
+            bool useReceivedDateForRange = false,
+            int? allowedUserId = null)
         {
             var startTime = DateTime.UtcNow;
             var whereConditions = new List<string>();
@@ -251,6 +255,16 @@ namespace MailArchiver.Services.Core
                     _logger.LogWarning("User has no allowed accounts, returning empty result set");
                     return (new List<ArchivedEmail>(), 0);
                 }
+            }
+
+            if (allowedUserId.HasValue)
+            {
+                whereConditions.Add($@"EXISTS (
+                    SELECT 1 FROM mail_archiver.""UserMailAccounts"" uma
+                    WHERE uma.""UserId"" = @param{paramCounter}
+                      AND uma.""MailAccountId"" = ""MailAccountId"")");
+                parameters.Add(new Npgsql.NpgsqlParameter($"@param{paramCounter}", allowedUserId.Value));
+                paramCounter++;
             }
 
             // Date filtering. The inbox uses ReceivedDate so a recently
@@ -568,7 +582,8 @@ namespace MailArchiver.Services.Core
             List<int> allowedAccountIds = null,
             string sortBy = "SentDate",
             string sortOrder = "desc",
-            bool useReceivedDateForRange = false)
+            bool useReceivedDateForRange = false,
+            int? allowedUserId = null)
         {
             var baseQuery = _context.ArchivedEmails.AsNoTracking().AsQueryable();
 
@@ -578,6 +593,12 @@ namespace MailArchiver.Services.Core
                     baseQuery = baseQuery.Where(e => allowedAccountIds.Contains(e.MailAccountId));
                 else
                     baseQuery = baseQuery.Where(e => false);
+            }
+
+            if (allowedUserId.HasValue)
+            {
+                baseQuery = baseQuery.Where(e => _context.UserMailAccounts.Any(link =>
+                    link.UserId == allowedUserId.Value && link.MailAccountId == e.MailAccountId));
             }
 
             if (accountId.HasValue)

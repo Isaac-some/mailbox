@@ -160,6 +160,38 @@ public sealed class OutlookMailProviderModule : IMailProviderModule
 
     }
 
+    public async Task<bool> TestOutgoingConnectionAsync(
+        MailAccount account,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureIdentity(account);
+        if (_smtpMailSender is null)
+            return false;
+
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(account.OAuthRefreshToken))
+            {
+                var token = await _tokenManager.GetSmtpAccessTokenAsync(account, cancellationToken: cancellationToken);
+                if (await _smtpMailSender.TestAsync(account, token, cancellationToken))
+                    return true;
+            }
+
+            if (!string.IsNullOrWhiteSpace(account.Password))
+            {
+                var password = _credentialEncryption?.Decrypt(account.Password)
+                    ?? throw new InvalidOperationException("Outlook 账号的密码回退未配置凭据解密服务。");
+                return await _smtpMailSender.TestWithPasswordAsync(account, password, cancellationToken);
+            }
+        }
+        catch
+        {
+            // Record a failed capability without exposing provider auth details.
+        }
+
+        return false;
+    }
+
     private async Task AuthenticateOAuthAsync(
         ImapClient client,
         MailAccount account,

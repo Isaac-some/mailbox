@@ -196,13 +196,46 @@ public sealed class OnDemandMailSyncQueue : BackgroundService, IOnDemandMailSync
             return;
         }
 
+        if (account.MailProviderKind == MailProviderKind.Custom)
+        {
+            var endpointDiscovery = services.GetRequiredService<IMailEndpointDiscoveryService>();
+            await endpointDiscovery.DiscoverAsync(account, stoppingToken);
+            await dbContext.SaveChangesAsync(stoppingToken);
+        }
+
         var providerFactory = services.GetRequiredService<ProviderEmailServiceFactory>();
         var provider = providerFactory.GetServiceForAccount(account);
+        var providerModule = account.MailProviderKind is null
+            ? null
+            : services.GetRequiredService<MailProviders.IMailProviderRegistry>().For(account);
 
         if (entry.Kind == MailSyncRequestKind.ValidateConnection)
         {
-            var connected = await provider.TestConnectionAsync(account);
-            if (connected)
+            var canReceive = false;
+            try
+            {
+                canReceive = await provider.TestConnectionAsync(account);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "IMAP capability check failed for account {AccountId}", account.Id);
+            }
+
+            var canSend = false;
+            if (providerModule is not null)
+            {
+                try
+                {
+                    canSend = await providerModule.TestOutgoingConnectionAsync(account, stoppingToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "SMTP capability check failed for account {AccountId}", account.Id);
+                }
+            }
+            UpdateCredentialCapabilities(account, canReceive, canSend);
+            await dbContext.SaveChangesAsync(stoppingToken);
+            if (canReceive || canSend)
             {
                 _logger.LogInformation("Imported account {AccountId} connection validation succeeded", account.Id);
             }
@@ -226,14 +259,69 @@ public sealed class OnDemandMailSyncQueue : BackgroundService, IOnDemandMailSync
         try
         {
             await provider.SyncMailAccountAsync(account, jobId);
+            if (providerModule is not null)
+            {
+                var canSend = await providerModule.TestOutgoingConnectionAsync(account, stoppingToken);
+                UpdateCredentialCapabilities(account, canReceive: true, canSend: canSend);
+                await dbContext.SaveChangesAsync(stoppingToken);
+            }
             var storage = services.GetRequiredService<IAccountStorageService>();
             await storage.RefreshAccountStorageAsync(account.Id);
         }
         catch (Exception ex)
         {
+            // A credential can be SMTP-only. Preserve the IMAP failure for the
+            // sync job, but still probe SMTP so the classification endpoint can
+            // report Smtp instead of collapsing both capabilities to Unknown.
+            if (providerModule is not null)
+            {
+                var canSend = false;
+                try
+                {
+                    canSend = await providerModule.TestOutgoingConnectionAsync(account, stoppingToken);
+                }
+                catch (Exception probeException)
+                {
+                    _logger.LogDebug(probeException, "SMTP capability check failed after IMAP sync failure for account {AccountId}", account.Id);
+                }
+                UpdateCredentialCapabilities(account, canReceive: false, canSend: canSend);
+                await dbContext.SaveChangesAsync(stoppingToken);
+            }
             syncJobs.CompleteJob(jobId, false, ex.Message);
             throw;
         }
+    }
+
+    private static void UpdateCredentialCapabilities(MailAccount account, bool canReceive, bool canSend)
+    {
+        account.CredentialLastCheckedAt = DateTime.UtcNow;
+        account.CredentialScope = (canReceive, canSend) switch
+        {
+            (true, true) => MailCredentialScope.ImapAndSmtp,
+            (true, false) => MailCredentialScope.Imap,
+            (false, true) => MailCredentialScope.Smtp,
+            _ => MailCredentialScope.Unknown
+        };
+        if (account.CredentialKind is MailCredentialKind.Unknown
+            or MailCredentialKind.ImapPassword
+            or MailCredentialKind.SmtpPassword
+            or MailCredentialKind.SharedMailPassword)
+        {
+            account.CredentialKind = (canReceive, canSend) switch
+            {
+                (true, false) => MailCredentialKind.ImapPassword,
+                (false, true) => MailCredentialKind.SmtpPassword,
+                (true, true) => MailCredentialKind.SharedMailPassword,
+                _ => MailCredentialKind.Unknown
+            };
+        }
+        account.CredentialDetectionStatus = (canReceive, canSend) switch
+        {
+            (true, true) => "ImapSmtpVerified",
+            (true, false) => "ImapVerified",
+            (false, true) => "SmtpVerified",
+            _ => "VerificationFailed"
+        };
     }
 
     public override void Dispose()

@@ -262,6 +262,24 @@ namespace MailArchiver.Data
                 .HasMaxLength(16);
 
             modelBuilder.Entity<MailAccount>()
+                .Property(e => e.CredentialKind)
+                .HasConversion<string>()
+                .HasMaxLength(32);
+
+            modelBuilder.Entity<MailAccount>()
+                .Property(e => e.CredentialScope)
+                .HasConversion<string>()
+                .HasMaxLength(16);
+
+            modelBuilder.Entity<MailAccount>()
+                .Property(e => e.CredentialDetectionStatus)
+                .HasMaxLength(32);
+
+            modelBuilder.Entity<MailAccount>()
+                .Property(e => e.EndpointDiscoveryStatus)
+                .HasMaxLength(32);
+
+            modelBuilder.Entity<MailAccount>()
                 .Property(e => e.GroupName)
                 .HasColumnType("text")
                 .HasDefaultValue(string.Empty);

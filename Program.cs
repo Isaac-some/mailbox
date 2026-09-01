@@ -146,7 +146,7 @@ builder.Services.Configure<ReleaseNotesOptions>(
 builder.Services.Configure<DeletionPolicyOptions>(
     builder.Configuration.GetSection(DeletionPolicyOptions.DeletionPolicy));
 
-// ===== Read-only REST API (v1) — kept in one contiguous block to minimize
+// ===== REST API (v1) — kept in one contiguous block to minimize
 // upstream merge churn. Disabled by default via Api:Enabled. =====
 builder.Services.Configure<MailArchiver.Models.ApiOptions>(
     builder.Configuration.GetSection(MailArchiver.Models.ApiOptions.Api));
@@ -161,7 +161,7 @@ builder.Services.AddOpenApi("v1", openApiOptions =>
         description.RelativePath?.StartsWith("api/v1", StringComparison.OrdinalIgnoreCase) ?? false;
     openApiOptions.AddDocumentTransformer<MailArchiver.Models.Api.OpenApi.BearerSecuritySchemeTransformer>();
 });
-// ===== End read-only REST API block =====
+// ===== End REST API block =====
 
 // Add DateTimeHelper
 builder.Services.AddScoped<MailArchiver.Utilities.DateTimeHelper>();
@@ -170,6 +170,19 @@ builder.Services.AddScoped<MailArchiver.Utilities.DateTimeHelper>();
 builder.Services.AddHttpClient("GitHubReleases");
 builder.Services.AddHttpClient("MsaOAuth");
 builder.Services.AddHttpClient("ExternalMailOAuth");
+builder.Services.AddHttpClient("MailAutoconfig", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(3);
+    client.MaxResponseContentBufferSize = 64 * 1024;
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("MailArchiver/1.0 mailbox-autoconfig");
+})
+.ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+{
+    // Autoconfig must never follow a server-controlled redirect to an unrelated
+    // or private URL. Only the two HTTPS URLs constructed from the mailbox domain
+    // are eligible for discovery.
+    AllowAutoRedirect = false
+});
 
 // Register CSV import options for bulk IMAP account import
 builder.Services.Configure<CsvImportOptions>(builder.Configuration.GetSection(CsvImportOptions.CsvImport));
@@ -186,10 +199,13 @@ builder.Services.AddScoped<MailArchiver.Services.IMsaOAuthService, MailArchiver.
 builder.Services.AddSingleton<MailArchiver.Services.IMsaGraphTokenCache, MailArchiver.Services.MsaGraphTokenCache>();
 builder.Services.AddScoped<MailArchiver.Services.IMsaTokenManager, MailArchiver.Services.MsaTokenManager>();
 builder.Services.AddScoped<MailArchiver.Services.IExternalOAuthTokenManager, MailArchiver.Services.ExternalOAuthTokenManager>();
+builder.Services.AddScoped<MailArchiver.Services.MailCredentialIntakeService>();
+builder.Services.AddScoped<MailArchiver.Services.IMailEndpointDiscoveryService, MailArchiver.Services.MailEndpointDiscoveryService>();
 builder.Services.AddScoped<MailArchiver.Services.MailProviders.IMailProviderModule, MailArchiver.Services.MailProviders.GmailMailProviderModule>();
 builder.Services.AddScoped<MailArchiver.Services.MailProviders.IMailProviderModule, MailArchiver.Services.MailProviders.YahooMailProviderModule>();
 builder.Services.AddScoped<MailArchiver.Services.MailProviders.IMailProviderModule, MailArchiver.Services.MailProviders.GmxMailProviderModule>();
 builder.Services.AddScoped<MailArchiver.Services.MailProviders.IMailProviderModule, MailArchiver.Services.MailProviders.OutlookMailProviderModule>();
+builder.Services.AddScoped<MailArchiver.Services.MailProviders.IMailProviderModule, MailArchiver.Services.MailProviders.CustomDomainMailProviderModule>();
 builder.Services.AddScoped<MailArchiver.Services.MailProviders.IMailProviderRegistry, MailArchiver.Services.MailProviders.MailProviderRegistry>();
 builder.Services.Configure<OutboundMailOptions>(builder.Configuration.GetSection(OutboundMailOptions.SectionName));
 builder.Services.AddScoped<MailArchiver.Services.IOutlookGraphMailSender, MailArchiver.Services.OutlookGraphMailSender>();
@@ -447,8 +463,8 @@ builder.Services.AddHostedService<EmailDeletionService>(provider => provider.Get
 builder.Services.AddSingleton<DeletionPolicyApplicationService>();
 builder.Services.AddHostedService<DeletionPolicyApplicationService>(provider => provider.GetRequiredService<DeletionPolicyApplicationService>());
 
-builder.Services.AddSingleton<IMailSyncTrigger, MailSyncTrigger>();
-builder.Services.AddHostedService<MailSyncBackgroundService>();
+// Mailbox content is never synchronized on a timer. User actions enqueue a
+// bounded, on-demand refresh through IOnDemandMailSyncQueue.
 builder.Services.AddSingleton<OnDemandMailSyncQueue>();
 builder.Services.AddSingleton<IOnDemandMailSyncQueue>(provider => provider.GetRequiredService<OnDemandMailSyncQueue>());
 builder.Services.AddHostedService(provider => provider.GetRequiredService<OnDemandMailSyncQueue>());
@@ -905,7 +921,7 @@ app.UseRateLimiter();
 // Add our custom authentication middleware
 app.UseAuth();
 
-// OpenAPI document + Swagger UI for the read-only REST API. Mapped only when the
+// OpenAPI document + Swagger UI for the REST API. Mapped only when the
 // API and its UI are enabled. Both paths sit OUTSIDE /api/, so the cookie
 // middleware above gates them — a logged-in browser session is required, and
 // they are unreachable with an API key.
@@ -919,6 +935,11 @@ if (apiUiOptions.Enabled && apiUiOptions.EnableSwaggerUi)
         swaggerOptions.RoutePrefix = "apidocs";
     });
 }
+
+// Attribute-routed REST controllers (/api/v1/...) are separate from the
+// conventional MVC route below. Keep the API middleware's enabled/disabled
+// decision in front of this mapping so disabled deployments still return 404.
+app.MapControllers();
 
 app.MapControllerRoute(
     name: "default",

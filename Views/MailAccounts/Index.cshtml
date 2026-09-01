@@ -32,13 +32,6 @@
                     <i class="bi bi-upload" aria-hidden="true"></i>
                     导入账号
                 </a>
-                <form asp-action="SyncAll" method="post" class="d-inline" onsubmit="return confirm('将同步全部已启用邮箱。未同步过的邮箱会下载最近 30 天邮件，任务可能持续较长时间。确认继续吗？');">
-                    @Html.AntiForgeryToken()
-                    <button type="submit" class="btn btn-outline-primary btn-sm" title="同步全部邮箱">
-                        <i class="bi bi-arrow-repeat" aria-hidden="true"></i>
-                        同步全部
-                    </button>
-                </form>
                 <button type="button" class="btn btn-outline-danger btn-sm" data-bs-toggle="modal"
                         data-bs-target="#whitelistDeletionModal">
                     <i class="bi bi-shield-check" aria-hidden="true"></i>
@@ -135,7 +128,7 @@
                             </td>
                             <td>
                                 <div class="account-row-actions">
-                                    <a asp-controller="Emails" asp-action="Index" asp-route-SelectedAccountId="@item.Id"
+                                    <a asp-controller="Emails" asp-action="Index" asp-route-SelectedAccountId="@item.Id" asp-route-autoSync="true"
                                        class="btn btn-primary btn-sm account-view-btn">
                                         <i class="bi bi-inbox" aria-hidden="true"></i>
                                         查看

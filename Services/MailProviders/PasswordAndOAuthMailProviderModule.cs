@@ -31,6 +31,8 @@ public abstract class PasswordAndOAuthMailProviderModule : IMailProviderModule
     protected abstract string GetSmtpHost(MailAccount account);
     protected virtual int SmtpPort => 587;
     protected virtual SecureSocketOptions SmtpSocketOptions => SecureSocketOptions.StartTls;
+    protected virtual int GetSmtpPort(MailAccount account) => SmtpPort;
+    protected virtual SecureSocketOptions GetSmtpSocketOptions(MailAccount account) => SmtpSocketOptions;
     protected virtual bool SmtpSavesSentCopy => false;
     protected virtual ExternalOAuthSettings? OAuth => null;
 
@@ -98,7 +100,7 @@ public abstract class PasswordAndOAuthMailProviderModule : IMailProviderModule
         MailProxyClientFactory.Apply(client, _mailProxyOptions);
         client.ServerCertificateValidationCallback = static (_, _, chain, errors) =>
             MailCertificatePolicy.IsAccepted(errors, chain);
-        await client.ConnectAsync(GetSmtpHost(account), SmtpPort, SmtpSocketOptions, cancellationToken);
+        await client.ConnectAsync(GetSmtpHost(account), GetSmtpPort(account), GetSmtpSocketOptions(account), cancellationToken);
         await MailCredentialFallback.AuthenticateAsync(
             HasOAuth(account),
             HasPassword(account),
@@ -110,6 +112,34 @@ public abstract class PasswordAndOAuthMailProviderModule : IMailProviderModule
         await client.SendAsync(message, cancellationToken);
         await client.DisconnectAsync(true, cancellationToken);
         return new ProviderSendResult(SmtpSavesSentCopy);
+    }
+
+    public async Task<bool> TestOutgoingConnectionAsync(
+        MailAccount account,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureIdentity(account);
+        using var client = new SmtpClient();
+        try
+        {
+            MailProxyClientFactory.Apply(client, _mailProxyOptions);
+            client.ServerCertificateValidationCallback = static (_, _, chain, errors) =>
+                MailCertificatePolicy.IsAccepted(errors, chain);
+            await client.ConnectAsync(GetSmtpHost(account), GetSmtpPort(account), GetSmtpSocketOptions(account), cancellationToken);
+            await MailCredentialFallback.AuthenticateAsync(
+                HasOAuth(account),
+                HasPassword(account),
+                () => AuthenticateOAuthAsync(client, account, cancellationToken),
+                () => AuthenticatePasswordAsync(client, account, cancellationToken),
+                MailProviderCredentialPolicy.For(Kind),
+                cancellationToken);
+            await client.DisconnectAsync(true, cancellationToken);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     protected static string? DomainOf(string emailAddress)

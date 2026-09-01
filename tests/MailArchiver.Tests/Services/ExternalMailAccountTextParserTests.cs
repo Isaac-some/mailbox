@@ -38,7 +38,7 @@ public class ExternalMailAccountTextParserTests
     [Theory]
     [InlineData("two@yahoo.com\tyahoo-client\tyahoo-refresh")]
     [InlineData("three@gmx.com\tgmx-client\tgmx-refresh")]
-    [InlineData("person@example.com\tpassword")]
+    [InlineData("person@\tpassword")]
     public void Parse_rejects_unsupported_OAuth_or_provider_rows(string line)
     {
         using var reader = new StringReader(line);

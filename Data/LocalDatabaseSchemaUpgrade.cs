@@ -20,6 +20,15 @@ public static class LocalDatabaseSchemaUpgrade
             await EnsureNullableTextColumnAsync(connection, "MailAccounts", "OAuthGrantedScopes", cancellationToken);
             await EnsureNullableTextColumnAsync(connection, "MailAccounts", "OAuthRedirectUri", cancellationToken);
             await EnsureNullableTextColumnAsync(connection, "MailAccounts", "MailProviderKind", cancellationToken);
+            await EnsureNullableTextColumnAsync(connection, "MailAccounts", "SmtpServer", cancellationToken);
+            await EnsureNullableIntegerColumnAsync(connection, "MailAccounts", "SmtpPort", cancellationToken);
+            await EnsureNullableBooleanColumnAsync(connection, "MailAccounts", "SmtpUseSSL", cancellationToken);
+            await EnsureNullableTextColumnAsync(connection, "MailAccounts", "EndpointDiscoveryStatus", cancellationToken);
+            await EnsureNullableTextColumnAsync(connection, "MailAccounts", "EndpointDiscoveryLastCheckedAt", cancellationToken);
+            await EnsureTextColumnAsync(connection, "MailAccounts", "CredentialKind", "Unknown", cancellationToken);
+            await EnsureTextColumnAsync(connection, "MailAccounts", "CredentialScope", "Unknown", cancellationToken);
+            await EnsureNullableTextColumnAsync(connection, "MailAccounts", "CredentialDetectionStatus", cancellationToken);
+            await EnsureNullableTextColumnAsync(connection, "MailAccounts", "CredentialLastCheckedAt", cancellationToken);
             if (await HasColumnAsync(connection, "MailAccounts", "Provider", cancellationToken))
             {
                 await ExecuteAsync(connection, @"
@@ -29,6 +38,7 @@ public static class LocalDatabaseSchemaUpgrade
                     WHEN ""Provider"" = 'IMAP' AND (LOWER(""EmailAddress"") LIKE '%@gmail.com' OR LOWER(""EmailAddress"") LIKE '%@googlemail.com') THEN 'Gmail'
                     WHEN ""Provider"" = 'IMAP' AND LOWER(""EmailAddress"") LIKE '%@yahoo.%' THEN 'Yahoo'
                     WHEN ""Provider"" = 'IMAP' AND (LOWER(""EmailAddress"") LIKE '%@gmx.com' OR LOWER(""EmailAddress"") LIKE '%@gmx.net' OR LOWER(""EmailAddress"") LIKE '%@gmx.de') THEN 'Gmx'
+                    WHEN ""MailProviderKind"" IS NULL THEN 'Custom'
                     ELSE ""MailProviderKind""
                 END
                 WHERE ""MailProviderKind"" IS NULL;", cancellationToken);
@@ -105,6 +115,50 @@ public static class LocalDatabaseSchemaUpgrade
 
         await using var alter = connection.CreateCommand();
         alter.CommandText = $"ALTER TABLE \"{table}\" ADD COLUMN \"{column}\" TEXT NULL;";
+        await alter.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task EnsureTextColumnAsync(
+        System.Data.Common.DbConnection connection,
+        string table,
+        string column,
+        string defaultValue,
+        CancellationToken cancellationToken)
+    {
+        if (await HasColumnAsync(connection, table, column, cancellationToken))
+            return;
+
+        await using var alter = connection.CreateCommand();
+        var escapedDefault = defaultValue.Replace("'", "''", StringComparison.Ordinal);
+        alter.CommandText = $"ALTER TABLE \"{table}\" ADD COLUMN \"{column}\" TEXT NOT NULL DEFAULT '{escapedDefault}';";
+        await alter.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task EnsureNullableIntegerColumnAsync(
+        System.Data.Common.DbConnection connection,
+        string table,
+        string column,
+        CancellationToken cancellationToken)
+    {
+        if (await HasColumnAsync(connection, table, column, cancellationToken))
+            return;
+
+        await using var alter = connection.CreateCommand();
+        alter.CommandText = $"ALTER TABLE \"{table}\" ADD COLUMN \"{column}\" INTEGER NULL;";
+        await alter.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task EnsureNullableBooleanColumnAsync(
+        System.Data.Common.DbConnection connection,
+        string table,
+        string column,
+        CancellationToken cancellationToken)
+    {
+        if (await HasColumnAsync(connection, table, column, cancellationToken))
+            return;
+
+        await using var alter = connection.CreateCommand();
+        alter.CommandText = $"ALTER TABLE \"{table}\" ADD COLUMN \"{column}\" INTEGER NULL;";
         await alter.ExecuteNonQueryAsync(cancellationToken);
     }
 

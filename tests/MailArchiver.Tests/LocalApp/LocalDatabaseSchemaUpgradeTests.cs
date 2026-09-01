@@ -66,4 +66,36 @@ public class LocalDatabaseSchemaUpgradeTests
         Assert.True(reader.IsDBNull(1));
         Assert.True(reader.IsDBNull(2));
     }
+
+    [Fact]
+    public async Task Upgrade_adds_credential_classification_columns_with_safe_defaults()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using (var create = connection.CreateCommand())
+        {
+            create.CommandText = "CREATE TABLE MailAccounts (Id INTEGER PRIMARY KEY, EmailAddress TEXT NOT NULL, Provider TEXT NOT NULL);" +
+                "INSERT INTO MailAccounts VALUES (1, 'legacy@corp.example', 'IMAP');";
+            await create.ExecuteNonQueryAsync();
+        }
+
+        var options = new DbContextOptionsBuilder<MailArchiverDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        await using var context = new MailArchiverDbContext(options);
+
+        await LocalDatabaseSchemaUpgrade.ApplyAsync(context);
+
+        await using var verify = connection.CreateCommand();
+        verify.CommandText = "SELECT MailProviderKind, CredentialKind, CredentialScope, SmtpServer, SmtpPort, SmtpUseSSL, EndpointDiscoveryStatus FROM MailAccounts WHERE Id = 1;";
+        await using var reader = await verify.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal("Custom", reader.GetString(0));
+        Assert.Equal("Unknown", reader.GetString(1));
+        Assert.Equal("Unknown", reader.GetString(2));
+        Assert.True(reader.IsDBNull(3));
+        Assert.True(reader.IsDBNull(4));
+        Assert.True(reader.IsDBNull(5));
+        Assert.True(reader.IsDBNull(6));
+    }
 }

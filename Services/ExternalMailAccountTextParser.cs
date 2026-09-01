@@ -38,7 +38,7 @@ public static class ExternalMailAccountTextParser
             var email = fields[0].Trim();
             if (!IsValidEmail(email) || !SupportedMailProviderPolicy.TryResolve(email, out _))
             {
-                errors.Add(new ExternalMailAccountTextError(lineNumber, "仅支持 Gmail、Yahoo 和 GMX 邮箱地址。"));
+                errors.Add(new ExternalMailAccountTextError(lineNumber, "邮箱地址格式不正确。"));
                 continue;
             }
 
@@ -63,7 +63,7 @@ public static class ExternalMailAccountTextParser
                 var redirectUri = fields.Length == 5 ? fields[4].Trim() : null;
                 if (!ExternalOAuthProviderPolicy.TryResolve(email, out var provider))
                 {
-                    errors.Add(new ExternalMailAccountTextError(lineNumber, "GMX 官方不支持 OAuth，请提供邮箱和应用专用密码两列。"));
+                    errors.Add(new ExternalMailAccountTextError(lineNumber, "该邮箱域名尚未配置 OAuth Token 地址，请先提供 IMAP/SMTP 密码。"));
                     continue;
                 }
                 if (string.IsNullOrWhiteSpace(clientId) || string.IsNullOrWhiteSpace(refreshToken))

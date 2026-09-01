@@ -4,14 +4,14 @@
 
 ## 📋 Overview
 
-Mail Archiver synchronizes every enabled mailbox automatically in the background through the `MailSyncBackgroundService`. The service runs a short polling loop (every 60 s), determines which accounts are due, and syncs them — up to `MailSync:MaxConcurrentSyncs` accounts in parallel within one cycle — before rescheduling each account according to its own sync interval. Intervals can be configured globally via `appsettings.json` and overridden per account from the Create/Edit page.
+Mail Archiver does not run a timer-based mailbox synchronizer. Mail content is fetched only when the user opens a mailbox, clicks refresh, or explicitly requests a sync. Those requests use a bounded on-demand queue, with `MailSync:MaxConcurrentSyncs` limiting simultaneous provider connections.
 
 There are two distinct synchronization modes:
 
 | Mode | Triggered by | Scope |
 |------|--------------|-------|
-| **Quick Sync** (incremental) | Every sync cycle (per-account interval) | Only new/changed messages since the last successful sync |
-| **Full Sync** (resync) | New account, manual button, `AlwaysForceFullSync`, or per-account / global Full Sync interval | Every message in every non-excluded folder |
+| **Quick Sync** (incremental) | Open mailbox, refresh, or manual sync request | Only new/changed messages since the last successful sync |
+| **Full Sync** (resync) | Explicit full-resync request | Every message in every non-excluded folder |
 
 Both modes are safe to run repeatedly – Mail Archiver detects duplicates (by `MessageId`, or by From/To/Subject/SentDate when the `MessageId` is missing) and skips messages that are already archived.
 
@@ -19,7 +19,7 @@ Both modes are safe to run repeatedly – Mail Archiver detects duplicates (by `
 
 ## ⚡ Quick Sync (Incremental Sync)
 
-Quick sync is the normal operating mode that runs automatically at the configured interval. The global default is `MailSync:IntervalMinutes` minutes (default 15); each account can override this with its own `SyncIntervalMinutes` value set on the Create/Edit page (leave empty to use the global default).
+Quick sync is the normal operating mode for an on-demand request. There is no per-account or global timer interval.
 
 ### How it works
 
@@ -35,9 +35,9 @@ Quick sync is the normal operating mode that runs automatically at the configure
 
 ### When you see it
 
-- Automatically, every few minutes, for all enabled accounts.
-- After the initial sync of a new account has completed (the first cycle is a Full Sync, see below).
-- No user action required.
+- When a user opens a mailbox or clicks refresh.
+- When a user explicitly requests a sync from the account page.
+- No background request is created merely by importing or enabling an account.
 
 ---
 
@@ -47,12 +47,7 @@ A Full Sync ignores the date filter and downloads **every** message in every non
 
 ### What triggers a Full Sync
 
-A Full Sync is triggered whenever an account's `LastSync` is set to the Unix epoch (`1970-01-01T00:00:00Z`). This happens in four situations:
-
-1. **New account** – Every newly created IMAP or M365 account starts with `LastSync = 1970-01-01`. The first scheduled sync cycle for that account is therefore automatically a Full Sync, which performs the initial archive import.
-2. **Manual "Full Resync" button** – On the *Account Details* page, the **Full Resync** button (`MailAccounts/Resync`) resets `LastSync` to the epoch and starts the sync immediately in the foreground of the request.
-3. **`MailSync:AlwaysForceFullSync = true`** – When this configuration flag is enabled, the background service resets `LastSync` to the epoch for **every enabled account at the beginning of every sync cycle**. This effectively turns every cycle into a Full Sync. This is intended for troubleshooting only and should be turned back off once the issue is resolved, because it drastically increases load on the mail server and the Mail Archiver instance.
-4. **Per-account or global Full Sync interval** – When an account has `FullSyncIntervalHours` set (Create/Edit page), or the global default `MailSync:FullSyncIntervalHours` is configured in `appsettings.json`, the background service automatically triggers a Full Sync once that interval has elapsed since the account's last full sync (`LastFullSync`). The per-account value takes precedence; when neither is set no automatic full sync runs and only the manual resync button (and `AlwaysForceFullSync` above) remain. After the full sync completes, `LastFullSync` is updated to `DateTime.UtcNow` so the next full sync is scheduled from that point.
+A Full Sync is triggered whenever an account's `LastSync` is set to the Unix epoch (`1970-01-01T00:00:00Z`). This happens when a newly imported account is opened for the first time, or when the user explicitly chooses **Full Resync** on the account details page. The request resets `LastSync` and queues the resync through the bounded on-demand queue.
 
 ### Behavior during a Full Sync
 
@@ -75,7 +70,7 @@ Do **not** use Full Sync:
 
 - As a regular operation – it puts unnecessary load on the provider and your Mail Archiver instance.
 - To "refresh" message bodies or metadata – duplicates are skipped, so existing archived copies are not updated by a Full Sync. To replace an archived message you must delete it from the archive first, then run a (Quick or Full) sync.
-- Permanently via `AlwaysForceFullSync=true` – leave this off in production. It is a diagnostic switch, not a mode of operation.
+- As a substitute for Quick Sync – use the normal open/refresh action for incremental updates.
 
 ---
 
@@ -90,7 +85,7 @@ Do **not** use Full Sync:
 | `LastSync` updated on success | Yes | Yes |
 | `LastSync` updated on failure / rate-limit | No (retry next cycle) | No (resume from checkpoint) |
 | Duplicate handling | Skip already-archived messages | Skip already-archived messages |
-| Triggered by | Scheduler (per-account interval) | New account, manual button, `AlwaysForceFullSync`, or Full Sync interval |
+| Triggered by | Open mailbox, refresh, or manual request | Explicit full-resync request |
 | Recommended for | Everyday operation | Initial import and occasional verification |
 
 ---
@@ -101,17 +96,13 @@ The sync behavior is controlled by the `MailSync` section of `appsettings.json` 
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `MailSync:IntervalMinutes` | `15` | Global default for the per-account sync interval, in minutes. Each account can override this on the Create/Edit page (leave empty to use this default). |
-| `MailSync:FullSyncIntervalHours` | _unset_ | Optional global default for automatic full resyncs, in hours. When unset (the default), no automatic full sync runs unless a per-account `FullSyncIntervalHours` value is set. Per-account values override this. |
 | `MailSync:TimeoutMinutes` | `120` | Per-account sync timeout. If an account takes longer, its sync is cancelled and retried next cycle. |
 | `MailSync:ConnectionTimeoutSeconds` | `300` | IMAP connection timeout. |
 | `MailSync:CommandTimeoutSeconds` | `600` | IMAP command timeout. |
-| `MailSync:AlwaysForceFullSync` | `false` | When `true`, every cycle is a Full Sync for all accounts. **Diagnostics only – keep off in production.** |
 | `MailSync:IgnoreSelfSignedCert` | `false` | Accept self-signed TLS certificates for IMAP connections. |
-| `MailSync:MaxConcurrentSyncs` | `1` | Maximum number of account syncs that may run in parallel within one poll cycle. `1` reproduces the previous sequential behaviour; increase to parallelize — mind provider rate limits and local resource usage. |
-| `MailSync:InterAccountDelaySeconds` | `0` | Optional stagger delay in seconds applied at the end of each account sync task. Useful to avoid burst-starts when `MaxConcurrentSyncs > 1`. `0` disables it. |
+| `MailSync:MaxConcurrentSyncs` | `1` | Maximum number of on-demand account syncs that may run in parallel. Increase carefully because providers enforce connection and rate limits. |
 
-> 💡 Both the normal sync interval and the full-sync interval can be overridden per account on the **Create/Edit Mail Account** page. Leave the per-account fields empty to fall back to the global defaults above. To remove an account from the scheduler entirely, disable it (toggle *Enabled* off on the Account Details page).
+> Mailbox content is fetched only after an explicit user action. Disabling an account prevents it from being queued for on-demand synchronization.
 
 ---
 
