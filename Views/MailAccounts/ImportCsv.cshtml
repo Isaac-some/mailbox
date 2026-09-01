@@ -63,9 +63,9 @@
 
                     <div class="alert alert-light border mb-3">
                         <strong>一个文件可以混放 Gmail、Yahoo、GMX 和 Outlook，程序会逐行自动识别。</strong>
-                        Outlook 使用四列 Tab 分隔格式：<code>邮箱　密码占位列　Client ID　Refresh Token</code>；微软密码不会保存，收发件优先使用 OAuth。
+                        Outlook 可使用两列密码格式，或四列 Tab 分隔格式：<code>邮箱　密码　Client ID　Refresh Token</code>；有 Refresh Token 时收发件优先使用 OAuth，OAuth 失败后才尝试 IMAP/SMTP 密码。
                         Gmail/Yahoo/GMX 密码模式使用两列：<code>邮箱、SMTP授权码</code>。Gmail 密码可直接粘贴 Google 显示的分组格式；程序会自动删除空格和复制时混入的不可见分隔符，清理后必须恰好 16 位。Gmail OAuth 使用 <code>邮箱、Client ID、Refresh Token</code>；Yahoo OAuth 还必须增加 <code>Client Secret、Redirect URI</code>。TXT 使用相同列顺序并以 Tab 分隔。GMX 官方不支持 OAuth。
-                        Gmail/Yahoo 同时提供应用专用密码和 OAuth 时，收件与发件都会先试 OAuth，授权失效再自动尝试应用专用密码。
+                        Gmail 优先应用专用密码；Yahoo、GMX 优先 IMAP 密码认证；三者失败后才尝试可用 OAuth。Outlook 优先 OAuth Refresh Token，失败后才尝试 IMAP/SMTP 密码。
                         姓名会自动取邮箱 <code>@@</code> 前去掉数字后的内容，并根据邮箱域名设置收发件服务器和 TLS。
                         <code>名字</code>、<code>分组</code>、<code>密码</code>、<code>辅助邮箱</code>、<code>2fa</code>、序号和使用状态都会被忽略。
                     </div>

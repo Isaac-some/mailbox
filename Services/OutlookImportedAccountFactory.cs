@@ -4,7 +4,7 @@ namespace MailArchiver.Services;
 
 public static class OutlookImportedAccountFactory
 {
-    public static MailAccount Create(OutlookImportedAccount imported, bool isEnabled)
+    public static MailAccount Create(OutlookImportedAccount imported, bool isEnabled, string? encryptedPassword = null)
         => new()
         {
             Name = MailAccountNamePolicy.Derive(imported.Email),
@@ -13,7 +13,7 @@ public static class OutlookImportedAccountFactory
             ImapServer = "outlook.office365.com",
             ImapPort = 993,
             Username = imported.Email.Trim(),
-            Password = null,
+            Password = encryptedPassword,
             UseSSL = true,
             IsEnabled = isEnabled,
             Provider = ProviderType.MSA,

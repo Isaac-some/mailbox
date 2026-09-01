@@ -68,8 +68,8 @@ public class LocalAppPackagingPolicyTests
     {
         var source = ReadBundledFile("Info.plist");
 
-        Assert.Contains("<string>1.0.16</string>", source, StringComparison.Ordinal);
-        Assert.Contains("<string>17</string>", source, StringComparison.Ordinal);
+        Assert.Contains("<string>1.0.17</string>", source, StringComparison.Ordinal);
+        Assert.Contains("<string>18</string>", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -77,8 +77,8 @@ public class LocalAppPackagingPolicyTests
     {
         var source = ReadBundledFile("KouziMailAssistant.Windows.csproj");
 
-        Assert.Contains("<Version>1.0.16</Version>", source, StringComparison.Ordinal);
-        Assert.Contains("<FileVersion>1.0.16.0</FileVersion>", source, StringComparison.Ordinal);
+        Assert.Contains("<Version>1.0.17</Version>", source, StringComparison.Ordinal);
+        Assert.Contains("<FileVersion>1.0.17.0</FileVersion>", source, StringComparison.Ordinal);
     }
 
     [Fact]

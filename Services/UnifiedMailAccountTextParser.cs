@@ -68,19 +68,27 @@ public static class UnifiedMailAccountTextParser
         ICollection<UnifiedImportedMailAccount> accounts,
         ICollection<UnifiedMailAccountTextError> errors)
     {
+        if (fields.Length == 2)
+        {
+            var passwordOnly = NullIfWhiteSpace(fields[1], preserveWhitespace: true);
+            if (passwordOnly is null)
+            {
+                errors.Add(new(lineNumber, "Outlook 密码不能为空。"));
+                return;
+            }
+            accounts.Add(new(lineNumber, MailProviderKind.Outlook, email, passwordOnly,
+                null, null, null, null));
+            return;
+        }
+
         if (fields.Length != 4)
         {
-            errors.Add(new(lineNumber, "Outlook 每行必须是邮箱、密码占位列、Client ID、Refresh Token 四列。"));
+            errors.Add(new(lineNumber, "Outlook 使用邮箱、密码两列，或邮箱、密码、Client ID、Refresh Token 四列。"));
             return;
         }
 
         var clientId = fields[2].Trim();
         var refreshToken = fields[3].Trim();
-        if (string.IsNullOrWhiteSpace(fields[1]))
-        {
-            errors.Add(new(lineNumber, "Outlook 密码占位列不能为空，但不会保存或用于登录。"));
-            return;
-        }
         if (!Guid.TryParseExact(clientId, "D", out _))
         {
             errors.Add(new(lineNumber, "Outlook Client ID 格式不正确。"));
@@ -92,7 +100,7 @@ public static class UnifiedMailAccountTextParser
             return;
         }
 
-        accounts.Add(new(lineNumber, MailProviderKind.Outlook, email, null,
+        accounts.Add(new(lineNumber, MailProviderKind.Outlook, email, NullIfWhiteSpace(fields[1], preserveWhitespace: true),
             clientId, null, refreshToken, null));
     }
 

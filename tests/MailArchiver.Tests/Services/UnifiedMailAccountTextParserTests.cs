@@ -11,7 +11,7 @@ public class UnifiedMailAccountTextParserTests
         const string clientId = "11111111-2222-3333-4444-555555555555";
         using var reader = new StringReader(
             "first@yahoo.com\tyahoo-password\n" +
-            $"second@outlook.com\tignored-password\t{clientId}\toutlook-refresh\n" +
+            $"second@outlook.com\toutlook-password\t{clientId}\toutlook-refresh\n" +
             "third@gmx.de\tgmx-password\n" +
             "fourth@gmail.com\tgoogle-client\tgoogle-refresh\n");
 
@@ -23,7 +23,7 @@ public class UnifiedMailAccountTextParserTests
             account => Assert.Equal(MailProviderKind.Outlook, account.Provider),
             account => Assert.Equal(MailProviderKind.Gmx, account.Provider),
             account => Assert.Equal(MailProviderKind.Gmail, account.Provider));
-        Assert.Null(result.Accounts[1].AppPassword);
+        Assert.Equal("outlook-password", result.Accounts[1].AppPassword);
     }
 
     [Fact]
@@ -42,6 +42,20 @@ public class UnifiedMailAccountTextParserTests
             Assert.False(string.IsNullOrWhiteSpace(account.ClientId));
             Assert.False(string.IsNullOrWhiteSpace(account.RefreshToken));
         });
+    }
+
+    [Fact]
+    public void Parse_accepts_password_only_Outlook_for_IMAP_SMTP_fallback()
+    {
+        using var reader = new StringReader("person@outlook.com\tpassword-only\n");
+
+        var result = UnifiedMailAccountTextParser.Parse(reader);
+
+        var account = Assert.Single(result.Accounts);
+        Assert.Empty(result.Errors);
+        Assert.Equal(MailProviderKind.Outlook, account.Provider);
+        Assert.Equal("password-only", account.AppPassword);
+        Assert.Null(account.RefreshToken);
     }
 
     [Theory]

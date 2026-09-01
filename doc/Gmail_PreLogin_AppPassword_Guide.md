@@ -30,7 +30,7 @@ Google 只显示一次这组 16 位密码。立即放入邮箱助手或 CSV，�
 name@gmail.com,xxxx xxxx xxxx xxxx
 ```
 
-也可以与 Yahoo、GMX、Outlook 混放在同一个文件中；程序会逐行识别服务商。Gmail 同时提供 OAuth 与应用专用密码时，会先尝试 OAuth，失败后再尝试应用专用密码。
+也可以与 Yahoo、GMX、Outlook 混放在同一个文件中；程序会逐行识别服务商。Gmail 同时提供 OAuth 与应用专用密码时，会先尝试应用专用密码，失败后再尝试 OAuth。
 
 导入成功后，邮箱列表应显示“Gmail 可收发”。
 

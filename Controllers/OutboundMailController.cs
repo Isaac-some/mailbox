@@ -44,7 +44,7 @@ public sealed class OutboundMailController : Controller
         await PopulateOptionsAsync(model);
         if (model.SendingAccounts.Count == 0)
         {
-            TempData["ErrorMessage"] = "没有可发件的账号。Gmail/Yahoo 可用 OAuth 或应用专用密码，GMX 使用应用专用密码，Outlook 使用 OAuth。";
+            TempData["ErrorMessage"] = "没有可发件的账号。Gmail 优先应用专用密码，Yahoo/GMX 优先 IMAP 密码，Outlook 优先 OAuth；系统会在首选方式失败后自动尝试可用回退方式。";
             return RedirectToAction("Index", "MailAccounts");
         }
 

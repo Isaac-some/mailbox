@@ -81,6 +81,7 @@ public abstract class PasswordAndOAuthMailProviderModule : IMailProviderModule
             HasPassword(account),
             () => AuthenticateOAuthAsync(client, account, cancellationToken),
             () => AuthenticatePasswordAsync(client, account, cancellationToken),
+            MailProviderCredentialPolicy.For(Kind),
             cancellationToken);
     }
 
@@ -103,6 +104,7 @@ public abstract class PasswordAndOAuthMailProviderModule : IMailProviderModule
             HasPassword(account),
             () => AuthenticateOAuthAsync(client, account, cancellationToken),
             () => AuthenticatePasswordAsync(client, account, cancellationToken),
+            MailProviderCredentialPolicy.For(Kind),
             cancellationToken);
 
         await client.SendAsync(message, cancellationToken);

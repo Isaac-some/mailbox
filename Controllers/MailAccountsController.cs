@@ -3411,13 +3411,18 @@ namespace MailArchiver.Controllers
                     }
 
                     var account = row.Provider == ProviderType.MSA
+                        && !string.IsNullOrWhiteSpace(row.ClientId)
+                        && !string.IsNullOrWhiteSpace(row.OAuthRefreshToken)
                         ? OutlookImportedAccountFactory.Create(
                             new OutlookImportedAccount(
                                 row.LineNumber,
                                 row.Email,
                                 row.ClientId!,
                                 row.OAuthRefreshToken!),
-                            model.IsEnabled)
+                            model.IsEnabled,
+                            string.IsNullOrWhiteSpace(row.Password)
+                                ? null
+                                : _credentialEncryptionService.Encrypt(row.Password))
                         : new MailAccount
                         {
                             Name = MailAccountNamePolicy.Derive(row.Email),
@@ -3436,7 +3441,7 @@ namespace MailArchiver.Controllers
                             OAuthRedirectUri = row.OAuthRedirectUri,
                             UseSSL = true,
                             IsEnabled = model.IsEnabled,
-                            Provider = ProviderType.IMAP,
+                            Provider = row.Provider,
                             ExcludedFolders = string.Empty,
                             DeleteAfterDays = null,
                             LocalRetentionDays = null,
@@ -3634,7 +3639,7 @@ namespace MailArchiver.Controllers
             var text = "carol@gmail.com\tabcd efgh ijkl mnop\r\n"
                 + "alice@gmx.com\t示例应用专用密码\r\n"
                 + "bob@yahoo.com\t示例应用专用密码\r\n"
-                + "outlook@outlook.com\t密码占位不保存\t11111111-2222-3333-4444-555555555555\t示例RefreshToken\r\n"
+                + "outlook@outlook.com\t密码回退示例\t11111111-2222-3333-4444-555555555555\t示例RefreshToken\r\n"
                 + "oauth@gmail.com\t示例GoogleClientID\t示例RefreshToken\r\n"
                 + "both@gmail.com\tabcd efgh ijkl mnop\t示例GoogleClientID\t\t示例RefreshToken\t\r\n"
                 + "david@yahoo.com\t示例YahooClientID\t示例YahooClientSecret\t示例RefreshToken\toob\r\n";
@@ -3761,20 +3766,24 @@ namespace MailArchiver.Controllers
 
             if (providerModule.Kind == MailProviderKind.Outlook)
             {
-                if (string.IsNullOrWhiteSpace(clientId) ||
-                    !Guid.TryParseExact(clientId.Trim(), "D", out _) ||
-                    string.IsNullOrWhiteSpace(refreshToken))
+                var hasCompleteOAuth = !string.IsNullOrWhiteSpace(clientId)
+                    && Guid.TryParseExact(clientId.Trim(), "D", out _)
+                    && !string.IsNullOrWhiteSpace(refreshToken);
+                var hasPartialOAuth = !string.IsNullOrWhiteSpace(clientId)
+                    || !string.IsNullOrWhiteSpace(refreshToken)
+                    || !string.IsNullOrWhiteSpace(clientSecret);
+                if (hasPartialOAuth && !hasCompleteOAuth)
                 {
                     failedRows.Add(new CsvImportFailedRow
                     {
                         LineNumber = lineNumber,
                         Email = email,
-                        Reason = "Outlook 必须提供格式正确的 Client ID 和 Refresh Token；密码列不会保存。"
+                        Reason = "Outlook OAuth 必须同时提供格式正确的 Client ID 和 Refresh Token；否则请只提供密码走 IMAP/SMTP。"
                     });
                     return null;
                 }
 
-                password = string.Empty;
+                // Keep the password encrypted as a final IMAP/SMTP fallback when OAuth is unavailable.
             }
             else if (hasAnyOAuthValue)
             {

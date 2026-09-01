@@ -58,6 +58,49 @@ public class OutlookMailProviderModuleTests
         Assert.False(result.SentCopySavedByProvider);
     }
 
+    [Fact]
+    public async Task SendAsync_falls_back_to_SMTP_password_after_both_OAuth_paths_are_rejected()
+    {
+        var tokens = new FakeTokenManager
+        {
+            SmtpFailure = new MailKit.Security.AuthenticationException("smtp oauth rejected")
+        };
+        var graph = new FakeGraphSender
+        {
+            Failure = new OutlookGraphMailException(
+                System.Net.HttpStatusCode.Forbidden,
+                "Authorization_RequestDenied",
+                "denied",
+                "denied")
+        };
+        var smtp = new FakeSmtpSender();
+        var module = new OutlookMailProviderModule(tokens, graph, smtp, new PassthroughEncryption());
+        var account = CreateAccount();
+        account.Password = "encrypted-password";
+        var message = new MimeMessage { Body = new TextPart("plain") { Text = "body" } };
+        message.To.Add(MailboxAddress.Parse("target@example.com"));
+
+        var result = await module.SendAsync(account, message);
+
+        Assert.Equal(1, tokens.SmtpRequests);
+        Assert.Equal("encrypted-password", smtp.Password);
+        Assert.False(result.SentCopySavedByProvider);
+    }
+
+    [Fact]
+    public void Inspect_accepts_password_only_Outlook_accounts()
+    {
+        var module = new OutlookMailProviderModule(null!, null!);
+        var account = CreateAccount();
+        account.OAuthRefreshToken = null;
+        account.Password = "encrypted-password";
+
+        var capabilities = module.Inspect(account);
+
+        Assert.True(capabilities.CanReceive);
+        Assert.True(capabilities.CanSend);
+    }
+
     private static MailAccount CreateAccount() => new()
     {
         Id = 42,
@@ -73,6 +116,7 @@ public class OutlookMailProviderModuleTests
         public int GraphRequests { get; private set; }
         public int ImapRequests { get; private set; }
         public int SmtpRequests { get; private set; }
+        public Exception? SmtpFailure { get; init; }
 
         public Task<MsaAccessToken> GetAccessTokenAsync(
             MailAccount account,
@@ -98,6 +142,8 @@ public class OutlookMailProviderModuleTests
             CancellationToken cancellationToken = default)
         {
             SmtpRequests++;
+            if (SmtpFailure is not null)
+                throw SmtpFailure;
             return Task.FromResult(new MsaAccessToken(account.EmailAddress, "smtp-access"));
         }
     }
@@ -122,6 +168,7 @@ public class OutlookMailProviderModuleTests
     private sealed class FakeSmtpSender : IOutlookSmtpMailSender
     {
         public string? AccessToken { get; private set; }
+        public string? Password { get; private set; }
 
         public Task SendAsync(
             MailAccount account,
@@ -132,5 +179,21 @@ public class OutlookMailProviderModuleTests
             AccessToken = token.AccessToken;
             return Task.CompletedTask;
         }
+
+        public Task SendWithPasswordAsync(
+            MailAccount account,
+            MimeMessage message,
+            string password,
+            CancellationToken cancellationToken)
+        {
+            Password = password;
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class PassthroughEncryption : ICredentialEncryptionService
+    {
+        public string Encrypt(string plaintext) => plaintext;
+        public string Decrypt(string encryptedValue) => encryptedValue;
     }
 }
