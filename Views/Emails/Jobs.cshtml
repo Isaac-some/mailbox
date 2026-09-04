@@ -962,7 +962,7 @@
         document.addEventListener('DOMContentLoaded', function(){
             const refreshInfo=document.createElement('small');
             refreshInfo.className='text-muted float-end';
-            refreshInfo.textContent = lastUpdateLabel + ' ' + new Date().toLocaleTimeString();
+            refreshInfo.textContent = lastUpdateLabel + ' ' + convertUTCToLocal(new Date().toISOString());
             const firstCardHeader=document.querySelector('.card .card-header');
             if(firstCardHeader){ firstCardHeader.appendChild(refreshInfo);} });
     </script>

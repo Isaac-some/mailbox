@@ -21,7 +21,7 @@ internal static class ServiceFactory
     public static EmailCoreService CreateEmailCoreService(MailArchiverDbContext ctx) =>
         new(ctx,
             NullLogger<EmailCoreService>.Instance,
-            new DateTimeHelper(Options.Create(new TimeZoneOptions { DisplayTimeZoneId = "Europe/Berlin" })),
+            new DateTimeHelper(Options.Create(new TimeZoneOptions { StorageTimeZoneId = "Europe/Berlin" })),
             Options.Create(new BatchOperationOptions()),
             Options.Create(new MailSyncOptions()));
 

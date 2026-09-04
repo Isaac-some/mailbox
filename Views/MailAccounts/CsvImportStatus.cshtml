@@ -1,0 +1,68 @@
+@inject Microsoft.Extensions.Localization.IStringLocalizer<MailArchiver.SharedResource> Localizer
+@model MailArchiver.Models.CsvImportJob
+@{
+    ViewData["Title"] = "CSV 导入处理中";
+    var statusUrl = Url.Action("CsvImportStatusJson", "MailAccounts", new { jobId = Model.JobId });
+    var resultUrl = Url.Action("CsvImportStatus", "MailAccounts", new { jobId = Model.JobId });
+}
+
+<div class="container">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h1 class="h3 mb-0">CSV 导入处理中</h1>
+        <a asp-action="Index" class="btn btn-outline-secondary btn-sm">返回邮箱列表</a>
+    </div>
+    <div class="alert alert-info" role="status" aria-live="polite">
+        <strong>文件已识别，后台任务已受理。</strong>
+        页面可以关闭；后台会继续写入邮箱。授权码不会在此阶段连接邮箱服务器。
+    </div>
+    <div class="card">
+        <div class="card-body">
+            <div class="d-flex justify-content-between mb-2">
+                <span id="csvImportStatus">等待后台开始</span>
+                <span><span id="csvImportProcessed">0</span> / @Model.TotalRows</span>
+            </div>
+            <div class="progress" style="height: 24px;">
+                <div id="csvImportProgress" class="progress-bar progress-bar-striped progress-bar-animated" style="width: 0%">0%</div>
+            </div>
+            <div class="row text-center mt-4">
+                <div class="col-6 col-md-3"><div class="h4 mb-0 text-success" id="csvCreated">0</div><small>新增</small></div>
+                <div class="col-6 col-md-3"><div class="h4 mb-0 text-primary" id="csvUpdated">0</div><small>覆盖更新</small></div>
+                <div class="col-6 col-md-3"><div class="h4 mb-0 text-warning" id="csvSkipped">@Model.SkippedCount</div><small>跳过</small></div>
+                <div class="col-6 col-md-3"><div class="h4 mb-0 text-danger" id="csvFailed">@Model.FailedCount</div><small>失败</small></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+(() => {
+    const statusUrl = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(statusUrl));
+    const resultUrl = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(resultUrl));
+    const labels = { Queued: '排队中', Running: '后台导入中', Completed: '导入完成', CompletedWithErrors: '导入完成，部分失败', Failed: '导入失败' };
+    async function refresh() {
+        try {
+            const response = await fetch(statusUrl, { cache: 'no-store' });
+            if (!response.ok) return;
+            const job = await response.json();
+            const percent = job.total ? Math.min(100, Math.round(job.processed * 100 / job.total)) : 0;
+            document.getElementById('csvImportStatus').textContent = labels[job.status] || job.status;
+            document.getElementById('csvImportProcessed').textContent = job.processed;
+            document.getElementById('csvCreated').textContent = job.created;
+            document.getElementById('csvUpdated').textContent = job.updated;
+            document.getElementById('csvSkipped').textContent = job.skipped;
+            document.getElementById('csvFailed').textContent = job.failed;
+            const bar = document.getElementById('csvImportProgress');
+            bar.style.width = percent + '%';
+            bar.textContent = percent + '%';
+            if (['Completed', 'CompletedWithErrors', 'Failed'].includes(job.status)) {
+                window.location.href = resultUrl;
+                return;
+            }
+        } catch (_) { }
+        window.setTimeout(refresh, 1000);
+    }
+    refresh();
+})();
+</script>
+}

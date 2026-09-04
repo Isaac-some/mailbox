@@ -128,7 +128,8 @@ services:
       - Authentication__Password=TempEmergencyPass2026!
       
       # Other settings remain unchanged...
-      - TimeZone__DisplayTimeZoneId=Europe/Berlin
+      - TimeZone__StorageTimeZoneId=Etc/UTC
+      - TimeZone__DisplayTimeZoneId=Asia/Shanghai
       # ... rest of configuration
     ports:
       - "5000:5000"

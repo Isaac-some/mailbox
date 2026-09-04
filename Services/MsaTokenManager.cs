@@ -161,7 +161,7 @@ public sealed class MsaTokenManager : IMsaTokenManager
             {
                 _logger.LogInformation("Refreshing Microsoft OAuth token for account {AccountId}", tracked.Id);
                 var refreshed = await _oauth.RefreshAccessTokenAsync(
-                    tracked.OAuthRefreshToken!, tracked.ClientId, tracked.ClientSecret);
+                    tracked.OAuthRefreshToken!, tracked.ClientId, tracked.ClientSecret, cancellationToken);
 
                 tracked.OAuthAccessToken = refreshed.AccessToken;
                 tracked.OAuthTokenExpiry = refreshed.Expiry;

@@ -23,7 +23,9 @@ public sealed class ComposeMailViewModel
 
     public List<IFormFile>? Attachments { get; set; }
 
+    public string? AccountQuery { get; set; }
     public List<SelectListItem> SendingAccounts { get; set; } = new();
+    public bool HasMoreSendingAccounts { get; set; }
     public int MaxAttachmentCount { get; set; }
     public long MaxTotalAttachmentBytes { get; set; }
 }

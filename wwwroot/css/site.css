@@ -1838,12 +1838,18 @@ body {
 
 .app-chrome .navbar {
   min-height: 56px;
-  padding: .55rem 1rem;
+  padding: .55rem .65rem;
   background: rgba(246, 246, 248, .78) !important;
   border-bottom: 1px solid rgba(60, 60, 67, .14);
   box-shadow: none;
   backdrop-filter: saturate(180%) blur(24px);
   -webkit-backdrop-filter: saturate(180%) blur(24px);
+}
+
+.app-chrome .navbar > .container-fluid {
+  width: 100%;
+  max-width: none;
+  padding-inline: 0;
 }
 
 .navbar-brand {

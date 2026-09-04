@@ -17,3 +17,10 @@ public enum MailCredentialScope
     Smtp,
     ImapAndSmtp
 }
+
+public enum MailAuthenticationMethod
+{
+    Unknown,
+    Password,
+    OAuth2
+}

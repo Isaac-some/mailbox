@@ -10,19 +10,26 @@ public enum MailCredentialPreference
 
 public static class MailProviderCredentialPolicy
 {
-    public static MailCredentialPreference For(MailProviderKind provider)
-        => provider switch
+    public static MailCredentialPreference For(
+        MailProviderKind provider,
+        MailAuthenticationMethod remembered = MailAuthenticationMethod.Unknown)
+        => remembered switch
         {
-            MailProviderKind.Outlook => MailCredentialPreference.OAuthFirst,
-            MailProviderKind.Gmail or MailProviderKind.Yahoo or MailProviderKind.Gmx or MailProviderKind.Custom
-                => MailCredentialPreference.AppPasswordFirst,
-            _ => throw new NotSupportedException($"不支持邮箱服务商 {provider}。")
+            MailAuthenticationMethod.OAuth2 => MailCredentialPreference.OAuthFirst,
+            MailAuthenticationMethod.Password => MailCredentialPreference.AppPasswordFirst,
+            _ => provider switch
+            {
+                MailProviderKind.Outlook => MailCredentialPreference.OAuthFirst,
+                MailProviderKind.Gmail or MailProviderKind.Yahoo or MailProviderKind.Gmx or MailProviderKind.Custom
+                    => MailCredentialPreference.AppPasswordFirst,
+                _ => throw new NotSupportedException($"不支持邮箱服务商 {provider}。")
+            }
         };
 }
 
 internal static class MailCredentialFallback
 {
-    public static async Task AuthenticateAsync(
+    public static async Task<MailAuthenticationMethod> AuthenticateAsync(
         bool hasOAuth,
         bool hasPassword,
         Func<Task> authenticateOAuth,
@@ -45,7 +52,9 @@ internal static class MailCredentialFallback
                     await authenticatePassword();
                 else
                     await authenticateOAuth();
-                return;
+                return attemptPassword
+                    ? MailAuthenticationMethod.Password
+                    : MailAuthenticationMethod.OAuth2;
             }
             catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
             {

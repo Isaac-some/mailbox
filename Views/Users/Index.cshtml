@@ -78,7 +78,7 @@
                                     else
                                     {<span class="badge bg-danger">@Localizer["Inactive"]</span>}
                                 </td>
-                                <td>@item.CreatedAt.ToString(System.Globalization.CultureInfo.CurrentUICulture.DateTimeFormat.ShortDatePattern)</td>
+                                <td data-utc-time="@item.CreatedAt.ToString("s")">@item.CreatedAt</td>
                                 <td>
                                     @if (item.LastLoginAt.HasValue)
                                     {
@@ -309,7 +309,7 @@
                             @Localizer["User"]
                         }
                     </p>
-                    <p class="card-text small mb-2"><strong>@Localizer["Created"]:</strong> @item.CreatedAt.ToString(System.Globalization.CultureInfo.CurrentUICulture.DateTimeFormat.ShortDatePattern)</p>
+                    <p class="card-text small mb-2"><strong>@Localizer["Created"]:</strong> <span data-utc-time="@item.CreatedAt.ToString("s")">@item.CreatedAt</span></p>
                     <p class="card-text small mb-3"><strong>@Localizer["LastLogin"]:</strong> 
                         @if (item.LastLoginAt.HasValue)
                         {

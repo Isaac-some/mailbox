@@ -1,4 +1,6 @@
 using MailArchiver.Data;
+using MailArchiver.Services;
+using MailArchiver.ViewModels;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
@@ -14,29 +16,102 @@ public sealed class LocalMaintenanceController : Controller
     private readonly MailArchiverDbContext _context;
     private readonly IHostApplicationLifetime _lifetime;
     private readonly IConfiguration _configuration;
+    private readonly IUpstreamMailboxConnectionStore _connectionStore;
+    private readonly IUpstreamMailboxSyncCursorStore _cursorStore;
+    private readonly IUpstreamMailboxSyncService _upstreamSync;
+    private readonly IPlatformSessionStore _platformSessionStore;
+    private readonly ICsvImportService _csvImportService;
     private readonly ILogger<LocalMaintenanceController> _logger;
 
     public LocalMaintenanceController(
         MailArchiverDbContext context,
         IHostApplicationLifetime lifetime,
         IConfiguration configuration,
+        IUpstreamMailboxConnectionStore connectionStore,
+        IUpstreamMailboxSyncCursorStore cursorStore,
+        IUpstreamMailboxSyncService upstreamSync,
+        IPlatformSessionStore platformSessionStore,
+        ICsvImportService csvImportService,
         ILogger<LocalMaintenanceController> logger)
     {
         _context = context;
         _lifetime = lifetime;
         _configuration = configuration;
+        _connectionStore = connectionStore;
+        _cursorStore = cursorStore;
+        _upstreamSync = upstreamSync;
+        _platformSessionStore = platformSessionStore;
+        _csvImportService = csvImportService;
         _logger = logger;
     }
 
     [HttpGet]
-    public IActionResult Index()
+    public async Task<IActionResult> Index(CancellationToken cancellationToken)
     {
         if (!IsLocalApp())
         {
             return NotFound();
         }
 
-        return View();
+        var connection = await _connectionStore.GetStatusAsync(cancellationToken);
+        var session = _platformSessionStore.Current;
+        return View(new LocalMaintenanceViewModel
+        {
+            PlatformConfigured = session is not null,
+            PlatformUsername = session?.Username ?? string.Empty,
+            PlatformIsAdmin = session?.IsAdmin ?? false,
+            PlatformEndpoint = connection.Endpoint ?? string.Empty,
+            InstallationId = connection.InstallationId,
+            DeviceName = connection.DeviceName,
+            OperatingSystem = connection.OperatingSystem,
+            AppVersion = connection.AppVersion
+        });
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> PullPlatformMailboxes(CancellationToken cancellationToken)
+    {
+        if (!IsLocalApp())
+            return NotFound();
+
+        var authentication = HttpContext.RequestServices.GetRequiredService<IAuthenticationService>();
+        var userId = authentication.GetCurrentUserId(HttpContext);
+        if (!userId.HasValue)
+            return Unauthorized();
+
+        var result = await _upstreamSync.PullAsync(userId.Value, cancellationToken);
+        if (!result.Enabled)
+        {
+            TempData["ErrorMessage"] = "请先配置平台连接。";
+            return RedirectToAction(nameof(Index));
+        }
+        if (!result.Succeeded)
+        {
+            if (result.RequiresLogin)
+            {
+                return RedirectToAction("Login", "Auth", new { returnUrl = Url.Action(nameof(Index)) });
+            }
+            TempData["ErrorMessage"] = result.Error;
+            return RedirectToAction(nameof(Index));
+        }
+
+        TempData["SuccessMessage"] = $"平台邮箱已更新：新增 {result.Created} 个，更新 {result.Updated} 个。";
+        return RedirectToAction("Index", "MailAccounts");
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> RemovePlatformConnection(CancellationToken cancellationToken)
+    {
+        if (!IsLocalApp())
+            return NotFound();
+
+        await _connectionStore.RemoveAsync(cancellationToken);
+        _platformSessionStore.Clear();
+        await _cursorStore.ResetAsync(cancellationToken);
+        TempData["SuccessMessage"] = "平台连接已移除。";
+        return RedirectToAction(nameof(Index));
     }
 
     [HttpPost]
@@ -48,15 +123,30 @@ public sealed class LocalMaintenanceController : Controller
             return NotFound();
         }
 
-        await using var transaction = await _context.Database.BeginTransactionAsync();
-        await _context.EmailAttachments.ExecuteDeleteAsync();
-        await _context.AttachmentContents.ExecuteDeleteAsync();
-        await _context.ArchivedEmails.ExecuteDeleteAsync();
-        await _context.SyncCheckpoints.ExecuteDeleteAsync();
-        await _context.BandwidthUsages.ExecuteDeleteAsync();
-        await _context.AccountStorageCaches.ExecuteDeleteAsync();
-        await _context.AccountStorageBackfillStates.ExecuteDeleteAsync();
-        await transaction.CommitAsync();
+        if (_csvImportService.HasActiveJobs())
+        {
+            TempData["ErrorMessage"] = "邮箱账号正在后台导入，请等待导入完成后再清空邮件和附件。";
+            return RedirectToAction(nameof(Index));
+        }
+
+        try
+        {
+            await using var transaction = await _context.Database.BeginTransactionAsync();
+            await _context.EmailAttachments.ExecuteDeleteAsync();
+            await _context.AttachmentContents.ExecuteDeleteAsync();
+            await _context.ArchivedEmails.ExecuteDeleteAsync();
+            await _context.SyncCheckpoints.ExecuteDeleteAsync();
+            await _context.BandwidthUsages.ExecuteDeleteAsync();
+            await _context.AccountStorageCaches.ExecuteDeleteAsync();
+            await _context.AccountStorageBackfillStates.ExecuteDeleteAsync();
+            await transaction.CommitAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to clear local mail data; accounts were not targeted");
+            TempData["ErrorMessage"] = "邮件数据清理失败，邮箱账号和登录信息没有被删除。请重启应用后重试。";
+            return RedirectToAction(nameof(Index));
+        }
 
         _logger.LogInformation("Local archive mail and attachment data cleared; accounts retained.");
         TempData["SuccessMessage"] = "邮件和附件已清空，邮箱账号已保留。";

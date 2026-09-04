@@ -23,7 +23,7 @@
                     <input asp-for="NewSyncTime" class="form-control" type="datetime-local" value="@Model.NewSyncTime.ToString("yyyy-MM-ddTHH:mm")" />
                     <span asp-validation-for="NewSyncTime" class="text-danger"></span>
                     <div class="form-text">
-                        @Localizer["EditSyncTimeNote"]
+                        @Localizer["EditSyncTimeNote"]（北京时间）
                     </div>
                 </div>
                 
@@ -32,7 +32,7 @@
                     <div class="form-control-plaintext">
                         @if (Model.CurrentSyncTime.Year > 1970)
                         {
-                            <span class="utc-timestamp" data-utc-time="@Model.CurrentSyncTime.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss")">
+                            <span class="utc-timestamp" data-utc-time="@MailArchiver.Utilities.DateTimeHelper.EnsureUtc(Model.CurrentSyncTime).ToString("O")">
                                 @Model.CurrentSyncTime.ToString("g")
                             </span>
                         }

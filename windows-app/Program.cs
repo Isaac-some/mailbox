@@ -92,7 +92,6 @@ internal sealed class MainForm : Form
         "KouziMailAssistant");
     private readonly string _serverDirectory = Path.Combine(AppContext.BaseDirectory, "server");
     private Process? _server;
-    private string _serverPassword = string.Empty;
     private bool _isClosing;
     private bool _resetInProgress;
 
@@ -136,7 +135,6 @@ internal sealed class MainForm : Form
         await _webView.EnsureCoreWebView2Async(environment);
         _webView.CoreWebView2.NavigationStarting += OnNavigationStarting;
         _webView.CoreWebView2.NewWindowRequested += OnNewWindowRequested;
-        _webView.CoreWebView2.NavigationCompleted += async (_, _) => await CompleteAutomaticLoginAsync();
     }
 
     private void StartServer()
@@ -153,7 +151,6 @@ internal sealed class MainForm : Form
             File.WriteAllText(credentialKeyPath, Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)));
         }
 
-        _serverPassword = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
         var startInfo = new ProcessStartInfo
         {
             FileName = serverExecutable,
@@ -170,8 +167,6 @@ internal sealed class MainForm : Form
         startInfo.Environment["ConnectionStrings__DefaultConnection"] = $"Data Source={Path.Combine(_dataDirectory, "mail-archive.sqlite")}";
         startInfo.Environment["DataProtection__KeyPath"] = Path.Combine(_dataDirectory, "keys");
         startInfo.Environment["CredentialEncryption__KeyFilePath"] = credentialKeyPath;
-        startInfo.Environment["Authentication__Username"] = "local";
-        startInfo.Environment["Authentication__Password"] = _serverPassword;
 
         _server = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         _server.Exited += OnServerExited;
@@ -207,33 +202,6 @@ internal sealed class MainForm : Form
         }
 
         throw new TimeoutException("本机服务启动超时。");
-    }
-
-    private async Task CompleteAutomaticLoginAsync()
-    {
-        var source = _webView.Source;
-        if (source is null ||
-            !source.AbsolutePath.StartsWith("/Auth/Login", StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        var username = JsonSerializer.Serialize("local");
-        var password = JsonSerializer.Serialize(_serverPassword);
-        var script = $$"""
-            (() => {
-              const form = document.querySelector('form[action="/Auth/Login"], form');
-              const username = document.querySelector('input[name="Username"]');
-              const password = document.querySelector('input[name="Password"]');
-              const remember = document.querySelector('input[name="RememberMe"]');
-              if (!form || !username || !password) return;
-              username.value = {{username}};
-              password.value = {{password}};
-              if (remember) remember.checked = true;
-              form.submit();
-            })();
-            """;
-        await _webView.CoreWebView2.ExecuteScriptAsync(script);
     }
 
     private void OnNavigationStarting(object? sender, CoreWebView2NavigationStartingEventArgs eventArgs)

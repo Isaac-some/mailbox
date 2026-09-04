@@ -17,7 +17,7 @@ public sealed class MailCredentialSyncApiController : ApiControllerBase
     }
 
     /// <summary>
-    /// Accepts upstream batches in the minimal format: email, credential, optional domain.
+    /// Accepts upstream batches in the fixed format: email, domain, credential, client_id.
     /// The endpoint is intentionally batch-limited so a large upstream dataset can be
     /// streamed page by page without materializing every mailbox in memory.
     /// </summary>

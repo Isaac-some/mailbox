@@ -249,7 +249,10 @@ namespace MailArchiver.Services.Providers.Imap
 
                 if (jobId != null)
                 {
-                    _syncJobService.CompleteJob(jobId, false, ex.Message);
+                    _syncJobService.CompleteJob(
+                        jobId,
+                        false,
+                        MailConnectionFailurePolicy.ToUserMessage(ex));
                 }
                 throw;
             }

@@ -8,7 +8,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     private var window: NSWindow!
     private var webView: WKWebView!
     private var server: Process?
-    private var serverPassword = ""
     private var isQuitting = false
     private var downloadDestinations: [ObjectIdentifier: URL] = [:]
 
@@ -122,7 +121,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             }
             try FileManager.default.createDirectory(at: dataDirectory, withIntermediateDirectories: true)
             try FileManager.default.createDirectory(at: dataDirectory.appendingPathComponent("keys", isDirectory: true), withIntermediateDirectories: true)
-            serverPassword = randomBase64(byteCount: 32)
             let credentialKeyPath = dataDirectory.appendingPathComponent("credential-encryption.key")
             if !FileManager.default.fileExists(atPath: credentialKeyPath.path) {
                 let credentialKey = randomBase64(byteCount: 32)
@@ -154,8 +152,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             environment["ConnectionStrings__DefaultConnection"] = "Data Source=\(dataDirectory.appendingPathComponent("mail-archive.sqlite").path)"
             environment["DataProtection__KeyPath"] = dataDirectory.appendingPathComponent("keys", isDirectory: true).path
             environment["CredentialEncryption__KeyFilePath"] = credentialKeyPath.path
-            environment["Authentication__Username"] = "local"
-            environment["Authentication__Password"] = serverPassword
             applyDetectedMailProxy(to: &environment)
             process.environment = environment
             process.terminationHandler = { [weak self] _ in
@@ -226,26 +222,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                 }
             }
         }.resume()
-    }
-
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        guard webView.url?.path.lowercased().hasPrefix("/auth/login") == true else { return }
-        let username = jsonString("local")
-        let password = jsonString(serverPassword)
-        let script = """
-        (() => {
-          const form = document.querySelector('form[action="/Auth/Login"], form');
-          const username = document.querySelector('input[name="Username"]');
-          const password = document.querySelector('input[name="Password"]');
-          const remember = document.querySelector('input[name="RememberMe"]');
-          if (!form || !username || !password) return;
-          username.value = \(username);
-          password.value = \(password);
-          if (remember) remember.checked = true;
-          form.submit();
-        })();
-        """
-        webView.evaluateJavaScript(script)
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {

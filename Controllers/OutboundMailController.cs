@@ -14,6 +14,7 @@ namespace MailArchiver.Controllers;
 [SelfManagerRequired]
 public sealed class OutboundMailController : Controller
 {
+    private const int MaxSendingAccountOptions = 50;
     private readonly MailArchiverDbContext _context;
     private readonly IAuthenticationService _authentication;
     private readonly IOutboundMailService _outboundMail;
@@ -35,17 +36,23 @@ public sealed class OutboundMailController : Controller
     }
 
     [HttpGet]
-    public async Task<IActionResult> Index(int? accountId)
+    public async Task<IActionResult> Index(int? accountId, string? accountQuery)
     {
         if (!_options.Enabled)
             return NotFound();
 
-        var model = new ComposeMailViewModel { AccountId = accountId ?? 0 };
-        await PopulateOptionsAsync(model);
+        var model = new ComposeMailViewModel
+        {
+            AccountId = accountId ?? 0,
+            AccountQuery = accountQuery?.Trim()
+        };
+        await PopulateOptionsAsync(model, model.AccountQuery);
         if (model.SendingAccounts.Count == 0)
         {
-            TempData["ErrorMessage"] = "没有可发件的账号。Gmail 优先应用专用密码，Yahoo/GMX 优先 IMAP 密码，Outlook 优先 OAuth；系统会在首选方式失败后自动尝试可用回退方式。";
-            return RedirectToAction("Index", "MailAccounts");
+            ViewBag.AccountSearchMessage = string.IsNullOrWhiteSpace(model.AccountQuery)
+                ? "没有可发件的账号。"
+                : "没有找到匹配且可发件的账号。";
+            return View(model);
         }
 
         if (model.AccountId == 0 || model.SendingAccounts.All(item => item.Value != model.AccountId.ToString()))
@@ -157,22 +164,55 @@ public sealed class OutboundMailController : Controller
             ModelState.AddModelError(nameof(model.Attachments), $"附件总大小不能超过 {_options.MaxTotalAttachmentBytes / 1024 / 1024} MB。");
     }
 
-    private async Task PopulateOptionsAsync(ComposeMailViewModel model)
+    private async Task PopulateOptionsAsync(ComposeMailViewModel model, string? accountQuery = null)
     {
         var userId = _authentication.GetCurrentUserId(HttpContext);
-        var accounts = userId.HasValue
-            ? await _context.MailAccounts
-                .AsNoTracking()
-                .Where(account =>
-                    account.IsEnabled
-                    && account.Provider != ProviderType.IMPORT
-                    && account.UserMailAccounts.Any(ownership => ownership.UserId == userId.Value))
-                .OrderBy(account => account.EmailAddress)
-                .ToListAsync()
-            : new List<MailAccount>();
+        var normalizedQuery = accountQuery?.Trim();
+        model.AccountQuery = normalizedQuery;
 
-        model.SendingAccounts = accounts
+        if (!userId.HasValue)
+        {
+            model.SendingAccounts = [];
+            return;
+        }
+
+        var query = _context.MailAccounts
+            .AsNoTracking()
+            .Where(account =>
+                account.IsEnabled
+                && account.Provider != ProviderType.IMPORT
+                && account.UserMailAccounts.Any(ownership => ownership.UserId == userId.Value)
+                && ((account.Password != null && account.Password != string.Empty)
+                    || (account.OAuthRefreshToken != null && account.OAuthRefreshToken != string.Empty)));
+
+        if (model.AccountId > 0)
+        {
+            query = query.Where(account => account.Id == model.AccountId);
+        }
+        else if (!string.IsNullOrWhiteSpace(normalizedQuery))
+        {
+            var search = normalizedQuery.ToLower();
+            query = query.Where(account =>
+                account.EmailAddress.ToLower().Contains(search) ||
+                account.Name.ToLower().Contains(search));
+        }
+
+        // Provider capability inspection is local but not SQL-translatable. Read a
+        // bounded candidate window and render at most one page of select options.
+        var candidateLimit = model.AccountId > 0 ? 1 : MaxSendingAccountOptions * 4 + 1;
+        var accounts = await query
+            .OrderBy(account => account.EmailAddress)
+            .Take(candidateLimit)
+            .ToListAsync();
+        var sendingAccounts = accounts
             .Where(_outboundMail.CanSend)
+            .Take(MaxSendingAccountOptions + 1)
+            .ToList();
+
+        model.HasMoreSendingAccounts = sendingAccounts.Count > MaxSendingAccountOptions
+            || (model.AccountId == 0 && accounts.Count == candidateLimit);
+        model.SendingAccounts = sendingAccounts
+            .Take(MaxSendingAccountOptions)
             .Select(account => new SelectListItem(account.EmailAddress, account.Id.ToString()))
             .ToList();
         model.MaxAttachmentCount = _options.MaxAttachmentCount;

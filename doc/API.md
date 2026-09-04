@@ -16,8 +16,8 @@ without touching the underlying mail account.
 
 Archive-reading endpoints never expose mailbox credentials. The credential
 intake endpoint is the deliberate exception: it accepts only the minimal
-upstream fields `email`, `credential`, optional `domain`, and optional
-`clientId`, then encrypts and stores the credential for that user.
+upstream fields `email`, optional `domain`, `credential`, and optional
+`client_id`, then stores the credential for that user.
 
 ## Table of contents
 
@@ -278,31 +278,51 @@ POST /api/v1/mailbox-credentials/sync
 ```
 
 Accepts up to 500 rows per request. Send larger upstream datasets in bounded
-batches; there is no total mailbox-count cap. `credential` may be an IMAP
-password, SMTP password, one password covering both, Google app password, or
-OAuth2 refresh token. `domain` may be omitted and is then derived from the
-email address. For an Outlook OAuth2 refresh token, `clientId` is required and
-must be a GUID. Unknown domains use a custom-domain module: passwords try
-`imap.<domain>` and `smtp.<domain>`, while OAuth tokens remain marked
-`OAuthConfigurationRequired` until that domain's token endpoint is configured.
-The endpoint stores credentials but does not connect to the mail provider or
-download messages. The first user-triggered validation/sync may read a bounded
-Mozilla Autoconfig document for a custom domain to discover its IMAP/SMTP
-endpoints; it still does not read mailbox content until the sync operation.
+batches; there is no total mailbox-count cap. The request uses the same exact
+four-field contract as CSV: `email`, `domain`, `credential`, `client_id`.
+`email` and `credential` are required; the other two fields may be null or
+empty. `credential` is opaque at intake and may be an IMAP/SMTP password, a
+Google app password, or an OAuth2 refresh token. `client_id` is not validated
+as a GUID at intake.
+
+Before storage, the endpoint removes whitespace and invisible format characters,
+rejects empty/abnormal/oversized values, and verifies incoming login (20 seconds
+per row). It never downloads or sends messages. Success returns
+`status: "IncomingVerified"` and `credentialScope: "Imap"`; failure returns
+`status: "Rejected"` with a safe per-row error. Failed rows do not overwrite old
+accounts, while successful rows can commit independently. HTTP 200 is not proof
+that every row passed: inspect each result. Start with small batches because
+verification is sequential.
+
+Repeating an email fully replaces the four imported fields only after successful
+validation. Changed inputs reset remembered routes; unchanged normalized inputs
+preserve outgoing route memory and provider-rotated refresh tokens. Incoming
+login uses the provider funnel (Outlook OAuth first; Gmail/Yahoo/GMX password
+first), remembers the successful incoming route and does not certify SMTP send
+permission. See [Account Import](Account%20Import.md) for normalization rules.
 
 ```json
 {
-  "isEnabled": true,
+  "is_enabled": true,
   "items": [
     {
       "email": "both@outlook.com",
       "credential": "<refresh-token>",
       "domain": "outlook.com",
-      "clientId": "11111111-2222-3333-4444-555555555555"
+      "client_id": "11111111-2222-3333-4444-555555555555"
     }
   ]
 }
 ```
+
+The local app can also pull this envelope from the upstream HTTPS endpoint
+before every user-triggered mailbox sync. In the packaged app, the user first
+logs in through the platform session endpoint; the client forwards the returned
+Cookie or Bearer token on every credential request. The platform must validate
+that session on every request and return `401`/`403` after the account is
+disabled. See
+[Account Import](Account%20Import.md) for configuration and cursor behavior,
+and [平台账号登录接入说明](平台账号登录接入说明.md) for the platform contract.
 
 ### List folders
 

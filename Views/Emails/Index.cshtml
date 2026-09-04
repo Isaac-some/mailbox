@@ -40,6 +40,7 @@
         <span class="mailbox-sync-scan" aria-hidden="true"></span>
         <span id="mailbox-sync-message">正在扫描新邮件，当前页面可继续查看。</span>
     </div>
+    <div id="mailbox-sync-error" class="alert alert-danger" role="alert" hidden></div>
     <form id="mailbox-watch-sync-token" class="d-none">
         @Html.AntiForgeryToken()
     </form>
@@ -73,7 +74,7 @@
                        class="mail-item @(isSelected ? "mail-item--selected" : "")">
                         <div class="mail-item__topline">
                             <strong>@(string.IsNullOrWhiteSpace(email.From) ? "未知发件人" : email.From)</strong>
-                            <time datetime="@email.ReceivedDate.ToString("yyyy-MM-ddTHH:mm:ss")">@email.ReceivedDate.ToString("MM-dd HH:mm")</time>
+                            <time data-time-format="short" data-utc-time="@email.ReceivedDate.ToString("yyyy-MM-ddTHH:mm:ss")">@email.ReceivedDate.ToString("MM-dd HH:mm")</time>
                         </div>
                         <div class="mail-item__subject">@(string.IsNullOrWhiteSpace(email.Subject) ? "(无主题)" : email.Subject)</div>
                         <div class="mail-item__preview">@((email.Body ?? string.Empty).Replace("\r", " ").Replace("\n", " ").Trim())</div>
@@ -97,21 +98,16 @@
                     <h2>@(string.IsNullOrWhiteSpace(selectedEmail.Subject) ? "(无主题)" : selectedEmail.Subject)</h2>
                     <p>
                         <strong>@selectedEmail.From</strong>
-                        <span>收件于 <time datetime="@selectedEmail.ReceivedDate.ToString("yyyy-MM-ddTHH:mm:ss")">@selectedEmail.ReceivedDate.ToString("yyyy-MM-dd HH:mm")</time></span>
+                        <span>收件于 <time data-utc-time="@selectedEmail.ReceivedDate.ToString("yyyy-MM-ddTHH:mm:ss")">@selectedEmail.ReceivedDate.ToString("yyyy-MM-dd HH:mm")</time></span>
                     </p>
                     <a asp-controller="Emails" asp-action="Details" asp-route-id="@selectedEmail.Id" class="mail-viewer__details">
                         打开完整邮件 <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i>
                     </a>
                 </header>
                 <div class="mail-viewer__body">
-                    @if (!string.IsNullOrWhiteSpace(selectedEmail.Body))
-                    {
-                        <pre>@selectedEmail.Body</pre>
-                    }
-                    else
-                    {
-                        <p class="text-muted">该邮件没有可显示的纯文本内容，请打开完整邮件查看。</p>
-                    }
+                    <iframe src="@Url.Action("RawContent", new { id = selectedEmail.Id })"
+                            title="邮件正文" class="mail-viewer__content-frame"
+                            sandbox="allow-popups allow-popups-to-escape-sandbox allow-downloads"></iframe>
                 </div>
             }
             else
@@ -151,6 +147,7 @@
         const token = document.querySelector('#mailbox-watch-sync-token input[name="__RequestVerificationToken"]');
         const status = document.getElementById('mailbox-sync-status');
         const statusMessage = document.getElementById('mailbox-sync-message');
+        const syncError = document.getElementById('mailbox-sync-error');
         const refreshForm = document.getElementById('mailbox-refresh-form');
         const refreshButton = document.querySelector('[data-mailbox-refresh-button]');
         if (!page || !page.dataset.mailboxSyncAccount || !token || !status) return;
@@ -163,6 +160,20 @@
             window.history.replaceState({}, document.title, cleanUrl.toString());
         }
         let sawActiveSync = '@syncState' === 'Queued' || '@syncState' === 'Running';
+        let startedAfter = null;
+
+        const showSyncError = (message) => {
+            if (!syncError) return;
+            syncError.textContent = message;
+            syncError.hidden = false;
+        };
+
+        const friendlySyncError = (message) => {
+            const text = typeof message === 'string' ? message.trim() : '';
+            return text && /[\u3400-\u9fff]/.test(text)
+                ? text
+                : '连接失败，请检查网络、VPN、代理或邮箱服务是否可访问。';
+        };
 
         const setStatus = (active, message = '正在扫描新邮件，当前页面可继续查看。') => {
             status.hidden = !active;
@@ -174,6 +185,7 @@
             if (refreshButton?.disabled) return;
 
             refreshButton.disabled = true;
+            if (syncError) syncError.hidden = true;
             setStatus(true);
             try {
                 const response = await fetch(refreshForm.action, {
@@ -185,12 +197,14 @@
                     body: new URLSearchParams(new FormData(refreshForm)),
                     credentials: 'same-origin'
                 });
-                if (!response.ok) throw new Error('refresh failed');
-
+                const result = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(result.message || '暂时无法启动同步，请稍后再试。');
+                startedAfter = result.requestedAt || null;
                 sawActiveSync = true;
-            } catch (_) {
-                setStatus(true, '暂时无法启动同步，请稍后再试。');
-                window.setTimeout(() => setStatus(false), 3000);
+            } catch (error) {
+                sawActiveSync = false;
+                setStatus(false);
+                showSyncError(error.message || '暂时无法启动同步，请稍后再试。');
             } finally {
                 refreshButton.disabled = false;
             }
@@ -210,6 +224,7 @@
                     id: accountId,
                     __RequestVerificationToken: token.value
                 });
+                if (startedAfter) body.set('startedAfter', startedAfter);
                 const response = await fetch('@Url.Action("WatchSync", "MailAccounts")', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
@@ -221,8 +236,15 @@
                 const payload = await response.json();
                 const active = payload.state === 'Queued' || payload.state === 'Running';
                 setStatus(active);
-                if (!active && sawActiveSync) {
-                    window.location.reload();
+                if (!active && sawActiveSync && payload.job) {
+                    sawActiveSync = false;
+                    if (payload.job.status === 'Failed') {
+                        showSyncError(friendlySyncError(payload.job.errorMessage));
+                    } else if (payload.job.status === 'Cancelled' || payload.job.status === 'RateLimited') {
+                        showSyncError(payload.job.errorMessage || '同步已取消、超时或受到服务商限流，请稍后重试。');
+                    } else {
+                        window.location.reload();
+                    }
                     return;
                 }
                 sawActiveSync = sawActiveSync || active;

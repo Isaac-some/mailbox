@@ -242,7 +242,7 @@ public class EmailReceivedDateTests
         await context.SaveChangesAsync();
 
         var helper = new DateTimeHelper(Options.Create(
-            new TimeZoneOptions { DisplayTimeZoneId = "Europe/Berlin" }));
+            new TimeZoneOptions { StorageTimeZoneId = "Europe/Berlin" }));
         await ArchivedEmailReceivedDateRepair.ApplyAsync(
             context,
             helper,

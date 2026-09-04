@@ -54,6 +54,9 @@ namespace MailArchiver.Controllers
         [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
         public IActionResult Error()
         {
+            var errorFeature = HttpContext.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerPathFeature>();
+            if (errorFeature?.Error is not null)
+                _logger.LogError(errorFeature.Error, "Unhandled request error at {Path}", errorFeature.Path);
             return View(new ErrorViewModel { RequestId = Activity.Current?.Id ?? HttpContext.TraceIdentifier });
         }
 

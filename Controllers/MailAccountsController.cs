@@ -45,6 +45,8 @@ namespace MailArchiver.Controllers
     private readonly ICredentialEncryptionService _credentialEncryptionService;
     private readonly IOnDemandMailSyncQueue _onDemandSyncQueue;
     private readonly IMailProviderRegistry _mailProviderRegistry;
+    private readonly ICsvImportService _csvImportService;
+    private readonly IUpstreamMailboxSyncService _upstreamMailboxSync;
 
     public MailAccountsController(
         MailArchiverDbContext context,
@@ -69,7 +71,9 @@ namespace MailArchiver.Controllers
         IOptions<CsvImportOptions> csvImportOptions,
         ICredentialEncryptionService credentialEncryptionService,
         IOnDemandMailSyncQueue onDemandSyncQueue,
-        IMailProviderRegistry mailProviderRegistry)
+        IMailProviderRegistry mailProviderRegistry,
+        IUpstreamMailboxSyncService upstreamMailboxSync,
+        ICsvImportService csvImportService)
     {
         _context = context;
         _emailCoreService = emailCoreService;
@@ -94,7 +98,13 @@ namespace MailArchiver.Controllers
         _credentialEncryptionService = credentialEncryptionService;
         _onDemandSyncQueue = onDemandSyncQueue;
         _mailProviderRegistry = mailProviderRegistry;
+        _csvImportService = csvImportService;
+        _upstreamMailboxSync = upstreamMailboxSync;
     }
+
+        private bool IsLocalApp()
+            => HttpContext.RequestServices.GetRequiredService<IConfiguration>().GetValue<bool>("LocalApp:Enabled") ||
+               string.Equals(Environment.GetEnvironmentVariable("KOUZI_LOCAL_APP"), "1", StringComparison.Ordinal);
 
         private async Task<bool> HasAccessToAccountAsync(int accountId)
         {
@@ -123,6 +133,8 @@ namespace MailArchiver.Controllers
             // Use the authentication service to get user info properly
             var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
             var currentUsername = authService.GetCurrentUserDisplayName(HttpContext);
+            q = q?.Trim();
+
             IQueryable<MailAccount> mailAccountsQuery = ManageableMailAccounts();
 
             var pendingDeletionIds = _mailAccountDeletionService
@@ -137,7 +149,6 @@ namespace MailArchiver.Controllers
                     .Where(account => !pendingDeletionIds.Contains(account.Id));
             }
 
-            q = q?.Trim();
             if (!string.IsNullOrWhiteSpace(q))
             {
                 var search = q.ToLower();
@@ -171,8 +182,17 @@ namespace MailArchiver.Controllers
                 IMailProviderModule? module = null;
                 if (a.MailProviderKind is not null)
                 {
-                    module = _mailProviderRegistry.For(a);
-                    capabilities = module.Inspect(a);
+                    try
+                    {
+                        module = _mailProviderRegistry.For(a);
+                        capabilities = module.Inspect(a);
+                    }
+                    catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException or FormatException)
+                    {
+                        // A legacy/partially imported account must not prevent the
+                        // rest of the paged account list from rendering.
+                        _logger.LogWarning(ex, "Could not inspect provider for account {AccountId}; showing it as needing attention", a.Id);
+                    }
                 }
 
                 return new MailAccountViewModel
@@ -207,7 +227,6 @@ namespace MailArchiver.Controllers
             ViewBag.AccountPageSize = pageSize;
             ViewBag.AccountTotalCount = totalCount;
             ViewBag.AccountTotalPages = totalPages;
-
             return View(accounts);
         }
 
@@ -492,8 +511,8 @@ namespace MailArchiver.Controllers
                     await _context.SaveChangesAsync();
 
                     // Every account is owned by the user who adds it.
-                    var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
-                    var currentUsername = authService.GetCurrentUserDisplayName(HttpContext);
+                    var loggingAuthService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
+                    var currentUsername = loggingAuthService?.GetCurrentUserDisplayName(HttpContext);
                     var currentUser = await _context.Users
                         .FirstOrDefaultAsync(u => u.Username.ToLower() == currentUsername.ToLower());
                     
@@ -1126,7 +1145,7 @@ namespace MailArchiver.Controllers
                     
                     // Log the account update action
                     var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
-                    var currentUsername = authService.GetCurrentUserDisplayName(HttpContext);
+                    var currentUsername = authService?.GetCurrentUserDisplayName(HttpContext);
                     if (!string.IsNullOrEmpty(currentUsername))
                     {
                         await _accessLogService.LogAccessAsync(currentUsername, AccessLogType.Account, 
@@ -1463,6 +1482,23 @@ namespace MailArchiver.Controllers
                 return NotFound();
             }
 
+            var authService = HttpContext.RequestServices.GetRequiredService<IAuthenticationService>();
+            var currentUserId = authService.GetCurrentUserId(HttpContext);
+            if (currentUserId.HasValue && !IsLocalApp())
+            {
+                var upstream = await _upstreamMailboxSync.PullAsync(currentUserId.Value, HttpContext.RequestAborted);
+                if (upstream.Enabled && !upstream.Succeeded)
+                {
+                    if (upstream.RequiresLogin)
+                        return RedirectToAction("Login", "Auth", new { returnUrl = Url.Action(nameof(Sync), new { id }) });
+                    var message = $"同步未开始：{upstream.Error}";
+                    if (isMailboxRefresh)
+                        return StatusCode(StatusCodes.Status502BadGateway, new { message });
+                    TempData["ErrorMessage"] = message;
+                    return RedirectToAction(nameof(Index));
+                }
+            }
+
             var account = await _context.MailAccounts.FindAsync(id);
             if (account == null)
             {
@@ -1521,7 +1557,7 @@ namespace MailArchiver.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> WatchSync(int id)
+        public async Task<IActionResult> WatchSync(int id, DateTime? startedAfter = null)
         {
             if (!await HasAccessToAccountAsync(id))
                 return NotFound();
@@ -1533,10 +1569,20 @@ namespace MailArchiver.Controllers
                 return NotFound();
 
             var status = _onDemandSyncQueue.GetStatus(id);
+            var latestJob = _syncJobService.GetAllJobs()
+                .Where(job => job.MailAccountId == id &&
+                    (!startedAfter.HasValue || job.Started >= DateTimeHelper.EnsureUtc(startedAfter.Value)))
+                .OrderByDescending(job => job.Started)
+                .FirstOrDefault();
             return Json(new
             {
                 state = status.State.ToString(),
-                kind = status.Kind?.ToString()
+                kind = status.Kind?.ToString(),
+                job = latestJob is null ? null : new
+                {
+                    status = latestJob.Status.ToString(),
+                    latestJob.ErrorMessage
+                }
             });
         }
 
@@ -1580,6 +1626,20 @@ namespace MailArchiver.Controllers
                 return NotFound();
             }
 
+            var authService = HttpContext.RequestServices.GetRequiredService<IAuthenticationService>();
+            var currentUserId = authService.GetCurrentUserId(HttpContext);
+            if (currentUserId.HasValue && !IsLocalApp())
+            {
+                var upstream = await _upstreamMailboxSync.PullAsync(currentUserId.Value, HttpContext.RequestAborted);
+                if (upstream.Enabled && !upstream.Succeeded)
+                {
+                    if (upstream.RequiresLogin)
+                        return RedirectToAction("Login", "Auth", new { returnUrl = Url.Action(nameof(Resync), new { id }) });
+                    TempData["ErrorMessage"] = $"全量同步未开始：{upstream.Error}";
+                    return RedirectToAction(nameof(Details), new { id });
+                }
+            }
+
             var account = await _context.MailAccounts.FindAsync(id);
             if (account == null)
             {
@@ -1600,8 +1660,8 @@ namespace MailArchiver.Controllers
                 if (success)
                 {
                     // Log the resync action
-                    var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
-                    var currentUsername = authService.GetCurrentUserDisplayName(HttpContext);
+                    var resyncAuthService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
+                    var currentUsername = resyncAuthService?.GetCurrentUserDisplayName(HttpContext);
                     if (!string.IsNullOrEmpty(currentUsername))
                     {
                         await _accessLogService.LogAccessAsync(currentUsername, AccessLogType.Account, 
@@ -1939,7 +1999,8 @@ namespace MailArchiver.Controllers
                 Id = account.Id,
                 AccountName = account.Name,
                 CurrentSyncTime = account.LastSync,
-                NewSyncTime = account.LastSync
+                NewSyncTime = HttpContext.RequestServices.GetRequiredService<DateTimeHelper>()
+                    .ConvertUtcToDisplayTime(account.LastSync)
             };
 
             return View(model);
@@ -1973,8 +2034,9 @@ namespace MailArchiver.Controllers
                 return NotFound();
             }
 
-            // Set LastSync to the specified time (treat as local time and convert to UTC)
-            accountToUpdate.LastSync = model.NewSyncTime.ToUniversalTime();
+            // The datetime-local input represents Beijing time, not the host OS timezone.
+            accountToUpdate.LastSync = HttpContext.RequestServices.GetRequiredService<DateTimeHelper>()
+                .ConvertDisplayInputToUtc(model.NewSyncTime);
             await _context.SaveChangesAsync();
 
             TempData["SuccessMessage"] = _localizer["SyncTimeUpdatedSuccess"].Value;
@@ -3145,8 +3207,7 @@ namespace MailArchiver.Controllers
             {
                 ImapPort = 993,
                 UseSSL = true,
-                IsEnabled = true,
-                SkipExisting = true
+                IsEnabled = true
             };
             return View(model);
         }
@@ -3165,7 +3226,7 @@ namespace MailArchiver.Controllers
 
             var accountFiles = model.AccountFiles ?? [];
             if (accountFiles.Count == 0)
-                ModelState.AddModelError(nameof(model.AccountFiles), "请至少选择一个 TXT 或 CSV 文件。");
+                ModelState.AddModelError(nameof(model.AccountFiles), "请至少选择一个 CSV 文件。");
             if (accountFiles.Count > MaxAccountImportFiles)
                 ModelState.AddModelError(nameof(model.AccountFiles), $"一次最多选择 {MaxAccountImportFiles} 个文件。");
 
@@ -3173,10 +3234,9 @@ namespace MailArchiver.Controllers
             {
                 var safeFileName = Path.GetFileName(file.FileName);
                 var extension = Path.GetExtension(safeFileName);
-                if (!extension.Equals(".csv", StringComparison.OrdinalIgnoreCase) &&
-                    !extension.Equals(".txt", StringComparison.OrdinalIgnoreCase))
+                if (!extension.Equals(".csv", StringComparison.OrdinalIgnoreCase))
                 {
-                    ModelState.AddModelError(nameof(model.AccountFiles), $"{safeFileName}：仅支持 TXT 和 CSV 文件。");
+                    ModelState.AddModelError(nameof(model.AccountFiles), $"{safeFileName}：仅支持 CSV 文件。");
                 }
                 if (file.Length == 0)
                     ModelState.AddModelError(nameof(model.AccountFiles), $"{safeFileName}：文件为空。");
@@ -3235,201 +3295,37 @@ namespace MailArchiver.Controllers
                     return View("CsvImportResult", result);
                 }
 
-                var dedupedRows = rows
-                    .GroupBy(r => $"{r.Provider}:{r.Email!.Trim().ToLowerInvariant()}")
-                    .Select(g => g.First())
-                    .ToList();
-
-                var dedupSkipped = rows.Count - dedupedRows.Count;
-                if (dedupSkipped > 0)
+                var latestRows = new Dictionary<string, CsvParsedRow>(StringComparer.OrdinalIgnoreCase);
+                foreach (var row in rows)
                 {
-                    var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                    foreach (var row in rows)
+                    var key = row.Email.Trim();
+                    if (latestRows.ContainsKey(key))
                     {
-                        var key = $"{row.Provider}:{row.Email!.Trim().ToLowerInvariant()}";
-                        if (!seen.Add(key))
+                        result.SkippedRows.Add(new CsvImportSkippedRow
                         {
-                            result.SkippedRows.Add(new CsvImportSkippedRow
-                            {
-                                Email = row.Email,
-                                Reason = _localizer["CsvImportDuplicateInFile"].Value
-                            });
-                        }
-                    }
-                }
-
-                var incomingEmails = dedupedRows
-                    .Select(r => r.Email!.Trim().ToLowerInvariant())
-                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-                var existingEmails = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                const int chunkSize = 500;
-                var emailList = incomingEmails.ToList();
-                for (int i = 0; i < emailList.Count; i += chunkSize)
-                {
-                    var chunk = emailList.Skip(i).Take(chunkSize).ToList();
-                    var matches = await _context.MailAccounts
-                        .Where(a =>
-                            (a.Provider == ProviderType.IMAP || a.Provider == ProviderType.MSA) &&
-                            chunk.Contains(a.EmailAddress.ToLower()) &&
-                            a.UserMailAccounts.Any(ownership => ownership.UserId == currentUserId.Value))
-                        .Select(a => a.EmailAddress.ToLower())
-                        .ToListAsync();
-                    foreach (var m in matches)
-                    {
-                        existingEmails.Add(m);
-                    }
-                }
-
-                var accountsToCreate = new List<MailAccount>();
-
-                foreach (var row in dedupedRows)
-                {
-                    var emailLower = row.Email!.Trim().ToLowerInvariant();
-                    if (existingEmails.Contains(emailLower))
-                    {
-                        if (model.SkipExisting)
-                        {
-                            result.SkippedRows.Add(new CsvImportSkippedRow
-                            {
-                                Email = row.Email,
-                                Reason = _localizer["CsvImportAlreadyExists"].Value
-                            });
-                        }
-                        else
-                        {
-                            result.FailedRows.Add(new CsvImportFailedRow
-                            {
-                                FileName = row.SourceFileName,
-                                LineNumber = row.LineNumber,
-                                Email = row.Email,
-                                Reason = _localizer["CsvImportAlreadyExists"].Value
-                            });
-                            result.FailedCount++;
-                        }
-                        continue;
-                    }
-
-                    IMailProviderModule rowModule;
-                    try
-                    {
-                        rowModule = _mailProviderRegistry.For(row.MailProviderKind);
-                    }
-                    catch (Exception ex) when (ex is NotSupportedException or InvalidOperationException)
-                    {
-                        result.FailedRows.Add(new CsvImportFailedRow
-                        {
-                            FileName = row.SourceFileName,
-                            LineNumber = row.LineNumber,
-                            Email = row.Email,
-                            Reason = ex.Message
+                            Email = key,
+                            Reason = "同一批次中的后一个账号已覆盖前一个账号。"
                         });
-                        result.FailedCount++;
-                        continue;
                     }
-
-                    if (!string.IsNullOrWhiteSpace(row.Password))
-                    {
-                        try
-                        {
-                            row.Password = rowModule.NormalizeAppPassword(row.Password);
-                        }
-                        catch (InvalidOperationException ex)
-                        {
-                            result.FailedRows.Add(new CsvImportFailedRow
-                            {
-                                FileName = row.SourceFileName,
-                                LineNumber = row.LineNumber,
-                                Email = row.Email,
-                                Reason = ex.Message
-                            });
-                            result.FailedCount++;
-                            continue;
-                        }
-                    }
-
-                    var account = row.Provider == ProviderType.MSA
-                        && !string.IsNullOrWhiteSpace(row.ClientId)
-                        && !string.IsNullOrWhiteSpace(row.OAuthRefreshToken)
-                        ? OutlookImportedAccountFactory.Create(
-                            new OutlookImportedAccount(
-                                row.LineNumber,
-                                row.Email,
-                                row.ClientId!,
-                                row.OAuthRefreshToken!),
-                            model.IsEnabled,
-                            string.IsNullOrWhiteSpace(row.Password)
-                                ? null
-                                : _credentialEncryptionService.Encrypt(row.Password))
-                        : new MailAccount
-                        {
-                            Name = MailAccountNamePolicy.Derive(row.Email),
-                            EmailAddress = row.Email!.Trim(),
-                            GroupName = string.Empty,
-                            ImapServer = null,
-                            ImapPort = null,
-                            Username = row.Email.Trim(),
-                            Password = string.IsNullOrWhiteSpace(row.Password)
-                                ? null
-                                : _credentialEncryptionService.Encrypt(row.Password),
-                            ClientId = row.ClientId,
-                            ClientSecret = row.ClientSecret,
-                            OAuthRefreshToken = row.OAuthRefreshToken,
-                            OAuthGrantedScopes = row.OAuthGrantedScopes,
-                            OAuthRedirectUri = row.OAuthRedirectUri,
-                            UseSSL = true,
-                            IsEnabled = model.IsEnabled,
-                            Provider = row.Provider,
-                            ExcludedFolders = string.Empty,
-                            DeleteAfterDays = null,
-                            LocalRetentionDays = null,
-                            LastSync = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)
-                        };
-
-                    rowModule.PrepareAccount(account);
-                    ApplyImportedCredentialClassification(account, rowModule, row);
-
-                    accountsToCreate.Add(account);
-                    result.CreatedRows.Add(new CsvImportCreatedRow
-                    {
-                        Email = account.EmailAddress,
-                        Name = account.Name
-                    });
+                    latestRows[key] = row;
                 }
-
-                if (accountsToCreate.Count == 0)
-                {
-                    result.CreatedCount = 0;
-                    result.SkippedCount = result.SkippedRows.Count;
-                    _logger.LogInformation("CSV bulk import produced no new accounts (all skipped or failed)");
-                    return View("CsvImportResult", result);
-                }
-
-                _context.MailAccounts.AddRange(accountsToCreate);
-                await _context.SaveChangesAsync();
-                _context.UserMailAccounts.AddRange(accountsToCreate.Select(account => new UserMailAccount
-                {
-                    UserId = currentUserId.Value,
-                    MailAccountId = account.Id
-                }));
-                await _context.SaveChangesAsync();
-                // Import only persists credentials. It does not open remote mailboxes
-                // or trigger a connection check; verification happens on explicit refresh.
-
-                result.CreatedCount = accountsToCreate.Count;
-                result.SkippedCount = result.SkippedRows.Count;
 
                 var currentUsername = authService.GetCurrentUserDisplayName(HttpContext);
-                if (!string.IsNullOrEmpty(currentUsername))
+                var job = new CsvImportJob
                 {
-                    await _accessLogService.LogAccessAsync(currentUsername, AccessLogType.Account,
-                        searchParameters: $"Account bulk import: {result.CreatedCount} accounts created, {result.SkippedCount} skipped, {result.FailedCount} failed");
-                }
+                    UserId = currentUserId.Value,
+                    UserName = currentUsername ?? string.Empty,
+                    Enabled = model.IsEnabled,
+                    TotalRows = latestRows.Count,
+                    FailedCount = failedRows.Count,
+                    SkippedCount = result.SkippedRows.Count
+                };
+                job.Rows.AddRange(latestRows.Values);
+                job.FailedSamples.AddRange(failedRows.Take(100));
+                job.SkippedSamples.AddRange(result.SkippedRows.Take(100));
+                _csvImportService.QueueImport(job);
 
-                _logger.LogInformation("CSV bulk import completed: {Created} created, {Skipped} skipped, {Failed} failed",
-                    result.CreatedCount, result.SkippedCount, result.FailedCount);
-
-                return View("CsvImportResult", result);
+                return RedirectToAction(nameof(CsvImportStatus), new { jobId = job.JobId });
             }
             catch (Exception ex)
             {
@@ -3438,6 +3334,61 @@ namespace MailArchiver.Controllers
                 return View(model);
             }
         }
+
+        [HttpGet]
+        public async Task<IActionResult> CsvImportStatus(string jobId)
+        {
+            var job = await GetOwnedCsvImportJobAsync(jobId);
+            if (job is null)
+                return NotFound();
+            if (job.Status is CsvImportJobStatus.Completed or CsvImportJobStatus.CompletedWithErrors or CsvImportJobStatus.Failed)
+                return View("CsvImportResult", ToCsvImportResult(job));
+            return View(job);
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> CsvImportStatusJson(string jobId)
+        {
+            var job = await GetOwnedCsvImportJobAsync(jobId);
+            if (job is null)
+                return NotFound();
+            return Json(new
+            {
+                jobId = job.JobId,
+                status = job.Status.ToString(),
+                total = job.TotalRows,
+                processed = job.ProcessedRows,
+                created = job.CreatedCount,
+                updated = job.UpdatedCount,
+                skipped = job.SkippedCount,
+                failed = job.FailedCount,
+                error = job.ErrorMessage
+            });
+        }
+
+        private async Task<CsvImportJob?> GetOwnedCsvImportJobAsync(string jobId)
+        {
+            if (string.IsNullOrWhiteSpace(jobId))
+                return null;
+            var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
+            var userId = authService?.GetCurrentUserId(HttpContext);
+            var job = _csvImportService.GetJob(jobId);
+            return userId.HasValue && job?.UserId == userId.Value ? job : null;
+        }
+
+        private static CsvImportResultViewModel ToCsvImportResult(CsvImportJob job)
+            => new()
+            {
+                CreatedCount = job.CreatedCount,
+                UpdatedCount = job.UpdatedCount,
+                SkippedCount = job.SkippedCount,
+                FailedCount = job.FailedCount,
+                ErrorMessage = job.ErrorMessage,
+                CreatedRows = job.CreatedSamples,
+                UpdatedRows = job.UpdatedSamples,
+                SkippedRows = job.SkippedSamples,
+                FailedRows = job.FailedSamples
+            };
 
         private async Task<AccountImportFileParseResult> ParseAccountImportFileAsync(
             IFormFile file,
@@ -3454,92 +3405,74 @@ namespace MailArchiver.Controllers
                 uploadedText = await reader.ReadToEndAsync();
             }
 
-            var firstNonEmptyLine = uploadedText
-                .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
-                .FirstOrDefault(line => !string.IsNullOrWhiteSpace(line));
+            var lineNumber = 0;
+            var parsedLines = new List<(int LineNumber, string[] Fields)>();
+            var delimiter = DetectImportDelimiter(uploadedText);
 
-            if (firstNonEmptyLine?.Contains('\t') == true &&
-                !firstNonEmptyLine.Split('\t')[0].Trim().Equals("邮箱", StringComparison.OrdinalIgnoreCase) &&
-                !firstNonEmptyLine.Split('\t')[0].Trim().Equals("email", StringComparison.OrdinalIgnoreCase))
+            using var csvReader = new StringReader(uploadedText);
+            using var parser = new Microsoft.VisualBasic.FileIO.TextFieldParser(csvReader);
+            parser.SetDelimiters(delimiter);
+            parser.HasFieldsEnclosedInQuotes = true;
+
+            while (!parser.EndOfData)
             {
-                using var unifiedReader = new StringReader(uploadedText);
-                var parsed = UnifiedMailAccountTextParser.Parse(unifiedReader);
-                rows.AddRange(parsed.Accounts.Select(account => new CsvParsedRow
+                lineNumber++;
+                string[]? fields;
+
+                try
                 {
-                    LineNumber = account.LineNumber,
-                    Email = account.Email,
-                    Provider = account.Provider == MailProviderKind.Outlook ? ProviderType.MSA : ProviderType.IMAP,
-                    MailProviderKind = account.Provider,
-                    Password = account.AppPassword ?? string.Empty,
-                    ClientId = account.ClientId,
-                    ClientSecret = account.ClientSecret,
-                    OAuthRefreshToken = account.RefreshToken,
-                    OAuthRedirectUri = account.RedirectUri
-                }));
-                failedRows.AddRange(parsed.Errors.Select(error => new CsvImportFailedRow
-                {
-                    LineNumber = error.LineNumber,
-                    Email = string.Empty,
-                    Reason = error.Reason
-                }));
-            }
-            else
-            {
-                var lineNumber = 0;
-                var headerIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-
-                using var csvReader = new StringReader(uploadedText);
-                using var parser = new Microsoft.VisualBasic.FileIO.TextFieldParser(csvReader);
-                parser.SetDelimiters(firstNonEmptyLine?.Contains('\t') == true ? "\t" : ",");
-                parser.HasFieldsEnclosedInQuotes = true;
-
-                while (!parser.EndOfData)
-                {
-                    lineNumber++;
-                    string[]? fields;
-
-                    try
-                    {
-                        fields = parser.ReadFields();
-                    }
-                    catch (Microsoft.VisualBasic.FileIO.MalformedLineException exception)
-                    {
-                        failedRows.Add(new CsvImportFailedRow
-                        {
-                            LineNumber = lineNumber,
-                            Email = string.Empty,
-                            Reason = _localizer["CsvImportMalformedLine"].Value
-                        });
-                        _logger.LogWarning(exception, "Malformed account import line {LineNumber} in {FileName}", lineNumber, fileName);
-                        continue;
-                    }
-
-                    if (fields is null)
-                        continue;
-
-                    if (lineNumber == 1)
-                    {
-                        var headers = fields.Select(field => field?.Trim() ?? string.Empty).ToArray();
-                        if (headers.Any(header => header.Length > 0))
-                        {
-                            if (!CsvImportHeaderPolicy.TryCreateCanonicalIndex(headers, out headerIndex))
-                            {
-                                failedRows.Add(new CsvImportFailedRow
-                                {
-                                    LineNumber = lineNumber,
-                                    Email = string.Empty,
-                                    Reason = "文件必须包含邮箱，以及应用专用密码；或 Client ID、Refresh Token（Yahoo 还需 Client Secret）。"
-                                });
-                                break;
-                            }
-                            continue;
-                        }
-                    }
-
-                    var row = ParseCsvRow(fields, headerIndex, model, lineNumber, failedRows, _localizer);
-                    if (row is not null)
-                        rows.Add(row);
+                    fields = parser.ReadFields();
                 }
+                catch (Microsoft.VisualBasic.FileIO.MalformedLineException exception)
+                {
+                    failedRows.Add(new CsvImportFailedRow
+                    {
+                        LineNumber = lineNumber,
+                        Email = string.Empty,
+                        Reason = _localizer["CsvImportMalformedLine"].Value
+                    });
+                    _logger.LogWarning(exception, "Malformed account import line {LineNumber} in {FileName}", lineNumber, fileName);
+                    continue;
+                }
+
+                if (fields is null)
+                    continue;
+
+                parsedLines.Add((lineNumber, fields));
+            }
+
+            var headerIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            var headerLineNumber = 0;
+            var headerPosition = -1;
+            for (var index = 0; index < Math.Min(parsedLines.Count, 10); index++)
+            {
+                var headers = parsedLines[index].Fields.Select(field => field?.Trim() ?? string.Empty).ToArray();
+                if (CsvImportHeaderPolicy.TryCreateFlexibleIndex(headers, out headerIndex))
+                {
+                    headerLineNumber = parsedLines[index].LineNumber;
+                    headerPosition = index;
+                    break;
+                }
+            }
+
+            var sourceLines = headerPosition >= 0
+                ? parsedLines.Skip(headerPosition + 1)
+                : parsedLines;
+            foreach (var sourceLine in sourceLines)
+            {
+                var row = ParseCsvRow(sourceLine.Fields, headerIndex, model, sourceLine.LineNumber, failedRows, _localizer);
+                if (row is not null)
+                    rows.Add(row);
+            }
+
+            if (rows.Count == 0 && failedRows.Count == 0)
+            {
+                failedRows.Add(new CsvImportFailedRow
+                {
+                    LineNumber = headerLineNumber,
+                    Email = string.Empty,
+                    Reason = "没有识别出包含邮箱和授权码的有效行。"
+                });
             }
 
             foreach (var row in rows)
@@ -3558,29 +3491,14 @@ namespace MailArchiver.Controllers
         [HttpGet]
         public IActionResult DownloadExampleCsv()
         {
-            var csv = "邮箱（必填）,授权凭据（必填）,域名（可选）,Client ID（可选：Outlook OAuth2 Refresh Token 必填）\r\n"
-                + "alice@gmail.com,xxxx xxxx xxxx xxxx,gmail.com,\r\n"
-                + "reader@yahoo.com,上游接口返回的授权码,yahoo.com,\r\n"
-                + "sender@gmx.com,上游接口返回的授权码,gmx.com,\r\n"
-                + "both@outlook.com,示例 Outlook OAuth2 Refresh Token,outlook.com,11111111-2222-3333-4444-555555555555\r\n"
-                + "oauth@gmail.com,示例 OAuth2 Refresh Token,gmail.com,示例GoogleClientID\r\n"
-                + "unknown@yahoo.com,上游只提供的授权码,,\r\n";
+            var csv = "email,domain,credential,client_id\r\n"
+                + "alice@gmail.com,gmail.com,xxxx xxxx xxxx xxxx,\r\n"
+                + "reader@yahoo.com,yahoo.com,上游接口返回的授权码,\r\n"
+                + "sender@gmx.com,gmx.com,上游接口返回的授权码,\r\n"
+                + "both@outlook.com,outlook.com,示例 Outlook OAuth2 Refresh Token,11111111-2222-3333-4444-555555555555\r\n"
+                + "unknown@yahoo.com,,上游只提供的授权码,\r\n";
             var bytes = System.Text.Encoding.UTF8.GetBytes(csv);
             return File(bytes, "text/csv", "邮箱授权识别-最小接口标准示例.csv");
-        }
-
-        [HttpGet]
-        public IActionResult DownloadExampleTxt()
-        {
-            var text = "carol@gmail.com\tabcd efgh ijkl mnop\r\n"
-                + "alice@gmx.com\t示例应用专用密码\r\n"
-                + "bob@yahoo.com\t示例应用专用密码\r\n"
-                + "outlook@outlook.com\t密码回退示例\t11111111-2222-3333-4444-555555555555\t示例RefreshToken\r\n"
-                + "oauth@gmail.com\t示例GoogleClientID\t示例RefreshToken\r\n"
-                + "both@gmail.com\tabcd efgh ijkl mnop\t示例GoogleClientID\t\t示例RefreshToken\t\r\n"
-                + "david@yahoo.com\t示例YahooClientID\t示例YahooClientSecret\t示例RefreshToken\toob\r\n";
-            var bytes = System.Text.Encoding.UTF8.GetBytes(text);
-            return File(bytes, "text/plain", "邮箱批量导入示例.txt");
         }
 
         private CsvParsedRow? ParseCsvRow(string[] fields, Dictionary<string, int> headerIndex,
@@ -3589,118 +3507,34 @@ namespace MailArchiver.Controllers
         {
             string email = string.Empty;
             string password = string.Empty;
+            string? domain = null;
             string? clientId = null;
-            string? clientSecret = null;
-            string? refreshToken = null;
-            string? scopes = null;
-            string? redirectUri = null;
-            string? username = null;
-            string? imapServer = null;
-            int? imapPort = null;
-            bool? useSsl = null;
 
             if (headerIndex.Count > 0)
             {
                 email = GetFieldValue(fields, headerIndex, "email");
-                password = GetFieldValueRaw(fields, headerIndex, "app_password");
-                var suppliedDomain = GetFieldValueOrNull(fields, headerIndex, "domain");
-                if (!string.IsNullOrWhiteSpace(suppliedDomain))
-                {
-                    try
-                    {
-                        var actualDomain = new System.Net.Mail.MailAddress(email.Trim()).Host;
-                        var normalizedDomain = suppliedDomain.Trim().TrimStart('@');
-                        if (!actualDomain.Equals(normalizedDomain, StringComparison.OrdinalIgnoreCase))
-                        {
-                            failedRows.Add(new CsvImportFailedRow
-                            {
-                                LineNumber = lineNumber,
-                                Email = email,
-                                Reason = "CSV 中的域名与邮箱地址不一致。"
-                            });
-                            return null;
-                        }
-                    }
-                    catch (FormatException)
-                    {
-                        // The normal email validation below reports the canonical error.
-                    }
-                }
+                password = GetFieldValueRaw(fields, headerIndex, "credential");
+                domain = GetFieldValueOrNull(fields, headerIndex, "domain");
                 clientId = GetFieldValueOrNull(fields, headerIndex, "client_id");
-                clientSecret = GetFieldValueOrNull(fields, headerIndex, "client_secret");
-                refreshToken = GetFieldValueOrNull(fields, headerIndex, "refresh_token");
-                scopes = GetFieldValueOrNull(fields, headerIndex, "scopes");
-                redirectUri = GetFieldValueOrNull(fields, headerIndex, "redirect_uri");
-                username = null;
-                imapServer = null;
-                var portStr = GetFieldValueOrNull(fields, headerIndex, "imap_port");
-                if (!string.IsNullOrWhiteSpace(portStr))
-                {
-                    if (int.TryParse(portStr.Trim(), out var port) && port >= 1 && port <= 65535)
-                    {
-                        imapPort = port;
-                    }
-                    else
-                    {
-                        failedRows.Add(new CsvImportFailedRow
-                        {
-                            LineNumber = lineNumber,
-                            Email = email,
-                            Reason = localizer["CsvImportInvalidPort", lineNumber, portStr].Value
-                        });
-                        return null;
-                    }
-                }
-                var sslStr = GetFieldValueOrNull(fields, headerIndex, "use_ssl");
-                if (!string.IsNullOrWhiteSpace(sslStr))
-                {
-                    if (bool.TryParse(sslStr.Trim(), out var ssl))
-                    {
-                        useSsl = ssl;
-                    }
-                    else
-                    {
-                        failedRows.Add(new CsvImportFailedRow
-                        {
-                            LineNumber = lineNumber,
-                            Email = email,
-                            Reason = localizer["CsvImportInvalidUseSsl", lineNumber, sslStr].Value
-                        });
-                        return null;
-                    }
-                }
-
-                // Minimal upstream contract: a single credential column may carry
-                // an OAuth2 refresh token. Keep it as OAuth metadata instead of
-                // sending it through provider password validation.
-                if (string.IsNullOrWhiteSpace(clientId) &&
-                    string.IsNullOrWhiteSpace(refreshToken) &&
-                    LooksLikeOAuthRefreshToken(password))
-                {
-                    refreshToken = password.Trim();
-                    password = string.Empty;
-                }
-
-                // In the minimal four-column contract, Client ID disambiguates
-                // the single credential column as an OAuth2 refresh token. This
-                // is mandatory for Outlook OAuth and optional for other providers.
-                if (!string.IsNullOrWhiteSpace(clientId) &&
-                    string.IsNullOrWhiteSpace(refreshToken) &&
-                    !string.IsNullOrWhiteSpace(password))
-                {
-                    refreshToken = password.Trim();
-                    password = string.Empty;
-                }
             }
             else
             {
-                failedRows.Add(new CsvImportFailedRow
+                var emailIndex = FindEmailField(fields);
+                if (emailIndex < 0)
                 {
-                    LineNumber = lineNumber,
-                    Email = string.Empty,
-                    Reason = "CSV 缺少表头。"
-                });
-                return null;
+                    failedRows.Add(new CsvImportFailedRow
+                    {
+                        LineNumber = lineNumber,
+                        Email = string.Empty,
+                        Reason = "这一行没有识别出有效邮箱地址。"
+                    });
+                    return null;
+                }
+
+                email = fields[emailIndex].Trim();
+                var credentialIndex = FindCredentialField(fields, emailIndex);
+                password = credentialIndex >= 0 ? fields[credentialIndex] : string.Empty;
+                clientId = fields.FirstOrDefault(value => Guid.TryParse(value?.Trim(), out _))?.Trim();
             }
 
             if (string.IsNullOrWhiteSpace(email))
@@ -3732,106 +3566,15 @@ namespace MailArchiver.Controllers
                 return null;
             }
 
-            IMailProviderModule providerModule;
-            try
-            {
-                providerModule = _mailProviderRegistry.Detect(email);
-            }
-            catch (Exception exception) when (exception is NotSupportedException or InvalidOperationException)
+            if (string.IsNullOrWhiteSpace(password))
             {
                 failedRows.Add(new CsvImportFailedRow
                 {
                     LineNumber = lineNumber,
                     Email = email,
-                    Reason = exception.Message
+                    Reason = "授权码不能为空。"
                 });
                 return null;
-            }
-
-            var hasPassword = !string.IsNullOrWhiteSpace(password);
-            var hasAnyOAuthValue = !string.IsNullOrWhiteSpace(clientId)
-                || !string.IsNullOrWhiteSpace(clientSecret)
-                || !string.IsNullOrWhiteSpace(refreshToken);
-            if (!hasPassword && !hasAnyOAuthValue)
-            {
-                failedRows.Add(new CsvImportFailedRow
-                {
-                    LineNumber = lineNumber,
-                    Email = email,
-                    Reason = "必须提供应用专用密码，或完整 OAuth 凭据。"
-                });
-                return null;
-            }
-
-            if (providerModule.Kind == MailProviderKind.Outlook)
-            {
-                if (!string.IsNullOrWhiteSpace(refreshToken) && string.IsNullOrWhiteSpace(clientId))
-                {
-                    failedRows.Add(new CsvImportFailedRow
-                    {
-                        LineNumber = lineNumber,
-                        Email = email,
-                        Reason = "Outlook OAuth2 Refresh Token 必须同时提供 Client ID。"
-                    });
-                    return null;
-                }
-
-                var hasCompleteOAuth = !string.IsNullOrWhiteSpace(clientId)
-                    && Guid.TryParseExact(clientId.Trim(), "D", out _)
-                    && !string.IsNullOrWhiteSpace(refreshToken);
-                var hasPartialOAuth = !string.IsNullOrWhiteSpace(clientId)
-                    || !string.IsNullOrWhiteSpace(refreshToken)
-                    || !string.IsNullOrWhiteSpace(clientSecret);
-                if (hasPartialOAuth && !hasCompleteOAuth)
-                {
-                    failedRows.Add(new CsvImportFailedRow
-                    {
-                        LineNumber = lineNumber,
-                        Email = email,
-                        Reason = "Outlook OAuth 必须同时提供格式正确的 Client ID 和 Refresh Token；否则请只提供密码走 IMAP/SMTP。"
-                    });
-                    return null;
-                }
-
-                // Keep the password encrypted as a final IMAP/SMTP fallback when OAuth is unavailable.
-            }
-            else if (hasAnyOAuthValue)
-            {
-                if (!ExternalOAuthProviderPolicy.TryResolve(email, out var oauthProvider))
-                {
-                    if (providerModule.Kind == MailProviderKind.Custom &&
-                        !string.IsNullOrWhiteSpace(clientId) && !string.IsNullOrWhiteSpace(refreshToken))
-                    {
-                        // Keep the token metadata. The provider-specific token
-                        // endpoint can be configured later before verification.
-                    }
-                    else
-                    {
-                        failedRows.Add(new CsvImportFailedRow
-                        {
-                            LineNumber = lineNumber,
-                            Email = email,
-                            Reason = providerModule.Kind == MailProviderKind.Custom
-                                ? "自定义域名 OAuth 必须同时提供 Client ID 和 Refresh Token。"
-                                : "该邮箱服务商暂无 OAuth 令牌配置，请提供 IMAP/SMTP 密码。"
-                        });
-                        return null;
-                    }
-                }
-                if (oauthProvider is not null && (string.IsNullOrWhiteSpace(clientId) || string.IsNullOrWhiteSpace(refreshToken) ||
-                    (oauthProvider.RequiresClientSecret && string.IsNullOrWhiteSpace(clientSecret)) ||
-                    (oauthProvider.RequiresRedirectUri && string.IsNullOrWhiteSpace(redirectUri))))
-                {
-                    failedRows.Add(new CsvImportFailedRow
-                    {
-                        LineNumber = lineNumber,
-                        Email = email,
-                        Reason = oauthProvider.RequiresClientSecret
-                            ? "Yahoo OAuth 必须提供 Client ID、Client Secret、Refresh Token 和 Redirect URI。"
-                            : "Gmail OAuth 必须提供 Client ID 和 Refresh Token。"
-                    });
-                    return null;
-                }
             }
 
             return new CsvParsedRow
@@ -3839,59 +3582,9 @@ namespace MailArchiver.Controllers
                 LineNumber = lineNumber,
                 Email = email,
                 Password = password,
-                Provider = providerModule.Kind == MailProviderKind.Outlook ? ProviderType.MSA : ProviderType.IMAP,
-                MailProviderKind = providerModule.Kind,
-                ClientId = clientId,
-                ClientSecret = clientSecret,
-                OAuthRefreshToken = refreshToken,
-                OAuthGrantedScopes = scopes,
-                OAuthRedirectUri = redirectUri,
-                Username = username,
-                ImapServer = imapServer,
-                ImapPort = imapPort,
-                UseSSL = useSsl
+                Domain = domain,
+                ClientId = clientId
             };
-        }
-
-        private static bool LooksLikeOAuthRefreshToken(string value)
-            => value.TrimStart().StartsWith("1//", StringComparison.Ordinal)
-                || value.TrimStart().StartsWith("ya29.", StringComparison.OrdinalIgnoreCase)
-                || value.TrimStart().StartsWith("M.", StringComparison.Ordinal);
-
-        private static void ApplyImportedCredentialClassification(
-            MailAccount account,
-            IMailProviderModule provider,
-            CsvParsedRow row)
-        {
-            if (!string.IsNullOrWhiteSpace(row.OAuthRefreshToken))
-            {
-                account.CredentialKind = MailCredentialKind.OAuth2RefreshToken;
-                account.CredentialScope = MailCredentialScope.Unknown;
-                account.CredentialDetectionStatus = string.IsNullOrWhiteSpace(row.ClientId)
-                    ? "OAuthConfigurationRequired"
-                    : "PendingVerification";
-            }
-            else if (provider.Kind == MailProviderKind.Gmail &&
-                     !string.IsNullOrWhiteSpace(row.Password))
-            {
-                account.CredentialKind = MailCredentialKind.GoogleAppPassword;
-                account.CredentialScope = MailCredentialScope.Unknown;
-                account.CredentialDetectionStatus = "PendingVerification";
-            }
-            else if (provider.Kind is MailProviderKind.Custom or MailProviderKind.Outlook)
-            {
-                account.CredentialKind = MailCredentialKind.Unknown;
-                account.CredentialScope = MailCredentialScope.Unknown;
-                account.CredentialDetectionStatus = "PendingVerification";
-            }
-            else
-            {
-                account.CredentialKind = MailCredentialKind.SharedMailPassword;
-                account.CredentialScope = MailCredentialScope.Unknown;
-                account.CredentialDetectionStatus = "PendingVerification";
-            }
-
-            account.CredentialLastCheckedAt = null;
         }
 
         private static string GetFieldValue(string[] fields, Dictionary<string, int> headerIndex, string name)
@@ -3920,6 +3613,49 @@ namespace MailArchiver.Controllers
                 return string.IsNullOrWhiteSpace(val) ? null : val.Trim();
             }
             return null;
+        }
+
+        private static string DetectImportDelimiter(string text)
+        {
+            var firstLine = text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? string.Empty;
+            var candidates = new[] { ',', '\t', ';' };
+            return candidates.OrderByDescending(candidate => firstLine.Count(character => character == candidate)).First().ToString();
+        }
+
+        private static int FindEmailField(string[] fields)
+        {
+            for (var index = 0; index < fields.Length; index++)
+            {
+                try
+                {
+                    var value = fields[index].Trim();
+                    var address = new System.Net.Mail.MailAddress(value);
+                    if (string.Equals(address.Address, value, StringComparison.OrdinalIgnoreCase))
+                        return index;
+                }
+                catch (FormatException) { }
+            }
+            return -1;
+        }
+
+        private static int FindCredentialField(string[] fields, int emailIndex)
+        {
+            var candidates = fields
+                .Select((value, index) => (Value: value ?? string.Empty, Index: index))
+                .Where(candidate => candidate.Index != emailIndex && !string.IsNullOrWhiteSpace(candidate.Value))
+                .Select(candidate =>
+                {
+                    var normalized = MailCredentialInputPolicy.Normalize(candidate.Value);
+                    var score = normalized.Length == 16 ? 100 : normalized.Length >= 8 ? 50 : 0;
+                    if (normalized.All(char.IsDigit)) score -= 30;
+                    if (normalized.Contains("未使用", StringComparison.OrdinalIgnoreCase)) score -= 100;
+                    return (candidate.Index, score, Length: normalized.Length);
+                })
+                .Where(candidate => candidate.score > 0)
+                .OrderByDescending(candidate => candidate.score)
+                .ThenByDescending(candidate => candidate.Length)
+                .ToList();
+            return candidates.FirstOrDefault().Index;
         }
     }
 }

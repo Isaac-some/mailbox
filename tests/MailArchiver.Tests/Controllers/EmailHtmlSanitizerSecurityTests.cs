@@ -16,4 +16,17 @@ public class EmailHtmlSanitizerSecurityTests
 
         Assert.DoesNotContain("onerror", sanitized, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public void SanitizeHtmlFragmentForDisplay_Preserves_class_based_email_buttons()
+    {
+        const string html = "<style>.cta{display:inline-block;background:#07f;color:#fff;padding:12px}</style>" +
+            "<a class=\"cta\" href=\"https://example.com/action\" onclick=\"alert(1)\">打开</a>";
+
+        var sanitized = EmailsController.SanitizeHtmlFragmentForDisplay(html);
+
+        Assert.Contains("class=\"cta\"", sanitized, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(".cta", sanitized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("onclick", sanitized, StringComparison.OrdinalIgnoreCase);
+    }
 }

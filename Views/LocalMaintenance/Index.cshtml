@@ -1,3 +1,4 @@
+@model MailArchiver.ViewModels.LocalMaintenanceViewModel
 @{
     ViewData["Title"] = "本机数据";
 }
@@ -8,9 +9,14 @@
             <i class="bi bi-pc-display-horizontal fs-3 text-primary me-3"></i>
             <div>
                 <h1 class="h3 mb-1">本机数据</h1>
-                <p class="text-muted mb-0">管理这台 Mac 上的邮箱存档。</p>
+                <p class="text-muted mb-0">管理这台设备的邮箱助手。</p>
             </div>
         </div>
+
+        <section class="border-top pt-4 mb-5">
+            <h2 class="h5">本地账号</h2>
+            <p class="text-muted mb-0">本机版使用两个固定账号登录。账号启停状态由 GitHub 清单控制；修改清单后，下一次登录会立即生效。</p>
+        </section>
 
         <section class="border-top pt-4 mb-5">
             <h2 class="h5">清空邮件和附件</h2>

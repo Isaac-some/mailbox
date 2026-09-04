@@ -17,25 +17,38 @@
         </div>
     </div>
 
-    <div class="alert @((Model.FailedCount > 0 && Model.CreatedCount == 0) ? "alert-danger" : (Model.FailedCount > 0 ? "alert-warning" : "alert-success"))">
+    @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+    {
+        <div class="alert alert-danger">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>@Model.ErrorMessage
+        </div>
+    }
+
+    <div class="alert @((Model.FailedCount > 0 && Model.CreatedCount + Model.UpdatedCount == 0) ? "alert-danger" : (Model.FailedCount > 0 ? "alert-warning" : "alert-success"))">
         <h5 class="mb-2">
-            <i class="bi @(Model.CreatedCount > 0 ? "bi-check-circle-fill" : "bi-exclamation-triangle-fill") me-2"></i>
-            @Localizer["CsvImportResultSummary", Model.CreatedCount, Model.SkippedCount, Model.FailedCount]
+            <i class="bi @(Model.CreatedCount + Model.UpdatedCount > 0 ? "bi-check-circle-fill" : "bi-exclamation-triangle-fill") me-2"></i>
+            已新增 @Model.CreatedCount 个，覆盖更新 @Model.UpdatedCount 个，跳过 @Model.SkippedCount 个，失败 @Model.FailedCount 个。
         </h5>
         <div class="row text-center mt-3">
-            <div class="col-md-4 mb-2">
+            <div class="col-md-3 mb-2">
                 <div class="badge bg-success p-3 w-100">
                     <div class="h4 mb-0">@Model.CreatedCount</div>
                     <small>@Localizer["CsvImportCreated"]</small>
                 </div>
             </div>
-            <div class="col-md-4 mb-2">
+            <div class="col-md-3 mb-2">
+                <div class="badge bg-primary p-3 w-100">
+                    <div class="h4 mb-0">@Model.UpdatedCount</div>
+                    <small>覆盖更新</small>
+                </div>
+            </div>
+            <div class="col-md-3 mb-2">
                 <div class="badge bg-warning text-dark p-3 w-100">
                     <div class="h4 mb-0">@Model.SkippedCount</div>
                     <small>@Localizer["CsvImportSkipped"]</small>
                 </div>
             </div>
-            <div class="col-md-4 mb-2">
+            <div class="col-md-3 mb-2">
                 <div class="badge bg-danger p-3 w-100">
                     <div class="h4 mb-0">@Model.FailedCount</div>
                     <small>@Localizer["CsvImportFailed"]</small>
@@ -44,15 +57,19 @@
         </div>
     </div>
 
-    @if (Model.CreatedRows.Any())
+    @if (Model.CreatedRows.Any() || Model.UpdatedRows.Any())
     {
         <div class="alert alert-info">
-            <i class="bi bi-info-circle me-2"></i>账户已导入；不会自动连接或下载邮件。打开邮箱或手动刷新时才会连接并下载邮件。
+            <i class="bi bi-info-circle me-2"></i>已识别并保存邮箱与授权码，尚未连接邮箱服务器。打开邮箱或手动刷新时才会验证授权码并下载邮件。
         </div>
+    }
+
+    @if (Model.CreatedRows.Any())
+    {
         <div class="card mb-3">
             <div class="card-header bg-light d-flex align-items-center justify-content-between">
                 <span class="h6 mb-0"><i class="bi bi-check-circle text-success me-2"></i>@Localizer["CsvImportCreated"]</span>
-                <span class="badge bg-success">@Model.CreatedRows.Count</span>
+                <span class="badge bg-success">@Model.CreatedCount</span>
             </div>
             <div class="card-body p-0">
                 <div class="table-responsive">
@@ -78,12 +95,35 @@
         </div>
     }
 
+    @if (Model.UpdatedRows.Any())
+    {
+        <div class="card mb-3">
+            <div class="card-header bg-light d-flex align-items-center justify-content-between">
+                <span class="h6 mb-0"><i class="bi bi-arrow-repeat text-primary me-2"></i>覆盖更新</span>
+                <span class="badge bg-primary">@Model.UpdatedCount</span>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover table-sm mb-0">
+                        <thead class="table-dark"><tr><th>@Localizer["CsvImportEmail"]</th><th>@Localizer["CsvImportNameCol"]</th></tr></thead>
+                        <tbody>
+                            @foreach (var row in Model.UpdatedRows)
+                            {
+                                <tr><td>@row.Email</td><td>@row.Name</td></tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    }
+
     @if (Model.SkippedRows.Any())
     {
         <div class="card mb-3">
             <div class="card-header bg-light d-flex align-items-center justify-content-between">
                 <span class="h6 mb-0"><i class="bi bi-skip-forward text-warning me-2"></i>@Localizer["CsvImportSkipped"]</span>
-                <span class="badge bg-warning text-dark">@Model.SkippedRows.Count</span>
+                <span class="badge bg-warning text-dark">@Model.SkippedCount</span>
             </div>
             <div class="card-body p-0">
                 <div class="table-responsive">
@@ -114,7 +154,7 @@
         <div class="card mb-3">
             <div class="card-header bg-light d-flex align-items-center justify-content-between">
                 <span class="h6 mb-0"><i class="bi bi-x-circle text-danger me-2"></i>@Localizer["CsvImportFailed"]</span>
-                <span class="badge bg-danger">@Model.FailedRows.Count</span>
+                <span class="badge bg-danger">@Model.FailedCount</span>
             </div>
             <div class="card-body p-0">
                 <div class="table-responsive">

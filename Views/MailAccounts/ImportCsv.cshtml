@@ -16,18 +16,18 @@
         <div class="d-flex align-items-start">
             <i class="bi bi-info-circle-fill me-2 mt-1"></i>
             <div>
-                <strong>一次上传，自动识别邮箱和登录方式。</strong>
+                <strong>识别并保存邮箱与授权码，不在导入时连接邮箱服务器。</strong>
                 <ul class="mb-2 mt-1">
-                    <li>同一个文件可混放常见邮箱和自定义域名，程序会逐行识别，无需先选协议。</li>
-                    <li>每行只需提供该账号现有的应用专用密码或 OAuth 凭证；两种都有时会自动依次尝试。</li>
-                    <li>导入只保存凭据，不会自动连接或下载邮件；打开邮箱或点击刷新时才同步。</li>
+                    <li>不要求固定列数；程序会从常见中英文表头或行内容中识别邮箱和授权码，可直接导入截图这类带“邮箱、密码、IMAP授权码、2fa”的文件。</li>
+                    <li>自动清理授权码中的空格、换行和不可见字符；保留大小写和符号。</li>
+                    <li>标准格式固定为 <code>email, domain, credential, client_id</code>；Outlook OAuth2 才填写 <code>client_id</code>，其他邮箱留空。</li>
+                    <li>能识别到有效邮箱和非空授权码即导入成功；不在此处判断授权码能否登录。</li>
+                    <li>打开邮箱或点击刷新时才连接邮箱服务器，并分别提示“授权码无效”或“连接失败”。</li>
+                    <li>同邮箱再次导入时，用新四字段完整覆盖旧数据。</li>
                     <li>@Localizer["CsvImportAdminOnlyNote"]</li>
                 </ul>
                 <a asp-action="DownloadExampleCsv" class="btn btn-sm btn-outline-info">
                     <i class="bi bi-download me-1"></i> @Localizer["DownloadExampleCsv"]
-                </a>
-                <a asp-action="DownloadExampleTxt" class="btn btn-sm btn-outline-info ms-1">
-                    <i class="bi bi-download me-1"></i> 下载 TXT 示例
                 </a>
             </div>
         </div>
@@ -48,37 +48,23 @@
                     </div>
 
                     <div class="mb-3">
-                        <label asp-for="AccountFiles" class="form-label">选择 TXT / CSV 文件</label>
+                        <label asp-for="AccountFiles" class="form-label">选择 CSV 文件</label>
                         <input asp-for="AccountFiles" type="file" class="form-control"
-                               accept=".csv,.txt,text/csv,text/plain" id="accountFileInput" multiple required>
-                        <div class="form-text">可一次选择最多 20 个 TXT / CSV 文件；每个文件最多 10 MB。邮箱数量不设固定总数上限，系统会分批处理并限制并发。</div>
+                               accept=".csv,text/csv" id="accountFileInput" multiple required>
+                        <div class="form-text">可一次选择最多 20 个 CSV 文件；每个文件最多 10 MB。</div>
                         <span asp-validation-for="AccountFiles" class="text-danger"></span>
                     </div>
                 </div>
 
                 <div class="form-section">
                     <div class="form-section-header">
-                        <i class="bi bi-server me-1"></i> 自动识别和登录方式
+                        <i class="bi bi-database me-1"></i> 自动识别与保存
                     </div>
 
                     <div class="alert alert-light border mb-3">
-                        <strong>一个文件可以混放常见邮箱和自定义域名，程序会逐行自动识别。</strong>
-                        CSV 最小格式为：<code>邮箱,授权凭据,域名（可选）,Client ID（可选）</code>。上游只需提供邮箱和凭据；平台按域名识别服务商，并在用户主动连接时记录它能否用于 IMAP 收件、SMTP 发件或两者。使用 Outlook OAuth2 Refresh Token 时，Client ID 必填；其他凭据可留空。
-                        Outlook 可使用两列密码格式，或四列 Tab 分隔格式：<code>邮箱　密码　Client ID　Refresh Token</code>；有 Refresh Token 时收发件优先使用 OAuth，OAuth 失败后才尝试 IMAP/SMTP 密码。
-                        Gmail/Yahoo/GMX 密码模式使用两列：<code>邮箱、授权凭据</code>。Gmail 密码可直接粘贴 Google 显示的分组格式；程序会自动删除空格和复制时混入的不可见分隔符，清理后必须恰好 16 位。TXT 使用相同列顺序并以 Tab 分隔。GMX 官方不支持 OAuth。
-                        Gmail 优先应用专用密码；Yahoo、GMX 优先 IMAP 密码认证；三者失败后才尝试可用 OAuth。Outlook 优先 OAuth Refresh Token，失败后才尝试 IMAP/SMTP 密码。
-                        姓名会自动取邮箱 <code>@@</code> 前去掉数字后的内容；自定义域名先尝试标准 Autoconfig，失败后回退到 <code>imap.域名</code> 和 <code>smtp.域名</code>，最终以主动连接验证结果为准。
-                        <code>名字</code>、<code>分组</code>、<code>密码</code>、<code>辅助邮箱</code>、<code>2fa</code>、序号和使用状态都会被忽略。
-                    </div>
-
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <div class="form-check form-switch">
-                                <input asp-for="SkipExisting" class="form-check-input" type="checkbox" role="switch">
-                                <label asp-for="SkipExisting" class="form-check-label">@Localizer["SkipExisting"]</label>
-                                <div class="form-text">@Localizer["SkipExistingHelp"]</div>
-                            </div>
-                        </div>
+                        <strong>自动识别：</strong>邮箱列支持“邮箱、邮箱地址、email”等写法；授权列支持“IMAP授权码、授权码、应用专用密码、密码”等写法。
+                        同时有“密码”和“IMAP授权码”时优先使用 IMAP 授权码。16 位授权码可带分组空格，导入时会自动清理。
+                        导入只检查文件结构并保存，不连接邮箱服务器；打开邮箱或点击刷新时才验证授权码。
                     </div>
 
                     <div class="mb-3">
@@ -91,7 +77,7 @@
 
                 <div class="mt-4 d-flex gap-2">
                     <button type="submit" class="btn btn-primary" id="saveBtn">
-                        <i class="bi bi-upload"></i> @Localizer["CsvImportSubmit"]
+                        <i class="bi bi-upload"></i> 导入
                     </button>
                     <a asp-action="Index" class="btn btn-outline-secondary">@Localizer["BackToList"]</a>
                 </div>
@@ -104,8 +90,8 @@
     <partial name="_ValidationScriptsPartial" />
     <script>
         const i18n = {
-            saving: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Localizer["Saving"].Value)),
-            submit: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Localizer["CsvImportSubmit"].Value))
+            saving: '正在检查文件，请稍候…',
+            submit: '导入'
         };
         document.addEventListener('DOMContentLoaded', function() {
             const csvForm = document.getElementById('csvImportForm');

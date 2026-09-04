@@ -128,7 +128,7 @@ public class LocalAppSqliteRegressionTests
         new(
             context,
             NullLogger<EmailCoreService>.Instance,
-            new DateTimeHelper(Options.Create(new TimeZoneOptions { DisplayTimeZoneId = "Asia/Shanghai" })),
+            new DateTimeHelper(Options.Create(new TimeZoneOptions { StorageTimeZoneId = "Asia/Shanghai" })),
             Options.Create(new BatchOperationOptions { BatchSize = 50 }),
             Options.Create(mailSyncOptions ?? new MailSyncOptions()));
 

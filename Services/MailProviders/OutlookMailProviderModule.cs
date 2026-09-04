@@ -84,12 +84,12 @@ public sealed class OutlookMailProviderModule : IMailProviderModule
         EnsureIdentity(account);
         client.AuthenticationMechanisms.Remove("GSSAPI");
         client.AuthenticationMechanisms.Remove("NEGOTIATE");
-        await MailCredentialFallback.AuthenticateAsync(
+        account.PreferredIncomingAuth = await MailCredentialFallback.AuthenticateAsync(
             hasOAuth: !string.IsNullOrWhiteSpace(account.OAuthRefreshToken),
             hasPassword: !string.IsNullOrWhiteSpace(account.Password),
             authenticateOAuth: () => AuthenticateOAuthAsync(client, account, cancellationToken),
             authenticatePassword: () => AuthenticatePasswordAsync(client, account, cancellationToken),
-            preference: MailCredentialPreference.OAuthFirst,
+            preference: MailProviderCredentialPolicy.For(Kind, account.PreferredIncomingAuth),
             cancellationToken: cancellationToken);
     }
 
@@ -102,6 +102,23 @@ public sealed class OutlookMailProviderModule : IMailProviderModule
         if (!Inspect(account).CanSend)
             throw new InvalidOperationException("Outlook 账号没有可用的发件授权。");
 
+        if (account.PreferredOutgoingAuth == MailAuthenticationMethod.Password
+            && _smtpMailSender is not null
+            && !string.IsNullOrWhiteSpace(account.Password))
+        {
+            try
+            {
+                var rememberedPassword = _credentialEncryption?.Decrypt(account.Password)
+                    ?? throw new InvalidOperationException("Outlook 账号的密码回退未配置凭据解密服务。");
+                await _smtpMailSender.SendWithPasswordAsync(account, message, rememberedPassword, cancellationToken);
+                return new ProviderSendResult(SentCopySavedByProvider: false);
+            }
+            catch (AuthenticationException) when (!cancellationToken.IsCancellationRequested)
+            {
+                // The remembered route stopped working; continue down the OAuth funnel.
+            }
+        }
+
         Exception? graphFailure = null;
         if (!string.IsNullOrWhiteSpace(account.OAuthRefreshToken))
         {
@@ -112,6 +129,7 @@ public sealed class OutlookMailProviderModule : IMailProviderModule
                 try
                 {
                     await _graphMailSender.SendAsync(message, token.AccessToken, cancellationToken);
+                    account.PreferredOutgoingAuth = MailAuthenticationMethod.OAuth2;
                     return new ProviderSendResult(SentCopySavedByProvider: true);
                 }
                 catch (OutlookGraphMailException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Unauthorized)
@@ -119,10 +137,11 @@ public sealed class OutlookMailProviderModule : IMailProviderModule
                     token = await _tokenManager.GetGraphAccessTokenAsync(
                         account, forceRefresh: true, cancellationToken: cancellationToken);
                     await _graphMailSender.SendAsync(message, token.AccessToken, cancellationToken);
+                    account.PreferredOutgoingAuth = MailAuthenticationMethod.OAuth2;
                     return new ProviderSendResult(SentCopySavedByProvider: true);
                 }
             }
-            catch (Exception ex) when (IsGraphAuthorizationFailure(ex))
+            catch (Exception ex) when (!cancellationToken.IsCancellationRequested && IsGraphAuthorizationFailure(ex))
             {
                 graphFailure = ex;
             }
@@ -135,10 +154,12 @@ public sealed class OutlookMailProviderModule : IMailProviderModule
                 var smtpToken = await _tokenManager.GetSmtpAccessTokenAsync(
                     account, cancellationToken: cancellationToken);
                 await _smtpMailSender.SendAsync(account, message, smtpToken, cancellationToken);
+                account.PreferredOutgoingAuth = MailAuthenticationMethod.OAuth2;
                 return new ProviderSendResult(SentCopySavedByProvider: false);
             }
             catch (Exception ex) when (
-                !string.IsNullOrWhiteSpace(account.Password)
+                !cancellationToken.IsCancellationRequested
+                && !string.IsNullOrWhiteSpace(account.Password)
                 && IsSmtpOAuthAuthorizationFailure(ex))
             {
                 // Continue to the password transport fallback below.
@@ -150,6 +171,7 @@ public sealed class OutlookMailProviderModule : IMailProviderModule
             var password = _credentialEncryption?.Decrypt(account.Password)
                 ?? throw new InvalidOperationException("Outlook 账号的密码回退未配置凭据解密服务。", graphFailure);
             await _smtpMailSender.SendWithPasswordAsync(account, message, password, cancellationToken);
+            account.PreferredOutgoingAuth = MailAuthenticationMethod.Password;
             return new ProviderSendResult(SentCopySavedByProvider: false);
         }
 
@@ -168,25 +190,40 @@ public sealed class OutlookMailProviderModule : IMailProviderModule
         if (_smtpMailSender is null)
             return false;
 
-        try
+        var passwordFirst = MailProviderCredentialPolicy.For(Kind, account.PreferredOutgoingAuth)
+            == MailCredentialPreference.AppPasswordFirst;
+        foreach (var attemptPassword in passwordFirst ? new[] { true, false } : new[] { false, true })
         {
-            if (!string.IsNullOrWhiteSpace(account.OAuthRefreshToken))
+            try
             {
-                var token = await _tokenManager.GetSmtpAccessTokenAsync(account, cancellationToken: cancellationToken);
-                if (await _smtpMailSender.TestAsync(account, token, cancellationToken))
-                    return true;
+                if (attemptPassword)
+                {
+                    if (string.IsNullOrWhiteSpace(account.Password))
+                        continue;
+                    var password = _credentialEncryption?.Decrypt(account.Password)
+                        ?? throw new InvalidOperationException("Outlook 账号的密码回退未配置凭据解密服务。");
+                    if (await _smtpMailSender.TestWithPasswordAsync(account, password, cancellationToken))
+                    {
+                        account.PreferredOutgoingAuth = MailAuthenticationMethod.Password;
+                        return true;
+                    }
+                }
+                else
+                {
+                    if (string.IsNullOrWhiteSpace(account.OAuthRefreshToken))
+                        continue;
+                    var token = await _tokenManager.GetSmtpAccessTokenAsync(account, cancellationToken: cancellationToken);
+                    if (await _smtpMailSender.TestAsync(account, token, cancellationToken))
+                    {
+                        account.PreferredOutgoingAuth = MailAuthenticationMethod.OAuth2;
+                        return true;
+                    }
+                }
             }
-
-            if (!string.IsNullOrWhiteSpace(account.Password))
+            catch (Exception) when (!cancellationToken.IsCancellationRequested)
             {
-                var password = _credentialEncryption?.Decrypt(account.Password)
-                    ?? throw new InvalidOperationException("Outlook 账号的密码回退未配置凭据解密服务。");
-                return await _smtpMailSender.TestWithPasswordAsync(account, password, cancellationToken);
+                // Continue to the next usable route.
             }
-        }
-        catch
-        {
-            // Record a failed capability without exposing provider auth details.
         }
 
         return false;
@@ -223,8 +260,11 @@ public sealed class OutlookMailProviderModule : IMailProviderModule
         await client.AuthenticateAsync(account.Username ?? account.EmailAddress, password, cancellationToken);
     }
 
+    // Never retry a submitted message after an ambiguous network failure: the
+    // server may have accepted it. Only definite authorization failures fall back.
     private static bool IsGraphAuthorizationFailure(Exception exception)
         => exception is OutlookGraphAuthorizationException
+            || exception is MsaOAuthTokenException tokenException && tokenException.IsAuthorizationFailure
             || exception is OutlookGraphMailException graphException &&
                 graphException.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden;
 

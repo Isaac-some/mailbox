@@ -31,6 +31,7 @@ public class OutlookMailProviderModuleTests
         Assert.Equal(0, tokens.ImapRequests);
         Assert.Equal("graph-access", graph.AccessToken);
         Assert.True(result.SentCopySavedByProvider);
+        Assert.Equal(MailAuthenticationMethod.OAuth2, account.PreferredOutgoingAuth);
     }
 
     [Fact]
@@ -85,6 +86,82 @@ public class OutlookMailProviderModuleTests
         Assert.Equal(1, tokens.SmtpRequests);
         Assert.Equal("encrypted-password", smtp.Password);
         Assert.False(result.SentCopySavedByProvider);
+        Assert.Equal(MailAuthenticationMethod.Password, account.PreferredOutgoingAuth);
+    }
+
+    [Fact]
+    public async Task SendAsync_tries_the_remembered_password_route_first()
+    {
+        var tokens = new FakeTokenManager();
+        var smtp = new FakeSmtpSender();
+        var module = new OutlookMailProviderModule(tokens, new FakeGraphSender(), smtp, new PassthroughEncryption());
+        var account = CreateAccount();
+        account.Password = "encrypted-password";
+        account.PreferredOutgoingAuth = MailAuthenticationMethod.Password;
+        var message = new MimeMessage { Body = new TextPart("plain") { Text = "body" } };
+        message.To.Add(MailboxAddress.Parse("target@example.com"));
+
+        await module.SendAsync(account, message);
+
+        Assert.Equal("encrypted-password", smtp.Password);
+        Assert.Equal(0, tokens.GraphRequests);
+        Assert.Equal(0, tokens.SmtpRequests);
+        Assert.Equal(MailAuthenticationMethod.Password, account.PreferredOutgoingAuth);
+    }
+
+    [Fact]
+    public async Task TestOutgoingConnectionAsync_falls_back_after_OAuth_throws_and_remembers_password()
+    {
+        var tokens = new FakeTokenManager
+        {
+            SmtpFailure = new MailKit.Security.AuthenticationException("smtp oauth rejected")
+        };
+        var smtp = new FakeSmtpSender();
+        var module = new OutlookMailProviderModule(tokens, new FakeGraphSender(), smtp, new PassthroughEncryption());
+        var account = CreateAccount();
+        account.Password = "encrypted-password";
+
+        var connected = await module.TestOutgoingConnectionAsync(account);
+
+        Assert.True(connected);
+        Assert.Equal(1, tokens.SmtpRequests);
+        Assert.Equal("encrypted-password", smtp.Password);
+        Assert.Equal(MailAuthenticationMethod.Password, account.PreferredOutgoingAuth);
+    }
+
+    [Fact]
+    public async Task TestOutgoingConnectionAsync_tries_remembered_password_before_OAuth()
+    {
+        var tokens = new FakeTokenManager();
+        var smtp = new FakeSmtpSender();
+        var module = new OutlookMailProviderModule(tokens, new FakeGraphSender(), smtp, new PassthroughEncryption());
+        var account = CreateAccount();
+        account.Password = "encrypted-password";
+        account.PreferredOutgoingAuth = MailAuthenticationMethod.Password;
+
+        var connected = await module.TestOutgoingConnectionAsync(account);
+
+        Assert.True(connected);
+        Assert.Equal(0, tokens.SmtpRequests);
+        Assert.Equal("encrypted-password", smtp.Password);
+        Assert.Equal(MailAuthenticationMethod.Password, account.PreferredOutgoingAuth);
+    }
+
+    [Fact]
+    public async Task SendAsync_does_not_send_again_after_an_ambiguous_Graph_network_failure()
+    {
+        var tokens = new FakeTokenManager();
+        var smtp = new FakeSmtpSender();
+        var module = new OutlookMailProviderModule(tokens,
+            new FakeGraphSender { Failure = new HttpRequestException("response lost after submission") },
+            smtp, new PassthroughEncryption());
+        var account = CreateAccount();
+        account.Password = "password";
+
+        await Assert.ThrowsAsync<HttpRequestException>(() => module.SendAsync(account, new MimeMessage()));
+
+        Assert.Equal(0, tokens.SmtpRequests);
+        Assert.Null(smtp.Password);
     }
 
     [Fact]

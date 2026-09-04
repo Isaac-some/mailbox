@@ -4,6 +4,7 @@
     ViewData["Title"] = Localizer["LoginTitle"];
     Layout = "_LoginLayout";
     var disablePasswordLogin = ViewBag.DisablePasswordLogin ?? false;
+    var isLocalApp = ViewBag.IsLocalApp ?? false;
 }
 
 <div class="login-container">
@@ -58,9 +59,12 @@
                         </button>
                     </div>                
                 </form>
-                <div class="text-center">
-                    <a asp-action="Register">使用授权码注册</a>
-                </div>
+                @if (!isLocalApp)
+                {
+                    <div class="text-center">
+                        <a asp-action="Register">使用授权码注册</a>
+                    </div>
+                }
             }
             
             @if (ViewBag.OAuthEnabled)

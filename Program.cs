@@ -67,6 +67,11 @@ var builder = WebApplication.CreateBuilder(args);
 var isLocalApp = builder.Configuration.GetValue<bool>("LocalApp:Enabled") ||
                  string.Equals(Environment.GetEnvironmentVariable("KOUZI_LOCAL_APP"), "1", StringComparison.Ordinal);
 
+if (isLocalApp)
+{
+    builder.Configuration["AccountStorage:Enabled"] = "false";
+}
+
 // Configure Forwarded Headers for reverse proxy support
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
@@ -79,7 +84,7 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 
 var authEnabled = builder.Configuration.GetValue("Authentication:Enabled", true);
 var authPassword = builder.Configuration.GetSection("Authentication:Password").Value;
-if (authEnabled && string.IsNullOrWhiteSpace(authPassword))
+if (authEnabled && string.IsNullOrWhiteSpace(authPassword) && !isLocalApp)
 {
     // Create a logger to log the error message
     var logger = builder.Services.BuildServiceProvider().GetRequiredService<ILogger<Program>>();
@@ -170,6 +175,21 @@ builder.Services.AddScoped<MailArchiver.Utilities.DateTimeHelper>();
 builder.Services.AddHttpClient("GitHubReleases");
 builder.Services.AddHttpClient("MsaOAuth");
 builder.Services.AddHttpClient("ExternalMailOAuth");
+builder.Services.AddHttpClient("UpstreamMailboxSync");
+builder.Services.AddHttpClient("PlatformAuthentication", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(30);
+})
+.ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+{
+    AllowAutoRedirect = false,
+    UseCookies = false
+});
+builder.Services.AddHttpClient("LocalAccessManifest", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(10);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("KouziMailAssistant/LocalAccess");
+});
 builder.Services.AddHttpClient("MailAutoconfig", client =>
 {
     client.Timeout = TimeSpan.FromSeconds(3);
@@ -186,6 +206,12 @@ builder.Services.AddHttpClient("MailAutoconfig", client =>
 
 // Register CSV import options for bulk IMAP account import
 builder.Services.Configure<CsvImportOptions>(builder.Configuration.GetSection(CsvImportOptions.CsvImport));
+builder.Services.Configure<UpstreamMailboxSyncOptions>(
+    builder.Configuration.GetSection(UpstreamMailboxSyncOptions.SectionName));
+builder.Services.Configure<PlatformAuthenticationOptions>(
+    builder.Configuration.GetSection(PlatformAuthenticationOptions.SectionName));
+builder.Services.Configure<LocalAccessOptions>(
+    builder.Configuration.GetSection(LocalAccessOptions.SectionName));
 
 // Provider credentials are encrypted before persistence. Startup fails fast when
 // the Docker secret is absent or malformed instead of accepting plaintext data.
@@ -200,6 +226,16 @@ builder.Services.AddSingleton<MailArchiver.Services.IMsaGraphTokenCache, MailArc
 builder.Services.AddScoped<MailArchiver.Services.IMsaTokenManager, MailArchiver.Services.MsaTokenManager>();
 builder.Services.AddScoped<MailArchiver.Services.IExternalOAuthTokenManager, MailArchiver.Services.ExternalOAuthTokenManager>();
 builder.Services.AddScoped<MailArchiver.Services.MailCredentialIntakeService>();
+builder.Services.AddSingleton<CsvImportService>();
+builder.Services.AddSingleton<ICsvImportService>(provider => provider.GetRequiredService<CsvImportService>());
+builder.Services.AddHostedService<CsvImportService>(provider => provider.GetRequiredService<CsvImportService>());
+builder.Services.AddScoped<MailArchiver.Services.IMailCredentialVerifier, MailArchiver.Services.MailCredentialVerifier>();
+builder.Services.AddScoped<MailArchiver.Services.IUpstreamMailboxSyncService, MailArchiver.Services.UpstreamMailboxSyncService>();
+builder.Services.AddSingleton<MailArchiver.Services.IUpstreamMailboxConnectionStore, MailArchiver.Services.UpstreamMailboxConnectionStore>();
+builder.Services.AddSingleton<MailArchiver.Services.IUpstreamMailboxSyncCursorStore, MailArchiver.Services.UpstreamMailboxSyncCursorStore>();
+builder.Services.AddSingleton<MailArchiver.Services.IPlatformSessionStore, MailArchiver.Services.PlatformSessionStore>();
+builder.Services.AddScoped<MailArchiver.Services.IPlatformAuthenticationClient, MailArchiver.Services.PlatformAuthenticationClient>();
+builder.Services.AddSingleton<MailArchiver.Services.ILocalAccessService, MailArchiver.Services.LocalAccessService>();
 builder.Services.AddScoped<MailArchiver.Services.IMailEndpointDiscoveryService, MailArchiver.Services.MailEndpointDiscoveryService>();
 builder.Services.AddScoped<MailArchiver.Services.MailProviders.IMailProviderModule, MailArchiver.Services.MailProviders.GmailMailProviderModule>();
 builder.Services.AddScoped<MailArchiver.Services.MailProviders.IMailProviderModule, MailArchiver.Services.MailProviders.YahooMailProviderModule>();

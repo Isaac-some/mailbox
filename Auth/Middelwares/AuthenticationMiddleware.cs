@@ -14,19 +14,23 @@ namespace MailArchiver.Auth.Middlewares
         private readonly RequestDelegate _next;
         private readonly ILogger<AuthenticationMiddleware> _logger;
         private readonly MailArchiver.Models.AuthenticationOptions _authenticationOptions;
+        private readonly bool _isLocalApp;
 
         public AuthenticationMiddleware(
             RequestDelegate next,
             ILogger<AuthenticationMiddleware> logger,
-            IOptions<MailArchiver.Models.AuthenticationOptions> authenticationOptions)
+            IOptions<MailArchiver.Models.AuthenticationOptions> authenticationOptions,
+            IConfiguration configuration)
         {
             _next = next;
             _logger = logger;
             _authenticationOptions = authenticationOptions.Value;
+            _isLocalApp = configuration.GetValue<bool>("LocalApp:Enabled") ||
+                          string.Equals(Environment.GetEnvironmentVariable("KOUZI_LOCAL_APP"), "1", StringComparison.Ordinal);
         }
 
         public async Task InvokeAsync(HttpContext context, MailArchiver.Services.IAuthenticationService authService,
-            IUserService userService, IOptions<ApiOptions> apiOptions)
+            IUserService userService, IOptions<ApiOptions> apiOptions, ILocalAccessService localAccess)
         {
             var path = context.Request.Path.Value?.ToLower() ?? string.Empty;
 
@@ -79,6 +83,18 @@ namespace MailArchiver.Auth.Middlewares
                     var returnUrl = context.Request.Path + context.Request.QueryString;
                     context.Response.Redirect($"/Auth/Login?returnUrl={Uri.EscapeDataString(returnUrl)}");
                     return;
+                }
+
+
+                if (_isLocalApp)
+                {
+                    var username = authService.GetCurrentUserDisplayName(context);
+                    if (!await localAccess.IsActiveAsync(username, context.RequestAborted))
+                    {
+                        authService.SignOut(context);
+                        context.Response.Redirect("/Auth/Login?error=" + Uri.EscapeDataString("账号已停用，请联系管理员。"));
+                        return;
+                    }
                 }
             }
 

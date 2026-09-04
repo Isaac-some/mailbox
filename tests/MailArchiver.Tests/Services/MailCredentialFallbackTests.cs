@@ -17,12 +17,22 @@ public class MailCredentialFallbackTests
         Assert.Equal(expected, MailProviderCredentialPolicy.For(provider));
     }
 
+    [Theory]
+    [InlineData(MailAuthenticationMethod.Password, MailCredentialPreference.AppPasswordFirst)]
+    [InlineData(MailAuthenticationMethod.OAuth2, MailCredentialPreference.OAuthFirst)]
+    public void Remembered_success_overrides_the_provider_default(
+        MailAuthenticationMethod remembered,
+        MailCredentialPreference expected)
+    {
+        Assert.Equal(expected, MailProviderCredentialPolicy.For(MailProviderKind.Outlook, remembered));
+    }
+
     [Fact]
     public async Task App_password_success_does_not_try_OAuth()
     {
         var attempts = new List<string>();
 
-        await MailCredentialFallback.AuthenticateAsync(
+        var used = await MailCredentialFallback.AuthenticateAsync(
             hasOAuth: true,
             hasPassword: true,
             authenticateOAuth: () =>
@@ -38,6 +48,7 @@ public class MailCredentialFallbackTests
             preference: MailCredentialPreference.AppPasswordFirst);
 
         Assert.Equal(["password"], attempts);
+        Assert.Equal(MailAuthenticationMethod.Password, used);
     }
 
     [Fact]
@@ -45,7 +56,7 @@ public class MailCredentialFallbackTests
     {
         var attempts = new List<string>();
 
-        await MailCredentialFallback.AuthenticateAsync(
+        var used = await MailCredentialFallback.AuthenticateAsync(
             hasOAuth: true,
             hasPassword: true,
             authenticateOAuth: () =>
@@ -61,6 +72,7 @@ public class MailCredentialFallbackTests
             preference: MailCredentialPreference.AppPasswordFirst);
 
         Assert.Equal(["password", "oauth"], attempts);
+        Assert.Equal(MailAuthenticationMethod.OAuth2, used);
     }
 
     [Fact]

@@ -11,7 +11,17 @@ namespace MailArchiver.Tests.Utilities;
 public class DateTimeHelperTests
 {
     private static DateTimeHelper Create(string tzId = "Europe/Berlin")
-        => new(Options.Create(new TimeZoneOptions { DisplayTimeZoneId = tzId }));
+        => new(Options.Create(new TimeZoneOptions { StorageTimeZoneId = tzId }));
+
+    [Fact]
+    public void Display_input_and_UTC_round_trip_in_Beijing_independently_of_host_timezone()
+    {
+        var helper = new DateTimeHelper(Options.Create(new TimeZoneOptions()));
+        var input = new DateTime(2026, 9, 3, 8, 30, 0);
+        var utc = helper.ConvertDisplayInputToUtc(input);
+        Assert.Equal(new DateTime(2026, 9, 3, 0, 30, 0, DateTimeKind.Utc), utc);
+        Assert.Equal(input, helper.ConvertUtcToDisplayTime(utc));
+    }
 
     [Theory]
     [InlineData(2024, 6, 15, 10, 0, 0, DateTimeKind.Utc)]
@@ -111,5 +121,33 @@ public class DateTimeHelperTests
         var helper = Create();
         var dt = new DateTime(2024, 6, 15, 12, 0, 0, DateTimeKind.Utc);
         Assert.Equal(dt, helper.ConvertFromDisplayTimeZoneToUtc(dt));
+    }
+
+    [Fact]
+    public void ConvertArchiveTimeToDisplayTimeZone_converts_UTC_storage_to_Beijing()
+    {
+        var helper = new DateTimeHelper(Options.Create(new TimeZoneOptions
+        {
+            StorageTimeZoneId = "Etc/UTC",
+            DisplayTimeZoneId = "Asia/Shanghai"
+        }));
+
+        var result = helper.ConvertArchiveTimeToDisplayTimeZone(
+            new DateTime(2026, 9, 2, 16, 30, 0, DateTimeKind.Unspecified));
+
+        Assert.Equal(new DateTime(2026, 9, 3, 0, 30, 0), result);
+    }
+
+    [Fact]
+    public void Source_timezone_is_normalized_to_UTC_then_displayed_as_Beijing()
+    {
+        var helper = new DateTimeHelper(Options.Create(new TimeZoneOptions()));
+        var source = new DateTimeOffset(2026, 9, 3, 1, 30, 0, TimeSpan.FromHours(9));
+
+        var stored = helper.ConvertToDisplayTimeZone(source);
+        var displayed = helper.ConvertArchiveTimeToDisplayTimeZone(stored);
+
+        Assert.Equal(new DateTime(2026, 9, 2, 16, 30, 0), stored);
+        Assert.Equal(new DateTime(2026, 9, 3, 0, 30, 0), displayed);
     }
 }

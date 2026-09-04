@@ -49,6 +49,14 @@ public class MailAccount
     public string? OAuthGrantedScopes { get; set; }
     public string? OAuthRedirectUri { get; set; }
 
+    // Optional metadata supplied by the upstream platform. Provider routing is
+    // still derived from EmailAddress so stale metadata cannot redirect secrets.
+    public string? ImportedDomain { get; set; }
+
+    // Receiving and sending can legitimately succeed through different routes.
+    public MailAuthenticationMethod PreferredIncomingAuth { get; set; } = MailAuthenticationMethod.Unknown;
+    public MailAuthenticationMethod PreferredOutgoingAuth { get; set; } = MailAuthenticationMethod.Unknown;
+
     // Credential intake metadata. The raw credential remains encrypted in Password
     // or stored in the existing OAuth fields; these fields describe the last
     // classification/verification result and are safe to expose to the API caller.

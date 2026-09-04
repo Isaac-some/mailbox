@@ -13,6 +13,27 @@
         <a asp-controller="MailAccounts" asp-action="Index" class="btn btn-light">返回邮箱账号</a>
     </header>
 
+    <form asp-action="Index" method="get" class="account-search mb-3" role="search">
+        <i class="bi bi-search" aria-hidden="true"></i>
+        <input type="search" name="accountQuery" value="@Model.AccountQuery" placeholder="搜索发件邮箱" aria-label="搜索发件邮箱" autocomplete="off" />
+        <button type="submit" class="btn btn-primary btn-sm">搜索</button>
+        @if (!string.IsNullOrWhiteSpace(Model.AccountQuery))
+        {
+            <a asp-action="Index" class="account-search__clear" aria-label="清除搜索" title="清除搜索">
+                <i class="bi bi-x-lg" aria-hidden="true"></i>
+            </a>
+        }
+    </form>
+
+    @if (ViewBag.AccountSearchMessage is string accountSearchMessage)
+    {
+        <div class="alert alert-warning">@accountSearchMessage</div>
+    }
+    else if (Model.HasMoreSendingAccounts)
+    {
+        <div class="form-text mb-3">发件账号较多，当前只显示前 @Model.SendingAccounts.Count 个，可搜索邮箱名称或地址。</div>
+    }
+
     <form asp-action="Index" method="post" enctype="multipart/form-data" class="compose-card" id="composeForm">
         @Html.AntiForgeryToken()
         <div asp-validation-summary="ModelOnly" class="alert alert-danger"></div>
@@ -55,7 +76,8 @@
         </div>
 
         <div class="compose-actions">
-            <button type="submit" class="btn btn-primary" id="sendButton">
+            <button type="submit" class="btn btn-primary" id="sendButton"
+                    disabled="@(Model.SendingAccounts.Count == 0 ? "disabled" : null)">
                 <i class="bi bi-send" aria-hidden="true"></i> 发送
             </button>
             <span class="text-muted small">点击一次即可，发送过程中请不要关闭页面。</span>

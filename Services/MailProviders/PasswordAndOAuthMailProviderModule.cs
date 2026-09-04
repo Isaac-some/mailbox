@@ -78,12 +78,12 @@ public abstract class PasswordAndOAuthMailProviderModule : IMailProviderModule
         EnsureIdentity(account);
         RemoveUnsupportedMechanisms(client);
 
-        await MailCredentialFallback.AuthenticateAsync(
+        account.PreferredIncomingAuth = await MailCredentialFallback.AuthenticateAsync(
             HasOAuth(account),
             HasPassword(account),
             () => AuthenticateOAuthAsync(client, account, cancellationToken),
             () => AuthenticatePasswordAsync(client, account, cancellationToken),
-            MailProviderCredentialPolicy.For(Kind),
+            MailProviderCredentialPolicy.For(Kind, account.PreferredIncomingAuth),
             cancellationToken);
     }
 
@@ -101,12 +101,12 @@ public abstract class PasswordAndOAuthMailProviderModule : IMailProviderModule
         client.ServerCertificateValidationCallback = static (_, _, chain, errors) =>
             MailCertificatePolicy.IsAccepted(errors, chain);
         await client.ConnectAsync(GetSmtpHost(account), GetSmtpPort(account), GetSmtpSocketOptions(account), cancellationToken);
-        await MailCredentialFallback.AuthenticateAsync(
+        account.PreferredOutgoingAuth = await MailCredentialFallback.AuthenticateAsync(
             HasOAuth(account),
             HasPassword(account),
             () => AuthenticateOAuthAsync(client, account, cancellationToken),
             () => AuthenticatePasswordAsync(client, account, cancellationToken),
-            MailProviderCredentialPolicy.For(Kind),
+            MailProviderCredentialPolicy.For(Kind, account.PreferredOutgoingAuth),
             cancellationToken);
 
         await client.SendAsync(message, cancellationToken);
@@ -126,12 +126,12 @@ public abstract class PasswordAndOAuthMailProviderModule : IMailProviderModule
             client.ServerCertificateValidationCallback = static (_, _, chain, errors) =>
                 MailCertificatePolicy.IsAccepted(errors, chain);
             await client.ConnectAsync(GetSmtpHost(account), GetSmtpPort(account), GetSmtpSocketOptions(account), cancellationToken);
-            await MailCredentialFallback.AuthenticateAsync(
+            account.PreferredOutgoingAuth = await MailCredentialFallback.AuthenticateAsync(
                 HasOAuth(account),
                 HasPassword(account),
                 () => AuthenticateOAuthAsync(client, account, cancellationToken),
                 () => AuthenticatePasswordAsync(client, account, cancellationToken),
-                MailProviderCredentialPolicy.For(Kind),
+                MailProviderCredentialPolicy.For(Kind, account.PreferredOutgoingAuth),
                 cancellationToken);
             await client.DisconnectAsync(true, cancellationToken);
             return true;

@@ -9,7 +9,7 @@ namespace MailArchiver.Services
     {
         Task<DeviceCodeResult> StartDeviceCodeAsync(string? clientId);
         Task<MsaPollResult> PollDeviceCodeAsync(string? clientId, string deviceCode, int currentInterval);
-        Task<MsaTokenResult> RefreshAccessTokenAsync(string refreshToken, string? clientId, string? clientSecret);
+        Task<MsaTokenResult> RefreshAccessTokenAsync(string refreshToken, string? clientId, string? clientSecret, CancellationToken cancellationToken = default);
         Task<MsaTokenResult> RefreshGraphAccessTokenAsync(string refreshToken, string? clientId, string? clientSecret);
         Task<MsaTokenResult> RefreshSmtpAccessTokenAsync(string refreshToken, string? clientId, string? clientSecret);
         /// <summary>
@@ -206,7 +206,7 @@ namespace MailArchiver.Services
             };
         }
 
-        public async Task<MsaTokenResult> RefreshAccessTokenAsync(string refreshToken, string? clientId, string? clientSecret)
+        public async Task<MsaTokenResult> RefreshAccessTokenAsync(string refreshToken, string? clientId, string? clientSecret, CancellationToken cancellationToken = default)
         {
             var resolvedClientId = ResolveClientId(clientId);
             var body = new Dictionary<string, string>
@@ -220,7 +220,7 @@ namespace MailArchiver.Services
             };
             if (!string.IsNullOrEmpty(clientSecret))
                 body["client_secret"] = clientSecret;
-            return await PostTokenAsync(body);
+            return await PostTokenAsync(body, cancellationToken);
         }
 
         public async Task<MsaTokenResult> RefreshGraphAccessTokenAsync(
@@ -259,11 +259,11 @@ namespace MailArchiver.Services
             return await PostTokenAsync(body);
         }
 
-        private async Task<MsaTokenResult> PostTokenAsync(Dictionary<string, string> body)
+        private async Task<MsaTokenResult> PostTokenAsync(Dictionary<string, string> body, CancellationToken cancellationToken = default)
         {
             var client = _httpClientFactory.CreateClient("MsaOAuth");
-            var response = await client.PostAsync($"{Authority}/token", new FormUrlEncodedContent(body));
-            var json = await response.Content.ReadAsStringAsync();
+            using var response = await client.PostAsync($"{Authority}/token", new FormUrlEncodedContent(body), cancellationToken);
+            var json = await response.Content.ReadAsStringAsync(cancellationToken);
 
             if (!response.IsSuccessStatusCode)
             {

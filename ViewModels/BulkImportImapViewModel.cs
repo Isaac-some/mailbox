@@ -31,9 +31,6 @@ namespace MailArchiver.Models.ViewModels
         [Range(1, int.MaxValue, ErrorMessage = "Local retention days must be at least 1")]
         public int? LocalRetentionDays { get; set; }
 
-        [Display(Name = "Skip existing mailboxes")]
-        public bool SkipExisting { get; set; } = true;
-
         public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
         {
             var localizer = validationContext.GetService(typeof(IStringLocalizer<SharedResource>)) as IStringLocalizer<SharedResource>;

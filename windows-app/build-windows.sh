@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-OUTPUT_DIR="$SCRIPT_DIR/build/邮箱助手-Windows-x64"
+OUTPUT_DIR="${KOUZI_WINDOWS_OUTPUT_DIR:-$SCRIPT_DIR/build/邮箱助手-Windows-x64}"
 DOTNET_COMMAND="${DOTNET_BIN:-dotnet}"
 WORK_DIR="$(mktemp -d "${TMPDIR:-/private/tmp}/kouzi-windows-build.XXXXXX")"
 STAGING_DIR="$WORK_DIR/邮箱助手-Windows-x64"

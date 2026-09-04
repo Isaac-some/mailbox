@@ -42,18 +42,18 @@
                 </dd>
 
                 <dt class="col-sm-3">@Localizer["Created"]:</dt>
-                <dd class="col-sm-9">@Model.Created.ToString("yyyy-MM-dd HH:mm:ss")</dd>
+                <dd class="col-sm-9" data-utc-time="@Model.Created.ToString("s")">@Model.Created</dd>
 
                 @if (Model.Started.HasValue)
                 {
                     <dt class="col-sm-3">@Localizer["Started"]:</dt>
-                    <dd class="col-sm-9">@Model.Started.Value.ToString("yyyy-MM-dd HH:mm:ss")</dd>
+                    <dd class="col-sm-9" data-utc-time="@Model.Started.Value.ToString("s")">@Model.Started.Value</dd>
                 }
 
                 @if (Model.Completed.HasValue)
                 {
                     <dt class="col-sm-3">@Localizer["Completed"]:</dt>
-                    <dd class="col-sm-9">@Model.Completed.Value.ToString("yyyy-MM-dd HH:mm:ss")</dd>
+                    <dd class="col-sm-9" data-utc-time="@Model.Completed.Value.ToString("s")">@Model.Completed.Value</dd>
                 }
 
                 <dt class="col-sm-3">@Localizer["User"]:</dt>

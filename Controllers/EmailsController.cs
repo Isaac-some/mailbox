@@ -145,48 +145,24 @@ namespace MailArchiver.Controllers
             // Store search state for return navigation
             StoreSearchState(model);
 
-            // Get current user's allowed accounts
-            List<int> allowedAccountIds = new();
-            var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
-            var userService = HttpContext.RequestServices.GetService<IUserService>();
-            
-            if (authService != null && userService != null)
-            {
-                var username = authService.GetCurrentUserDisplayName(HttpContext);
-                var user = await userService.GetUserByUsernameAsync(username);
-                if (user != null)
-                {
-                    var userAccounts = await userService.GetUserMailAccountsAsync(user.Id);
-                    allowedAccountIds = userAccounts.Select(a => a.Id).ToList();
-                    
-                    // Log for debugging
-                    _logger.LogInformation("User {Username} has access to {Count} accounts: {AccountIds}", 
-                        username, allowedAccountIds.Count, string.Join(", ", allowedAccountIds));
-                }
-                else
-                {
-                    // If user not found, set empty list to prevent access to any emails
-                    allowedAccountIds = new List<int>();
-                    _logger.LogWarning("User {Username} not found in database", username);
-                }
-            }
-
-            if (model.SelectedAccountId.HasValue &&
-                allowedAccountIds != null &&
-                !allowedAccountIds.Contains(model.SelectedAccountId.Value))
-            {
+            var currentUserId = _authService?.GetCurrentUserId(HttpContext);
+            if (!currentUserId.HasValue)
                 return NotFound();
-            }
 
+            // This view is scoped to one mailbox. Check that mailbox in SQL instead
+            // of materializing every account owned by the user.
             var selectedAccount = await _context.MailAccounts
                 .AsNoTracking()
-                .Where(a => a.Id == model.SelectedAccountId.Value)
+                .Where(a =>
+                    a.Id == model.SelectedAccountId.Value &&
+                    a.UserMailAccounts.Any(ownership => ownership.UserId == currentUserId.Value))
                 .Select(a => new { a.Id, a.Name, a.EmailAddress, a.LastSync, a.IsEnabled })
                 .FirstOrDefaultAsync();
             if (selectedAccount == null)
             {
                 return NotFound();
             }
+            var allowedAccountIds = new List<int> { selectedAccount.Id };
             ViewBag.SelectedAccount = selectedAccount;
             ViewBag.LookbackDays = lookbackDays;
             ViewBag.SyncState = selectedAccount.IsEnabled
@@ -228,7 +204,8 @@ namespace MailArchiver.Controllers
                 allowedAccountIds,
                 model.SortBy,
                 model.SortOrder,
-                useReceivedDateForRange: true);
+                useReceivedDateForRange: true,
+                allowedUserId: currentUserId.Value);
 
             model.SearchResults = emails;
             model.TotalResults = totalCount;
@@ -2494,6 +2471,10 @@ namespace MailArchiver.Controllers
             sanitizer.AllowedAttributes.Add("background");
             sanitizer.AllowedAttributes.Add("alt");
             sanitizer.AllowedAttributes.Add("title");
+            // Many transactional emails implement CTA buttons with an internal
+            // <style> rule targeting a class. Keeping safe class names preserves
+            // the button while the sanitizer and iframe CSP still block scripts.
+            sanitizer.AllowedAttributes.Add("class");
 
             // Allow cid: inline-image references and data:image/... URIs
             sanitizer.AllowedSchemes.Add("cid");

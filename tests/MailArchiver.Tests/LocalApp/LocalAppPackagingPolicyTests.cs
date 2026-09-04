@@ -5,14 +5,13 @@ namespace MailArchiver.Tests.LocalApp;
 public class LocalAppPackagingPolicyTests
 {
     [Fact]
-    public void LocalAppConfiguration_EnablesAutomaticMailSync()
+    public void LocalAppConfiguration_configures_automatic_mail_sync()
     {
         using var document = JsonDocument.Parse(ReadBundledFile("appsettings.Local.json"));
+        var mailSync = document.RootElement.GetProperty("MailSync");
 
-        Assert.True(document.RootElement
-            .GetProperty("MailSync")
-            .GetProperty("Enabled")
-            .GetBoolean());
+        Assert.True(mailSync.GetProperty("SyncInboxOnly").GetBoolean());
+        Assert.True(mailSync.GetProperty("MaxConcurrentSyncs").GetInt32() > 0);
     }
 
     [Fact]
@@ -35,6 +34,31 @@ public class LocalAppPackagingPolicyTests
             .GetProperty("MailSync")
             .GetProperty("MaxStoredEmailsPerAccount")
             .GetInt32());
+    }
+
+    [Fact]
+    public void LocalAppStartup_disables_the_archive_wide_storage_backfill()
+    {
+        var source = ReadBundledFile("Program.cs");
+
+        Assert.Contains("if (isLocalApp)", source, StringComparison.Ordinal);
+        Assert.Contains(
+            "builder.Configuration[\"AccountStorage:Enabled\"] = \"false\";",
+            source,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Application_normalizes_storage_to_UTC_and_displays_Beijing_time()
+    {
+        using var document = JsonDocument.Parse(ReadBundledFile("appsettings.json"));
+        var timeZone = document.RootElement.GetProperty("TimeZone");
+        var layout = ReadBundledFile("Layout.cshtml");
+
+        Assert.Equal("Etc/UTC", timeZone.GetProperty("StorageTimeZoneId").GetString());
+        Assert.Equal("Asia/Shanghai", timeZone.GetProperty("DisplayTimeZoneId").GetString());
+        Assert.Contains("timeZone: displayTimeZone", layout, StringComparison.Ordinal);
+        Assert.DoesNotContain("timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone", layout, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -68,8 +92,8 @@ public class LocalAppPackagingPolicyTests
     {
         var source = ReadBundledFile("Info.plist");
 
-        Assert.Contains("<string>1.0.18</string>", source, StringComparison.Ordinal);
-        Assert.Contains("<string>18</string>", source, StringComparison.Ordinal);
+        Assert.Contains("<string>2.0.0</string>", source, StringComparison.Ordinal);
+        Assert.Contains("<string>200</string>", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -77,8 +101,9 @@ public class LocalAppPackagingPolicyTests
     {
         var source = ReadBundledFile("KouziMailAssistant.Windows.csproj");
 
-        Assert.Contains("<Version>1.0.18</Version>", source, StringComparison.Ordinal);
-        Assert.Contains("<FileVersion>1.0.18.0</FileVersion>", source, StringComparison.Ordinal);
+        Assert.Contains("<Version>2.0.0</Version>", source, StringComparison.Ordinal);
+        Assert.Contains("<FileVersion>2.0.0.0</FileVersion>", source, StringComparison.Ordinal);
+        Assert.Contains("<ApplicationIcon>AppIcon.ico</ApplicationIcon>", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -119,7 +144,7 @@ public class LocalAppPackagingPolicyTests
     }
 
     [Fact]
-    public void Account_import_accepts_multiple_txt_and_csv_files_without_changing_outbound_tasks()
+    public void Account_import_accepts_multiple_standard_csv_files_without_changing_outbound_tasks()
     {
         var page = ReadBundledFile("MailAccountsImportCsv.cshtml");
         var model = ReadBundledFile("BulkImportImapViewModel.cs");
@@ -127,26 +152,98 @@ public class LocalAppPackagingPolicyTests
         var outboundPage = ReadBundledFile("OutboundMailTasksIndex.cshtml");
 
         Assert.Contains("asp-for=\"AccountFiles\"", page, StringComparison.Ordinal);
-        Assert.Contains("accept=\".csv,.txt,text/csv,text/plain\"", page, StringComparison.Ordinal);
+        Assert.Contains("accept=\".csv,text/csv\"", page, StringComparison.Ordinal);
         Assert.Contains("multiple required", page, StringComparison.Ordinal);
         Assert.Contains("List<IFormFile> AccountFiles", model, StringComparison.Ordinal);
         Assert.Contains("foreach (var file in accountFiles)", controller, StringComparison.Ordinal);
         Assert.Contains("ParseAccountImportFileAsync(file, model)", controller, StringComparison.Ordinal);
+        Assert.Contains("不要求固定列数", page, StringComparison.Ordinal);
+        Assert.Contains("extension.Equals(\".csv\"", controller, StringComparison.Ordinal);
+        Assert.DoesNotContain(".txt,text/plain", page, StringComparison.Ordinal);
         Assert.Contains("accept=\".csv,text/csv\"", outboundPage, StringComparison.Ordinal);
         Assert.DoesNotContain("multiple required", outboundPage, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Mixed_csv_import_detects_each_row_and_explains_the_automatic_fallback()
+    public void Mixed_csv_import_stores_opaque_credentials_without_connecting_to_providers()
     {
         var page = ReadBundledFile("MailAccountsImportCsv.cshtml");
         var controller = ReadBundledFile("MailAccountsController.cs");
+        var service = ReadBundledFile("CsvImportService.cs");
 
-        Assert.Contains("同一个文件可混放 Gmail、Yahoo、GMX 和 Outlook", page, StringComparison.Ordinal);
-        Assert.Contains("两种都有时会自动依次尝试", page, StringComparison.Ordinal);
-        Assert.Contains("providerModule = _mailProviderRegistry.Detect(email)", controller, StringComparison.Ordinal);
-        Assert.Contains("MailProviderKind = providerModule.Kind", controller, StringComparison.Ordinal);
-        Assert.Contains("outlook@outlook.com", controller, StringComparison.Ordinal);
+        Assert.Contains("不在导入时连接邮箱服务器", page, StringComparison.Ordinal);
+        Assert.Contains("能识别到有效邮箱和非空授权码即导入成功", page, StringComparison.Ordinal);
+        Assert.Contains("打开邮箱或点击刷新时才连接邮箱服务器", page, StringComparison.Ordinal);
+        Assert.Contains("_csvImportService.QueueImport(job)", controller, StringComparison.Ordinal);
+        Assert.Contains("new MailCredentialIntake(row.Email, row.Password, row.Domain, row.ClientId)", service, StringComparison.Ordinal);
+        Assert.Contains("verifyCredential: false", service, StringComparison.Ordinal);
+        Assert.DoesNotContain("NormalizeAppPassword(row.Password)", controller, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Csv_import_returns_a_background_job_before_database_intake_finishes()
+    {
+        var controller = ReadBundledFile("MailAccountsController.cs");
+        var service = ReadBundledFile("CsvImportService.cs");
+        var statusPage = ReadBundledFile("MailAccountsCsvImportStatus.cshtml");
+        var importAction = controller[
+            controller.IndexOf("public async Task<IActionResult> ImportCsv", StringComparison.Ordinal)
+            ..controller.IndexOf("private async Task<AccountImportFileParseResult>", StringComparison.Ordinal)];
+        Assert.Contains("_csvImportService.QueueImport(job)", importAction, StringComparison.Ordinal);
+        Assert.Contains("RedirectToAction(nameof(CsvImportStatus)", importAction, StringComparison.Ordinal);
+        Assert.DoesNotContain("await _mailCredentialIntake.UpsertAsync", importAction, StringComparison.Ordinal);
+        Assert.Contains("verifyCredential: false", service, StringComparison.Ordinal);
+        Assert.Contains("文件已识别，后台任务已受理", statusPage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Account_list_loads_a_bounded_first_page_without_requiring_search()
+    {
+        var controller = ReadBundledFile("MailAccountsController.cs");
+        var page = ReadBundledFile("MailAccountsIndex.cshtml");
+        var indexAction = controller[
+            controller.IndexOf("public async Task<IActionResult> Index(string? q", StringComparison.Ordinal)
+            ..controller.IndexOf("// GET: MailAccounts/Details", StringComparison.Ordinal)];
+
+        Assert.DoesNotContain("return View(Array.Empty<MailAccountViewModel>())", indexAction, StringComparison.Ordinal);
+        Assert.Contains(".Skip((page - 1) * pageSize)", indexAction, StringComparison.Ordinal);
+        Assert.Contains(".Take(pageSize)", indexAction, StringComparison.Ordinal);
+        Assert.Contains("邮箱账号默认分页显示", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Inbox_and_compose_pages_do_not_materialize_every_owned_account()
+    {
+        var emailsController = ReadBundledFile("EmailsController.cs");
+        var inboxAction = emailsController[
+            emailsController.IndexOf("public async Task<IActionResult> Index(SearchViewModel model)", StringComparison.Ordinal)
+            ..emailsController.IndexOf("// GET: Emails/Details", StringComparison.Ordinal)];
+        var outboundController = ReadBundledFile("OutboundMailController.cs");
+
+        Assert.DoesNotContain("GetUserMailAccountsAsync", inboxAction, StringComparison.Ordinal);
+        Assert.Contains("a.UserMailAccounts.Any", inboxAction, StringComparison.Ordinal);
+        Assert.Contains("allowedUserId: currentUserId.Value", inboxAction, StringComparison.Ordinal);
+        Assert.Contains("MaxSendingAccountOptions = 50", outboundController, StringComparison.Ordinal);
+        Assert.Contains(".Take(candidateLimit)", outboundController, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Clear_mail_data_keeps_identity_and_mailbox_tables_out_of_the_delete_set()
+    {
+        var controller = ReadBundledFile("LocalMaintenanceController.cs");
+        var action = controller[
+            controller.IndexOf("public async Task<IActionResult> ClearMailData", StringComparison.Ordinal)
+            ..controller.IndexOf("public IActionResult FactoryReset", StringComparison.Ordinal)];
+
+        Assert.DoesNotContain("Users.ExecuteDeleteAsync", action, StringComparison.Ordinal);
+        Assert.DoesNotContain("MailAccounts.ExecuteDeleteAsync", action, StringComparison.Ordinal);
+        Assert.DoesNotContain("UserMailAccounts.ExecuteDeleteAsync", action, StringComparison.Ordinal);
+        Assert.Contains("_csvImportService.HasActiveJobs()", action, StringComparison.Ordinal);
+        Assert.True(
+            action.IndexOf("try", StringComparison.Ordinal) <
+            action.IndexOf("BeginTransactionAsync", StringComparison.Ordinal));
+        Assert.Contains("await using var transaction", action, StringComparison.Ordinal);
+        Assert.Contains("登录信息没有被删除", action, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -175,9 +272,10 @@ public class LocalAppPackagingPolicyTests
     }
 
     [Fact]
-    public void Gmail_app_password_rule_is_applied_at_every_input_boundary_with_clear_help()
+    public void Gmail_app_password_is_normalized_only_when_authentication_is_attempted()
     {
         var controller = ReadBundledFile("MailAccountsController.cs");
+        var service = ReadBundledFile("CsvImportService.cs");
         var createAction = controller[
             controller.IndexOf("public async Task<IActionResult> Create(CreateMailAccountViewModel model)", StringComparison.Ordinal)
             ..controller.IndexOf("private async Task<IActionResult> CreateM365TenantAccountsAsync", StringComparison.Ordinal)];
@@ -190,7 +288,8 @@ public class LocalAppPackagingPolicyTests
 
         Assert.Contains("mailProviderModule.NormalizeAppPassword(model.Password)", createAction, StringComparison.Ordinal);
         Assert.Contains("mailProviderModule.NormalizeAppPassword(model.Password)", editAction, StringComparison.Ordinal);
-        Assert.Contains("rowModule.NormalizeAppPassword(row.Password)", importAction, StringComparison.Ordinal);
+        Assert.DoesNotContain("NormalizeAppPassword(row.Password)", importAction, StringComparison.Ordinal);
+        Assert.Contains("new MailCredentialIntake(row.Email, row.Password, row.Domain, row.ClientId)", service, StringComparison.Ordinal);
 
         var createPage = ReadBundledFile("MailAccountsCreate.cshtml");
         var editPage = ReadBundledFile("MailAccountsEdit.cshtml");
@@ -198,8 +297,8 @@ public class LocalAppPackagingPolicyTests
         Assert.Contains("Google 应用专用密码，不是 Google 登录密码", createPage, StringComparison.Ordinal);
         Assert.Contains("xxxx xxxx xxxx xxxx", createPage, StringComparison.Ordinal);
         Assert.Contains("Google 应用专用密码，不是 Google 登录密码", editPage, StringComparison.Ordinal);
-        Assert.Contains("复制时混入的不可见分隔符", importPage, StringComparison.Ordinal);
-        Assert.Contains("carol@gmail.com\\tabcd efgh ijkl mnop", controller, StringComparison.Ordinal);
+        Assert.Contains("16 位授权码可带分组空格", importPage, StringComparison.Ordinal);
+        Assert.Contains("导入时会自动清理", importPage, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -352,12 +451,11 @@ public class LocalAppPackagingPolicyTests
     }
 
     [Fact]
-    public void Mailbox_received_dates_are_not_reinterpreted_as_utc_in_the_browser()
+    public void Mailbox_received_dates_are_rendered_through_the_fixed_Beijing_converter()
     {
         var page = ReadBundledFile("EmailsIndex.cshtml");
 
-        Assert.DoesNotContain("class=\"utc-timestamp\"", page, StringComparison.Ordinal);
-        Assert.DoesNotContain("data-utc-time=", page, StringComparison.Ordinal);
+        Assert.Contains("data-utc-time=", page, StringComparison.Ordinal);
         Assert.Contains("@email.ReceivedDate.ToString(\"MM-dd HH:mm\")", page, StringComparison.Ordinal);
         Assert.Contains("@selectedEmail.ReceivedDate.ToString(\"yyyy-MM-dd HH:mm\")", page, StringComparison.Ordinal);
     }
@@ -406,6 +504,16 @@ public class LocalAppPackagingPolicyTests
             "summary.InternalDate?.UtcDateTime\n                        ?? summary.Envelope?.Date?.UtcDateTime",
             source,
             StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Inbox_reader_uses_the_sanitized_HTML_route_instead_of_forcing_plain_text()
+    {
+        var page = ReadBundledFile("EmailsIndex.cshtml");
+        Assert.Contains("<iframe", page, StringComparison.Ordinal);
+        Assert.Contains("Url.Action(\"RawContent\", new { id = selectedEmail.Id })", page, StringComparison.Ordinal);
+        Assert.Contains("sandbox=", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("<pre>@selectedEmail.Body</pre>", page, StringComparison.Ordinal);
     }
 
     private static string ReadBundledFile(string fileName)

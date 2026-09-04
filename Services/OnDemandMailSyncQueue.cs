@@ -287,7 +287,7 @@ public sealed class OnDemandMailSyncQueue : BackgroundService, IOnDemandMailSync
                 UpdateCredentialCapabilities(account, canReceive: false, canSend: canSend);
                 await dbContext.SaveChangesAsync(stoppingToken);
             }
-            syncJobs.CompleteJob(jobId, false, ex.Message);
+            syncJobs.CompleteJob(jobId, false, MailConnectionFailurePolicy.ToUserMessage(ex));
             throw;
         }
     }
@@ -302,10 +302,18 @@ public sealed class OnDemandMailSyncQueue : BackgroundService, IOnDemandMailSync
             (false, true) => MailCredentialScope.Smtp,
             _ => MailCredentialScope.Unknown
         };
-        if (account.CredentialKind is MailCredentialKind.Unknown
-            or MailCredentialKind.ImapPassword
-            or MailCredentialKind.SmtpPassword
-            or MailCredentialKind.SharedMailPassword)
+        if (account.PreferredIncomingAuth == MailAuthenticationMethod.OAuth2
+            || account.PreferredOutgoingAuth == MailAuthenticationMethod.OAuth2)
+        {
+            account.CredentialKind = MailCredentialKind.OAuth2RefreshToken;
+        }
+        else if (account.MailProviderKind == MailProviderKind.Gmail
+                 && (account.PreferredIncomingAuth == MailAuthenticationMethod.Password
+                     || account.PreferredOutgoingAuth == MailAuthenticationMethod.Password))
+        {
+            account.CredentialKind = MailCredentialKind.GoogleAppPassword;
+        }
+        else
         {
             account.CredentialKind = (canReceive, canSend) switch
             {

@@ -96,7 +96,8 @@ services:
       - DeletionPolicy__DeletionAllowed=true
 
       # TimeZone Settings
-      - TimeZone__DisplayTimeZoneId=Etc/UCT
+      - TimeZone__StorageTimeZoneId=Etc/UTC
+      - TimeZone__DisplayTimeZoneId=Asia/Shanghai
 
       # Database Maintenance Settings (Optional)
       - DatabaseMaintenance__Enabled=false
@@ -179,7 +180,7 @@ networks:
 
 4. If you want to use authentication (which is strongly recommended), define a `Authentication__Username` and `Authentication__Password` which is used for the admin user.
 
-5. Adjust the `TimeZone__DisplayTimeZoneId` environment variable to match your preferred timezone (default is "Etc/UCT"). You can use any IANA timezone identifier (e.g., "Europe/Berlin", "Asia/Tokyo").
+5. Keep `TimeZone__StorageTimeZoneId=Etc/UTC` and `TimeZone__DisplayTimeZoneId=Asia/Shanghai`. This normalizes mail from every source timezone to UTC while all users see Beijing time.
 
 6. Optionally configure the `Logging__LogLevel` environment variables to control the verbosity of application logs. See the Logging Settings section below for available options.
 
@@ -317,7 +318,8 @@ The optional REST API is **disabled by default**. See the [REST API guide](API.m
 - **Immutability protection:** When `IsLocked = true`, the database compliance trigger (`prevent_locked_email_changes`) blocks ANY modification to the email row — all columns are protected, not just a fixed field list. The only exempt columns are `IsLocked` itself (so that unlocking for retention deletion and startup policy application remains possible) and `FolderName` (so that IMAP sync can update the folder when an email is moved server-side). The protection is column-agnostic (JSONB-based comparison) and automatically covers future schema additions.
 
 ### 🕐 TimeZone Settings
-- `TimeZone__DisplayTimeZoneId`: The time zone used for displaying email timestamps in the UI. Uses IANA time zone identifiers (e.g., "Europe/Berlin", "Asia/Tokyo"). Default is "Etc/UCT" for backward compatibility. When importing emails timestamps will be converted to this time zone for display purposes.
+- `TimeZone__StorageTimeZoneId`: Internal archive normalization zone. Keep the default `Etc/UTC` so messages from any source timezone represent the same instant consistently.
+- `TimeZone__DisplayTimeZoneId`: Fixed UI and scheduled-send timezone. Product policy and default are `Asia/Shanghai` (Beijing time), independent of the browser or operating-system timezone.
 
 ### 🎉 ReleaseNotes Settings (Version Update Splash Screen)
 - `ReleaseNotes__Enabled`: Enable or disable the version update splash screen (true/false). Default is `true`. When enabled, administrators will see a one-time changelog modal after an application update, showing the release notes fetched from GitHub Releases for the current version. Each administrator can dismiss the modal, and it will only reappear for a new version. Set to `false` to completely disable this feature.

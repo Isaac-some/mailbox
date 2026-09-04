@@ -87,7 +87,7 @@ public class LocalDatabaseSchemaUpgradeTests
         await LocalDatabaseSchemaUpgrade.ApplyAsync(context);
 
         await using var verify = connection.CreateCommand();
-        verify.CommandText = "SELECT MailProviderKind, CredentialKind, CredentialScope, SmtpServer, SmtpPort, SmtpUseSSL, EndpointDiscoveryStatus FROM MailAccounts WHERE Id = 1;";
+        verify.CommandText = "SELECT MailProviderKind, CredentialKind, CredentialScope, SmtpServer, SmtpPort, SmtpUseSSL, EndpointDiscoveryStatus, ImportedDomain, PreferredIncomingAuth, PreferredOutgoingAuth FROM MailAccounts WHERE Id = 1;";
         await using var reader = await verify.ExecuteReaderAsync();
         Assert.True(await reader.ReadAsync());
         Assert.Equal("Custom", reader.GetString(0));
@@ -97,5 +97,8 @@ public class LocalDatabaseSchemaUpgradeTests
         Assert.True(reader.IsDBNull(4));
         Assert.True(reader.IsDBNull(5));
         Assert.True(reader.IsDBNull(6));
+        Assert.True(reader.IsDBNull(7));
+        Assert.Equal("Unknown", reader.GetString(8));
+        Assert.Equal("Unknown", reader.GetString(9));
     }
 }

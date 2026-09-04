@@ -128,7 +128,7 @@ public class MsaTokenManagerTests
         public Task<MsaPollResult> PollDeviceCodeAsync(string? clientId, string deviceCode, int currentInterval) => throw new NotSupportedException();
         public string? GetDefaultClientId() => "client";
 
-        public Task<MsaTokenResult> RefreshAccessTokenAsync(string refreshToken, string? clientId, string? clientSecret)
+        public Task<MsaTokenResult> RefreshAccessTokenAsync(string refreshToken, string? clientId, string? clientSecret, CancellationToken cancellationToken = default)
             => Task.FromResult(new MsaTokenResult
             {
                 AccessToken = "new-access",

@@ -272,6 +272,16 @@ namespace MailArchiver.Data
                 .HasMaxLength(16);
 
             modelBuilder.Entity<MailAccount>()
+                .Property(e => e.PreferredIncomingAuth)
+                .HasConversion<string>()
+                .HasMaxLength(16);
+
+            modelBuilder.Entity<MailAccount>()
+                .Property(e => e.PreferredOutgoingAuth)
+                .HasConversion<string>()
+                .HasMaxLength(16);
+
+            modelBuilder.Entity<MailAccount>()
                 .Property(e => e.CredentialDetectionStatus)
                 .HasMaxLength(32);
 

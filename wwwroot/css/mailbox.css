@@ -520,6 +520,14 @@ body {
   padding: 1.75rem;
 }
 
+.mail-viewer__content-frame {
+  display: block;
+  width: 100%;
+  min-height: 65vh;
+  border: 0;
+  background: #fff;
+}
+
 .mail-viewer__body pre {
   margin: 0;
   color: var(--mail-ink);

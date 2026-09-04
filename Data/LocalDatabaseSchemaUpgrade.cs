@@ -29,6 +29,9 @@ public static class LocalDatabaseSchemaUpgrade
             await EnsureTextColumnAsync(connection, "MailAccounts", "CredentialScope", "Unknown", cancellationToken);
             await EnsureNullableTextColumnAsync(connection, "MailAccounts", "CredentialDetectionStatus", cancellationToken);
             await EnsureNullableTextColumnAsync(connection, "MailAccounts", "CredentialLastCheckedAt", cancellationToken);
+            await EnsureNullableTextColumnAsync(connection, "MailAccounts", "ImportedDomain", cancellationToken);
+            await EnsureTextColumnAsync(connection, "MailAccounts", "PreferredIncomingAuth", "Unknown", cancellationToken);
+            await EnsureTextColumnAsync(connection, "MailAccounts", "PreferredOutgoingAuth", "Unknown", cancellationToken);
             if (await HasColumnAsync(connection, "MailAccounts", "Provider", cancellationToken))
             {
                 await ExecuteAsync(connection, @"

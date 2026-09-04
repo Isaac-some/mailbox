@@ -2,121 +2,147 @@
 
 [← Back to Documentation Index](Index.md)
 
-## Overview
+## Standard four-field contract
 
-Mail Archiver supports importing multiple email accounts at once so that onboarding a large number of mailboxes does not require creating each account individually.
+CSV import and the upstream account interface share one fixed contract. The
+field names contain no spaces and must remain in this order:
 
-Two bulk import paths exist, depending on the mail provider:
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `email` | Yes | Mailbox address. |
+| `domain` | No | Provider/domain supplied by the platform; it may be empty. |
+| `credential` | Yes | Opaque authorization value. It may be an app password, an IMAP/SMTP password, or an OAuth2 refresh token. |
+| `client_id` | No | OAuth client ID when the upstream platform has one. It may be empty. |
 
-| Provider | Bulk Import Method | Documentation |
-|---|---|---|
-| **Microsoft 365 (tenant)** | Tenant discovery via Microsoft Graph — one app registration accesses every mailbox in the tenant | [Microsoft 365 Tenant Mailbox Import](M365TenantImport.md) |
-| **Outlook personal** | Headerless, tab-separated TXT containing email, password, Client ID and Refresh Token | This page (see below) |
-| **IMAP** | CSV bulk import — upload a CSV file with one row per mailbox | This page (see below) |
-
-## Outlook Personal TXT Bulk Import
-
-The account import page accepts the vendor format below without a header row. Columns are separated by a Tab character, not spaces or commas:
-
-```text
-email@example.com<TAB>password<TAB>client-id<TAB>refresh-token
-```
-
-The credential column is required by the source format and is encrypted at rest. Outlook rows may be mixed with Gmail, Yahoo, GMX, and custom-domain rows in the same file. The app stores the per-account Client ID and Refresh Token, uses Microsoft OAuth/XOAUTH2 for IMAP receiving, and acquires separate tokens for Microsoft Graph `Mail.Send` and SMTP OAuth sending. Graph is attempted first; authorization failures fall back to Outlook.com SMTP. Each row is validated independently and malformed rows are reported by line number.
-
-Interactive device-code authorization remains available for accounts without an importable Refresh Token. See [MSA Outlook Setup](MSA_Outlook_Setup.md).
-
----
-
-## IMAP CSV Bulk Import
-
-### What it does
-
-The CSV bulk import lets an administrator create hundreds of IMAP mail accounts in a single operation by uploading a CSV file. Each row in the file corresponds to one mailbox. Common server settings (IMAP host, port, SSL) can be specified once in the upload form and apply to every row, with optional per-row overrides.
-
-The import is **admin-only**. It is accessible from the **Mail Accounts** page via the **Import** dropdown → **CSV Bulk Import**.
-
-### CSV File Format
-
-The file must be a UTF-8 encoded CSV with a **header row** and **comma (`,`) as the delimiter**. Fields containing commas or quotes must be wrapped in double quotes (`"..."`).
-
-#### Columns
-
-| Column | Required | Description |
-|---|---|---|
-| `email` | Yes | Mailbox address. Also used as the default login username when `username` is not provided. |
-| `password` | Yes | IMAP login password. Stored as provided — leading/trailing spaces are preserved. |
-| `name` | No | Display name for the account. If omitted, defaults to `{prefix} - <{email}>`. |
-| `username` | No | Login username if it differs from the email address. |
-| `imap_server` | No | Per-row IMAP host. Overrides the common server from the upload form. |
-| `imap_port` | No | Per-row IMAP port (1–65535). Overrides the common port. |
-| `use_ssl` | No | Per-row SSL toggle (`true` or `false`). Overrides the common setting. |
-
-#### Example
+The standard CSV header is exactly:
 
 ```csv
-email,password,name,username,imap_server,imap_port,use_ssl
-alice@firma.de,secret123,Alice Müller,,,,,
-bob@firma.de,p@ssw0rd,,bob@firma.de,,,993,
-charlie@extern.de,pass3,,charlie,mail.extern.de,143,false
+email,domain,credential,client_id
 ```
 
-- Row 1 uses the common server/port/SSL from the upload form.
-- Row 2 sets a custom username but otherwise uses the common settings.
-- Row 3 overrides server, port and SSL.
+Example:
 
-A downloadable example file is available on the import page via the **Download example CSV** button.
+```csv
+email,domain,credential,client_id
+alice@gmail.com,gmail.com,xxxx xxxx xxxx xxxx,
+reader@yahoo.com,yahoo.com,upstream-authorization-value,
+sender@gmx.com,gmx.com,upstream-authorization-value,
+both@outlook.com,outlook.com,oauth-refresh-token,11111111-2222-3333-4444-555555555555
+```
 
-### Upload Form
+The importer also recognizes the corresponding short Chinese headers and the
+legacy misspelling `Cilent ID`, but every newly generated file and every new
+integration must use the canonical English names above.
 
-| Field | Purpose |
-|---|---|
-| **CSV file** | The file to upload. |
-| **IMAP server** | Common host for all rows without an `imap_server` override. |
-| **IMAP port** | Common port (default 993). |
-| **Use SSL** | Common SSL toggle (default on). |
-| **Name prefix** | Prefix for auto-generated account names. Default: `IMAP`. |
-| **Skip existing mailboxes** | When enabled, rows whose email already exists as an IMAP account are skipped (counted as "skipped", not as errors). When disabled, they are treated as failures. |
-| **Account enabled** | Whether the created accounts should be eligible for on-demand refresh. |
-| **Delete After Days / Local Retention Days** | Optional retention settings applied to every created account. See [Retention Policies](RetentionPolicies.md). |
+## Import behavior
 
-### Processing
+- Import accepts CSV only. Several CSV files may be selected at once.
+- Intake removes whitespace (including tabs, newlines, full-width and nonbreaking
+  spaces) and invisible Unicode format characters from generated authorization
+  values. Case and punctuation are preserved. Empty results, abnormal control
+  characters and values over 16,384 characters are rejected before connection.
+- The app then verifies incoming mailbox login with a 20-second timeout per row.
+  It uses the provider authentication funnel rather than guessing a token type.
+  It does not select a mail folder, fetch messages or send mail.
+- Only successful rows are stored. A rejected replacement leaves the existing
+  account unchanged; other successful rows in the batch can still be imported.
+  A timeout/network error is reported separately from invalid login.
+- A Gmail app password may be pasted as `xxxx xxxx xxxx xxxx`; spaces are removed
+  before storage and comparison, treating it as 16 characters.
+- If the same email appears more than once in one batch, the last row wins.
+- If the email already exists, all four imported fields replace the previous
+  values. If the credential, domain or client ID changed, previous route
+  selection and short-lived OAuth access-token data are cleared. Identical
+  repeated input preserves the successful route and provider-rotated tokens.
+- Import never starts mailbox synchronization. Its `IncomingVerified` result
+  proves incoming login at that time only, not outgoing permission. Opening or
+  refreshing a mailbox downloads messages later.
 
-1. The CSV file is parsed and each row is validated (email format, credential present, optional domain, port range, SSL value).
-2. Duplicate emails within the file are removed (first occurrence wins).
-3. Existing IMAP accounts with the same email address are detected; depending on the **Skip existing** toggle they are either skipped or reported as failures.
-4. All new accounts are inserted in a single database batch.
-5. An access log entry is written summarising the run.
+## Authentication funnel
 
-No IMAP or SMTP connection test is performed during import — accounts are saved immediately. Authentication and endpoint discovery are performed only after the user opens a mailbox or clicks refresh. This keeps the import fast even for large mailbox sets.
+The imported `credential` is made available to both password and OAuth routes.
+The incoming login check at import tries the provider's default order:
 
-### Result Page
+- Outlook: OAuth2 first, then password-based IMAP/SMTP.
+- Gmail: app password first, then OAuth2.
+- Yahoo and GMX: IMAP/SMTP password first, then OAuth2.
+- Custom domains: IMAP/SMTP password first, then OAuth2 where configured.
 
-After the import completes, a result page shows three tables:
+When a route succeeds, the app remembers the working incoming and outgoing
+authentication methods independently and tries those methods first next time.
+Only after all usable routes fail does the app report a connection failure.
 
-- **Created** — email and name of every account that was created.
-- **Skipped** — emails that were duplicates (in-file or already existing) when **Skip existing** is enabled.
-- **Failed** — rows that could not be processed, with the line number and the reason (missing email, missing password, invalid port, no IMAP server, etc.).
+## Pulling accounts from an upstream platform
 
-A summary banner shows the counts: *{created} created, {skipped} skipped, {failed} failed*.
+When `UpstreamMailboxSync:Enabled` is enabled, every user-triggered mailbox
+sync first performs an HTTPS `GET` to `UpstreamMailboxSync:Endpoint`. The
+endpoint must return the documented `{ data: { total, items, serverTime } }`
+envelope. The client sends `Authorization: Bearer <secret>` by default; the
+platform must validate that secret before returning any credentials. A public
+GitHub Release must never contain the secret in `appsettings.json` or another
+bundled file.
 
-### Limits
+```json
+{
+  "data": {
+    "total": 1,
+    "serverTime": "2026-09-03T08:30:00.000Z",
+    "items": [
+      {
+        "email": "both@outlook.com",
+        "domain": "outlook.com",
+        "credential": "oauth-refresh-token",
+        "client_id": "11111111-2222-3333-4444-555555555555",
+        "updatedAt": "2026-09-02T09:30:00.000Z"
+      }
+    ]
+  }
+}
+```
 
-The following limits can be configured via `appsettings.json` / environment variables (see [Setup Guide](Setup.md) → *CSV Import Settings*):
+Imported or updated accounts are enabled locally.
+Rows omitted by the upstream response are not deleted. If the upstream request
+fails, the requested mailbox sync does not continue with possibly stale account
+credentials.
 
-| Setting | Default | Description |
-|---|---|---|
-| `CsvImport__MaxRows` | 0 | No artificial mailbox-count cap. Upload size remains bounded, and database lookups are chunked to keep memory and query parameters bounded. |
-| `CsvImport__MaxFileSizeBytes` | 10000000 (10 MB) | Maximum uploaded file size. |
+If any returned row is rejected, successfully validated rows remain saved, but
+the requested mail sync stops and reports the rejected count. Missing accounts
+are not deleted. The HTTP timeout bounds fetching the platform payload; each
+subsequent mailbox login has its own 20-second limit. Start integration with a
+small batch: this version validates rows sequentially and does not automatically
+follow platform pagination.
 
-### Security Note
+In the packaged desktop app, the login screen is mandatory. Enter the platform
+username and password; the app sends them to `/api/auth/login` and keeps the
+returned session only in process memory. No platform password or token is
+written to the app bundle or local data. Restarting the app or disabling the
+platform account requires another login.
 
-IMAP passwords are stored in the database in the same way as for individually created IMAP accounts. Be aware that the CSV file contains all mailbox passwords in plaintext — delete it from the client machine after a successful import.
+Each request also includes the installation ID, device name, operating system,
+and app version in `X-Kouzi-*` headers. The platform can combine these values
+with the source IP and the person bound to the token when investigating use.
+The client does not claim GPS or physical-location accuracy.
 
----
+`serverTime` is stored in `upstream-mailbox-sync.cursor` and sent as
+`updatedSince` on the next pull. The cursor advances only when every returned
+row passes validation, so a bad row cannot be skipped permanently. Changing or
+removing the platform connection resets the cursor and makes the next pull a
+full pull.
 
-## Microsoft 365 Tenant Import
+## Result and limits
 
-For Microsoft 365 (Exchange Online) the bulk import does not require a CSV file. A single Azure AD app registration with the right Graph permissions can access every mailbox in the tenant, so Mail Archiver can discover the mailboxes automatically.
+The result page separately reports created, updated, skipped, and failed rows.
+Skipped rows are earlier duplicates superseded by a later row in the same
+batch; an existing database account is counted as updated, not skipped.
 
-See the dedicated guide: **[Microsoft 365 Tenant Mailbox Import](M365TenantImport.md)**.
+`CsvImport:MaxFileSizeBytes` limits each uploaded file (10 MB by default).
+`CsvImport:MaxRows` can impose a batch row cap; `0` means no artificial cap.
+
+CSV files contain credentials in plaintext. Store and transfer them securely,
+then delete temporary copies after a successful import.
+
+## Microsoft 365 tenant import
+
+Microsoft 365 tenant discovery remains a separate flow because one Azure app
+registration can discover many tenant mailboxes. See
+[Microsoft 365 Tenant Mailbox Import](M365TenantImport.md).

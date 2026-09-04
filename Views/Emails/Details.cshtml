@@ -125,7 +125,9 @@
                     <strong class="text-muted small">@Localizer["Date"]:</strong>
                 </div>
                 <div class="col-12 col-md-10">
-                    @Model.Email.SentDate.ToString(System.Globalization.CultureInfo.CurrentUICulture.DateTimeFormat.ShortDatePattern + " " + System.Globalization.CultureInfo.CurrentUICulture.DateTimeFormat.ShortTimePattern)
+                    <time data-utc-time="@Model.Email.SentDate.ToString("yyyy-MM-ddTHH:mm:ss")">
+                        @Model.Email.SentDate.ToString("yyyy-MM-dd HH:mm")
+                    </time>
                 </div>
             </div>
 
@@ -302,7 +304,7 @@
     window.emailReplyData = {
         sender: @Json.Serialize(Model.Email.From),
         subject: @Json.Serialize(Model.Email.Subject),
-        sentDate: @Json.Serialize(Model.Email.SentDate.ToString("yyyy-MM-dd HH:mm")),
+        sentDateUtc: @Json.Serialize(Model.Email.SentDate.ToString("yyyy-MM-ddTHH:mm:ss")),
         body: @Json.Serialize(Model.Email.Body)
     };
 
@@ -367,7 +369,7 @@
         // Get data from the secure JSON object rendered by the server
         const sender = window.emailReplyData.sender;
         const subject = window.emailReplyData.subject;
-        const sentDate = window.emailReplyData.sentDate;
+        const sentDate = convertUTCToLocal(window.emailReplyData.sentDateUtc);
         const originalBody = window.emailReplyData.body || "[Original content not available]";
         
         // Format the body with ">" prefix for each line

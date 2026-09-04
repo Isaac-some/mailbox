@@ -23,7 +23,7 @@
         <div>
             <p class="account-page__eyebrow">KOUZI MAIL</p>
             <h1>邮箱账号</h1>
-            <p class="account-page__summary">搜索账号，直接打开最近 1 个月的收件箱。</p>
+            <p class="account-page__summary">邮箱账号默认分页显示，也可以搜索邮箱地址或名称。</p>
         </div>
         <div class="account-page__actions">
             @if (canManage)
@@ -68,7 +68,10 @@
                 </a>
             }
         </form>
-        <span class="account-toolbar__count">共 @total.ToString("N0") 个账号</span>
+        @if (!string.IsNullOrWhiteSpace(search))
+        {
+            <span class="account-toolbar__count">匹配 @total.ToString("N0") 个账号</span>
+        }
     </section>
 
     <section class="account-table-wrap">
@@ -187,8 +190,8 @@
                 <i class="bi bi-inbox" aria-hidden="true"></i>
                 @if (string.IsNullOrWhiteSpace(search))
                 {
-                    <strong>还没有邮箱账号</strong>
-                    <span>添加账号后，就可以从这里直接查看收件箱。</span>
+                    <strong>暂无邮箱账号</strong>
+                    <span>导入文件或连接平台接口后，账号会显示在这里。</span>
                 }
                 else
                 {

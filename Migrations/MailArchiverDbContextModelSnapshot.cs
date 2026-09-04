@@ -75,6 +75,9 @@ namespace MailArchiver.Migrations
                     b.Property<int?>("FullSyncIntervalHours")
                         .HasColumnType("integer");
 
+                    b.Property<string>("ImportedDomain")
+                        .HasColumnType("text");
+
                     b.Property<string>("GroupName")
                         .IsRequired()
                         .HasDefaultValue("")
@@ -136,6 +139,16 @@ namespace MailArchiver.Migrations
                     b.Property<string>("Provider")
                         .HasMaxLength(10)
                         .HasColumnType("text");
+
+                    b.Property<string>("PreferredIncomingAuth")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("PreferredOutgoingAuth")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
 
                     b.Property<int?>("SyncIntervalMinutes")
                         .HasColumnType("integer");

@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http;
 using System.Text;
 using MailArchiver.Models;
+using MailArchiver.Services;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace MailArchiver.Tests.Services;
