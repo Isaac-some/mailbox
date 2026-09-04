@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "accounts": [
+    {
+      "username": "mail-reader",
+      "isActive": true
+    },
+    {
+      "username": "mail-admin",
+      "isActive": true
+    }
+  ]
+}
