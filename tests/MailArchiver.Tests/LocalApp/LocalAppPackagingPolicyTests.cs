@@ -423,6 +423,22 @@ public class LocalAppPackagingPolicyTests
     }
 
     [Fact]
+    public void NativeLaunchers_migrate_a_single_existing_local_data_directory_without_legacy_brand_dependencies()
+    {
+        var mac = ReadBundledFile("MailAssistant.swift");
+        var windows = ReadBundledFile("WindowsProgram.cs");
+
+        Assert.Contains("migrateExistingDataIfNeeded()", mac, StringComparison.Ordinal);
+        Assert.Contains("mail-archive.sqlite", mac, StringComparison.Ordinal);
+        Assert.Contains("credential-encryption.key", mac, StringComparison.Ordinal);
+        Assert.Contains("MigrateExistingDataIfNeeded();", windows, StringComparison.Ordinal);
+        Assert.Contains("Directory.Move(candidates[0], _dataDirectory);", windows, StringComparison.Ordinal);
+        var retiredBrand = string.Concat("Ko", "uzi");
+        Assert.DoesNotContain(retiredBrand, mac, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(retiredBrand, windows, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void LocalMaintenance_exposes_a_single_action_to_clear_all_machine_data()
     {
         var source = ReadBundledFile("LocalMaintenanceIndex.cshtml");

@@ -38,6 +38,7 @@
     <None Include="..\..\local-app\build-dmg.sh" Link="build-dmg.sh" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\script\build_and_run.sh" Link="build_and_run.sh" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\windows-app\MailAssistant.Windows.csproj" Link="MailAssistant.Windows.csproj" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\windows-app\Program.cs" Link="WindowsProgram.cs" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Views\MailAccounts\Delete.cshtml" Link="Delete.cshtml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Views\MailAccounts\Index.cshtml" Link="MailAccountsIndex.cshtml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Views\MailAccounts\Create.cshtml" Link="MailAccountsCreate.cshtml" CopyToOutputDirectory="PreserveNewest" />

@@ -116,6 +116,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     private func startServer() {
         do {
+            try migrateExistingDataIfNeeded()
             if FileManager.default.fileExists(atPath: resetMarker.path) {
                 try resetLocalData()
             }
@@ -162,6 +163,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         } catch {
             showFatal("无法启动本机服务：\(error.localizedDescription)")
         }
+    }
+
+    private func migrateExistingDataIfNeeded() throws {
+        let fileManager = FileManager.default
+        guard !fileManager.fileExists(atPath: dataDirectory.path) else { return }
+
+        let base = dataDirectory.deletingLastPathComponent()
+        let candidates = try fileManager.contentsOfDirectory(
+            at: base,
+            includingPropertiesForKeys: [.isDirectoryKey, .contentModificationDateKey],
+            options: [.skipsHiddenFiles])
+            .filter { candidate in
+                guard candidate.lastPathComponent != dataDirectory.lastPathComponent else { return false }
+                var isDirectory: ObjCBool = false
+                guard fileManager.fileExists(atPath: candidate.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+                    return false
+                }
+                return fileManager.fileExists(atPath: candidate.appendingPathComponent("mail-archive.sqlite").path)
+                    && fileManager.fileExists(atPath: candidate.appendingPathComponent("credential-encryption.key").path)
+            }
+
+        guard candidates.count == 1, let existingDataDirectory = candidates.first else { return }
+        try fileManager.moveItem(at: existingDataDirectory, to: dataDirectory)
     }
 
     private func serverStopped() {

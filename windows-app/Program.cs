@@ -115,6 +115,7 @@ internal sealed class MainForm : Form
     {
         try
         {
+            MigrateExistingDataIfNeeded();
             Directory.CreateDirectory(_dataDirectory);
             Directory.CreateDirectory(Path.Combine(_dataDirectory, "keys"));
 
@@ -125,6 +126,27 @@ internal sealed class MainForm : Form
         catch (Exception exception)
         {
             ShowFatal($"无法启动本机服务：{exception.Message}");
+        }
+    }
+
+    private void MigrateExistingDataIfNeeded()
+    {
+        if (Directory.Exists(_dataDirectory))
+        {
+            return;
+        }
+
+        var baseDirectory = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var candidates = Directory.EnumerateDirectories(baseDirectory)
+            .Where(candidate =>
+                !string.Equals(candidate, _dataDirectory, StringComparison.OrdinalIgnoreCase)
+                && File.Exists(Path.Combine(candidate, "mail-archive.sqlite"))
+                && File.Exists(Path.Combine(candidate, "credential-encryption.key")))
+            .ToArray();
+
+        if (candidates.Length == 1)
+        {
+            Directory.Move(candidates[0], _dataDirectory);
         }
     }
 
