@@ -33,7 +33,7 @@ namespace MailArchiver.Data
             // The packaged macOS application runs on SQLite, which has no schemas.
             // Docker/PostgreSQL deployments keep their existing schema unchanged.
             var isLocalApp = string.Equals(
-                Environment.GetEnvironmentVariable("KOUZI_LOCAL_APP"), "1", StringComparison.Ordinal);
+                Environment.GetEnvironmentVariable("MAIL_ASSISTANT_LOCAL_APP"), "1", StringComparison.Ordinal);
             if (!isLocalApp)
             {
                 modelBuilder.HasDefaultSchema("mail_archiver");

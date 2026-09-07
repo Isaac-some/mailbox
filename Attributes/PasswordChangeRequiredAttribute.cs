@@ -18,7 +18,7 @@ namespace MailArchiver.Attributes
             // The native shell gates the local archive with its activation Key and
             // supplies an ephemeral server password on every launch. Redirecting to
             // the legacy password-change flow would permanently trap first launch.
-            if (string.Equals(Environment.GetEnvironmentVariable("KOUZI_LOCAL_APP"), "1", StringComparison.Ordinal))
+            if (string.Equals(Environment.GetEnvironmentVariable("MAIL_ASSISTANT_LOCAL_APP"), "1", StringComparison.Ordinal))
             {
                 base.OnActionExecuting(context);
                 return;

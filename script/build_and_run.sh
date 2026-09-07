@@ -4,7 +4,7 @@ set -euo pipefail
 MODE="${1:-run}"
 APP_NAME="邮箱助手"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-RUN_ROOT="${KOUZI_RUN_ROOT:-/private/tmp/kouzi-mail-assistant-run}"
+RUN_ROOT="${MAIL_ASSISTANT_RUN_ROOT:-/private/tmp/mail-assistant-run}"
 PUBLISH_DIR="$RUN_ROOT/server"
 APP_OUTPUT_DIR="$RUN_ROOT/app"
 APP_BUNDLE="$APP_OUTPUT_DIR/$APP_NAME.app"
@@ -14,8 +14,8 @@ resolve_dotnet() {
     printf '%s\n' "$DOTNET_BIN"
   elif command -v dotnet >/dev/null 2>&1; then
     command -v dotnet
-  elif [[ -x /private/tmp/kouzi-dotnet-sdk/dotnet ]]; then
-    printf '%s\n' /private/tmp/kouzi-dotnet-sdk/dotnet
+  elif [[ -x /private/tmp/mail-assistant-dotnet-sdk/dotnet ]]; then
+    printf '%s\n' /private/tmp/mail-assistant-dotnet-sdk/dotnet
   else
     printf '%s\n' "未找到 .NET 10 SDK。请先安装 .NET 10，或设置 DOTNET_BIN。" >&2
     exit 3
@@ -77,7 +77,7 @@ rm -rf "$PUBLISH_DIR" "$APP_OUTPUT_DIR"
 DOTNET_BIN="$DOTNET_COMMAND" \
 DOTNET_RUNTIME_ROOT="$DOTNET_RUNTIME_ROOT" \
 SERVER_PUBLISH_DIR="$PUBLISH_DIR" \
-KOUZI_APP_OUTPUT_DIR="$APP_OUTPUT_DIR" \
+MAIL_ASSISTANT_APP_OUTPUT_DIR="$APP_OUTPUT_DIR" \
   "$ROOT_DIR/local-app/build-dmg.sh" --app-only >/dev/null
 
 open_app() {
@@ -97,7 +97,7 @@ case "$MODE" in
     ;;
   --telemetry|telemetry)
     open_app
-    /usr/bin/log stream --info --style compact --predicate 'subsystem == "com.kouzi.mailassistant"'
+    /usr/bin/log stream --info --style compact --predicate 'subsystem == "com.mailbox.assistant"'
     ;;
   --verify|verify)
     open_app

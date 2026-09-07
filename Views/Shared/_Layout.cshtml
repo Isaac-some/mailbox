@@ -45,7 +45,7 @@
                 <div class="navbar-collapse collapse">
                     <ul class="navbar-nav me-auto"></ul>
                     <div class="app-toolbar-actions d-flex align-items-center">
-                        @if (string.Equals(Environment.GetEnvironmentVariable("KOUZI_LOCAL_APP"), "1", StringComparison.Ordinal))
+                        @if (string.Equals(Environment.GetEnvironmentVariable("MAIL_ASSISTANT_LOCAL_APP"), "1", StringComparison.Ordinal))
                         {
                             <a class="btn btn-toolbar-icon btn-sm me-2" asp-controller="LocalMaintenance" asp-action="Index" title="本机数据" aria-label="本机数据">
                                 <i class="bi bi-gear" aria-hidden="true"></i>

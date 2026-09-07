@@ -1,4 +1,4 @@
-name: kouzi-mail-archive
+name: mail-assistant-archive
 
 services:
   mailarchive-app:

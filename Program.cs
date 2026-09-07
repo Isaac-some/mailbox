@@ -65,7 +65,7 @@ async static Task EnsureMigrationsHistoryTableExists(MailArchiverDbContext conte
 
 var builder = WebApplication.CreateBuilder(args);
 var isLocalApp = builder.Configuration.GetValue<bool>("LocalApp:Enabled") ||
-                 string.Equals(Environment.GetEnvironmentVariable("KOUZI_LOCAL_APP"), "1", StringComparison.Ordinal);
+                 string.Equals(Environment.GetEnvironmentVariable("MAIL_ASSISTANT_LOCAL_APP"), "1", StringComparison.Ordinal);
 
 if (isLocalApp)
 {

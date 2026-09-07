@@ -104,7 +104,7 @@ namespace MailArchiver.Controllers
 
         private bool IsLocalApp()
             => HttpContext.RequestServices.GetRequiredService<IConfiguration>().GetValue<bool>("LocalApp:Enabled") ||
-               string.Equals(Environment.GetEnvironmentVariable("KOUZI_LOCAL_APP"), "1", StringComparison.Ordinal);
+               string.Equals(Environment.GetEnvironmentVariable("MAIL_ASSISTANT_LOCAL_APP"), "1", StringComparison.Ordinal);
 
         private async Task<bool> HasAccessToAccountAsync(int accountId)
         {
@@ -309,7 +309,7 @@ namespace MailArchiver.Controllers
         {
             IMailProviderModule? mailProviderModule = null;
             var isLocalApp = string.Equals(
-                Environment.GetEnvironmentVariable("KOUZI_LOCAL_APP"),
+                Environment.GetEnvironmentVariable("MAIL_ASSISTANT_LOCAL_APP"),
                 "1",
                 StringComparison.Ordinal);
 

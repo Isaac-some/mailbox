@@ -23,7 +23,7 @@ public sealed class NetworkDiagnosticsService(
             using var request = new HttpRequestMessage(HttpMethod.Head, target);
             using var client = clients.CreateClient("NetworkDiagnostics");
             using var response = await client.SendAsync(request, cancellationToken);
-            var fallback = response.Headers.Contains("X-Kouzi-Network-Fallback");
+            var fallback = response.Headers.Contains("X-MailAssistant-Network-Fallback");
             return new NetworkDiagnosticResult(id, target.Host, target.Port, route.Type,
                 NetworkDiagnosticStage.Https, true, (int)response.StatusCode, fallback,
                 DateTimeOffset.UtcNow, fallback ? "代理不可用，已临时使用本机直连。" : "HTTPS 连通正常。");

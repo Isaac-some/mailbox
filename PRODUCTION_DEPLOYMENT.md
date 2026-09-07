@@ -14,7 +14,7 @@
 在服务器克隆仓库后进入项目目录：
 
 ```sh
-cd /opt/kouzi/mail-archiver-main
+cd /opt/mail-assistant/mail-archiver-main
 cp .env.production.example .env.production
 mkdir -p secrets
 openssl rand -base64 32 > secrets/credential_encryption_key
@@ -24,7 +24,7 @@ chmod 600 .env.production secrets/credential_encryption_key
 编辑 `.env.production`，替换数据库密码和管理员密码，然后启动：
 
 ```sh
-cd /opt/kouzi/mail-archiver-main
+cd /opt/mail-assistant/mail-archiver-main
 docker compose --env-file .env.production -f docker-compose.production.yml up -d --build
 ```
 
@@ -34,7 +34,7 @@ docker compose --env-file .env.production -f docker-compose.production.yml up -d
 
 ## 数据与备份
 
-邮件正文和附件保存在 Docker 卷 `kouzi-mail-assistant_postgres_data`，登录会话密钥保存在 `kouzi-mail-assistant_data_protection_keys`。邮箱密码由 `secrets/credential_encryption_key` 加密。
+邮件正文和附件保存在 Docker 卷 `mail-assistant_postgres_data`，登录会话密钥保存在 `mail-assistant_data_protection_keys`。邮箱密码由 `secrets/credential_encryption_key` 加密。
 
 备份必须同时包含：
 

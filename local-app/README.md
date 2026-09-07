@@ -3,7 +3,7 @@
 仅支持 Apple Silicon。构建命令：
 
 ```sh
-cd "/Users/zhaoxiaohandexinwanju/Documents/蔻姿邮箱助手/mail-archiver-main"
+cd "/Users/zhaoxiaohandexinwanju/Documents/邮箱助手/mail-archiver-main"
 dotnet build --configuration Release
 ./local-app/build-dmg.sh
 ```
@@ -18,8 +18,8 @@ DMG 输出到 `local-app/build/邮箱助手-AppleSilicon-v<版本号>.dmg`。打
 只构建本机测试 App、不生成 DMG：
 
 ```sh
-cd "/Users/zhaoxiaohandexinwanju/Documents/蔻姿邮箱助手/mail-archiver-main"
+cd "/Users/zhaoxiaohandexinwanju/Documents/邮箱助手/mail-archiver-main"
 ./local-app/build-dmg.sh --app-only
 ```
 
-测试 App 默认输出到 `/private/tmp/kouzi-mail-assistant-test/邮箱助手.app`，避免云同步目录附加 Finder 属性后破坏严格签名校验。需要改目录时可设置 `KOUZI_APP_OUTPUT_DIR`。脚本会执行完整的 ad-hoc 签名和校验；该签名仅保证 App 结构与本机加载完整性，不替代 Developer ID 签名和 Apple 公证。
+测试 App 默认输出到 `/private/tmp/mail-assistant-test/邮箱助手.app`，避免云同步目录附加 Finder 属性后破坏严格签名校验。需要改目录时可设置 `MAIL_ASSISTANT_APP_OUTPUT_DIR`。脚本会执行完整的 ad-hoc 签名和校验；该签名仅保证 App 结构与本机加载完整性，不替代 Developer ID 签名和 Apple 公证。

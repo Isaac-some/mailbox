@@ -7,10 +7,10 @@ public static class LocalAppStoragePathPolicy
         return ResolveWritableRoot(
             contentRootPath,
             string.Equals(
-                Environment.GetEnvironmentVariable("KOUZI_LOCAL_APP"),
+                Environment.GetEnvironmentVariable("MAIL_ASSISTANT_LOCAL_APP"),
                 "1",
                 StringComparison.Ordinal),
-            Environment.GetEnvironmentVariable("KOUZI_DATA_DIRECTORY"));
+            Environment.GetEnvironmentVariable("MAIL_ASSISTANT_DATA_DIRECTORY"));
     }
 
     public static string ResolveWritableRoot(
@@ -26,7 +26,7 @@ public static class LocalAppStoragePathPolicy
         if (string.IsNullOrWhiteSpace(localDataDirectory))
         {
             throw new InvalidOperationException(
-                "KOUZI_DATA_DIRECTORY must be set when KOUZI_LOCAL_APP=1.");
+                "MAIL_ASSISTANT_DATA_DIRECTORY must be set when MAIL_ASSISTANT_LOCAL_APP=1.");
         }
 
         return localDataDirectory;

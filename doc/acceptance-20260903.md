@@ -43,5 +43,5 @@
 ```sh
 cd /Users/isaac/Downloads/邮箱/mailbox
 node tests/ui/mailbox-reader.mjs
-/private/tmp/kouzi-dotnet-sdk/dotnet test tests/MailArchiver.Tests/MailArchiver.Tests.csproj --configuration Release --no-build --no-restore --filter 'FullyQualifiedName!~DeletionPolicyApplicationServiceTests&FullyQualifiedName!~SyncJobServiceTests&FullyQualifiedName!~BandwidthServiceTests&FullyQualifiedName!~EmailCoreServiceTests&FullyQualifiedName!~ApiKeyServiceTests&FullyQualifiedName!~AccountStorageServiceTests&FullyQualifiedName!~AccessLogServiceTests&FullyQualifiedName!~ProviderEmailServiceFactoryTests&FullyQualifiedName!~UserServiceTests'
+/private/tmp/mail-assistant-dotnet-sdk/dotnet test tests/MailArchiver.Tests/MailArchiver.Tests.csproj --configuration Release --no-build --no-restore --filter 'FullyQualifiedName!~DeletionPolicyApplicationServiceTests&FullyQualifiedName!~SyncJobServiceTests&FullyQualifiedName!~BandwidthServiceTests&FullyQualifiedName!~EmailCoreServiceTests&FullyQualifiedName!~ApiKeyServiceTests&FullyQualifiedName!~AccountStorageServiceTests&FullyQualifiedName!~AccessLogServiceTests&FullyQualifiedName!~ProviderEmailServiceFactoryTests&FullyQualifiedName!~UserServiceTests'
 ```

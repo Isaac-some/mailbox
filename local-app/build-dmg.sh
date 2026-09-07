@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-BUILD_DIR="${KOUZI_BUILD_DIR:-$SCRIPT_DIR/build}"
+BUILD_DIR="${MAIL_ASSISTANT_BUILD_DIR:-$SCRIPT_DIR/build}"
 APP_NAME="邮箱助手"
 APP_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$SCRIPT_DIR/Info.plist")"
 DMG_PATH="$BUILD_DIR/$APP_NAME-AppleSilicon-v$APP_VERSION.dmg"
@@ -46,10 +46,10 @@ for runtime_item in dotnet host shared; do
 done
 
 TEMP_ROOT="${TMPDIR:-/private/tmp/}"
-WORK_DIR="$(mktemp -d "${TEMP_ROOT%/}/kouzi-mail-assistant.XXXXXX")"
+WORK_DIR="$(mktemp -d "${TEMP_ROOT%/}/mail-assistant.XXXXXX")"
 APP_BUILD_PATH="$WORK_DIR/$APP_NAME.app"
 if (( APP_ONLY )); then
-  APP_OUTPUT_DIR="${KOUZI_APP_OUTPUT_DIR:-/private/tmp/kouzi-mail-assistant-test}"
+  APP_OUTPUT_DIR="${MAIL_ASSISTANT_APP_OUTPUT_DIR:-/private/tmp/mail-assistant-test}"
 else
   APP_OUTPUT_DIR="$BUILD_DIR"
 fi
@@ -157,7 +157,7 @@ xcrun swiftc -O \
   -framework Cocoa \
   -framework Security \
   -framework WebKit \
-  "$SCRIPT_DIR/KouziMailAssistant.swift" \
+  "$SCRIPT_DIR/MailAssistant.swift" \
   -o "$APP_BUILD_PATH/Contents/MacOS/$APP_NAME"
 
 cp "$SCRIPT_DIR/Info.plist" "$APP_BUILD_PATH/Contents/Info.plist"

@@ -3,9 +3,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-OUTPUT_DIR="${KOUZI_WINDOWS_OUTPUT_DIR:-$SCRIPT_DIR/build/邮箱助手-Windows-x64}"
+OUTPUT_DIR="${MAIL_ASSISTANT_WINDOWS_OUTPUT_DIR:-$SCRIPT_DIR/build/邮箱助手-Windows-x64}"
 DOTNET_COMMAND="${DOTNET_BIN:-dotnet}"
-WORK_DIR="$(mktemp -d "${TMPDIR:-/private/tmp}/kouzi-windows-build.XXXXXX")"
+WORK_DIR="$(mktemp -d "${TMPDIR:-/private/tmp}/mail-assistant-windows-build.XXXXXX")"
 STAGING_DIR="$WORK_DIR/邮箱助手-Windows-x64"
 SERVER_DIR="$STAGING_DIR/server"
 
@@ -34,7 +34,7 @@ if [[ -d "$PROJECT_DIR/wwwroot" ]]; then
   ditto "$PROJECT_DIR/wwwroot" "$SERVER_DIR/wwwroot"
 fi
 
-"$DOTNET_COMMAND" publish "$SCRIPT_DIR/KouziMailAssistant.Windows.csproj" \
+"$DOTNET_COMMAND" publish "$SCRIPT_DIR/MailAssistant.Windows.csproj" \
   --configuration Release \
   --runtime win-x64 \
   --self-contained true \
@@ -48,7 +48,7 @@ fi
   -p:PublishTrimmed=false
 
 for required_file in \
-  "$STAGING_DIR/KouziMailAssistant.exe" \
+  "$STAGING_DIR/MailAssistant.exe" \
   "$SERVER_DIR/MailArchiver.exe" \
   "$SERVER_DIR/appsettings.Local.json"; do
   if [[ ! -f "$required_file" ]]; then
@@ -57,7 +57,7 @@ for required_file in \
   fi
 done
 
-mv "$STAGING_DIR/KouziMailAssistant.exe" "$STAGING_DIR/邮箱助手.exe"
+mv "$STAGING_DIR/MailAssistant.exe" "$STAGING_DIR/邮箱助手.exe"
 cp "$SCRIPT_DIR/README.md" "$STAGING_DIR/README.md"
 
 rm -rf "$OUTPUT_DIR"

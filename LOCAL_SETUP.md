@@ -3,7 +3,7 @@
 进入目录：
 
 ```sh
-cd /path/to/Kouzi/mail-archiver-main
+cd /path/to/MailAssistant/mail-archiver-main
 ```
 
 1. 安装并启动 Docker Desktop。

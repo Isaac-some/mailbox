@@ -99,7 +99,7 @@ public class LocalAppPackagingPolicyTests
     [Fact]
     public void WindowsRelease_matches_the_macOS_feature_version()
     {
-        var source = ReadBundledFile("KouziMailAssistant.Windows.csproj");
+        var source = ReadBundledFile("MailAssistant.Windows.csproj");
 
         Assert.Contains("<Version>2.1.1</Version>", source, StringComparison.Ordinal);
         Assert.Contains("<FileVersion>2.1.1.0</FileVersion>", source, StringComparison.Ordinal);
@@ -304,7 +304,7 @@ public class LocalAppPackagingPolicyTests
     [Fact]
     public void Mac_launcher_does_not_read_private_proxy_configuration()
     {
-        var launcher = ReadBundledFile("KouziMailAssistant.swift");
+        var launcher = ReadBundledFile("MailAssistant.swift");
 
         Assert.DoesNotContain("Application Support/gw/vortex.json", launcher, StringComparison.Ordinal);
         Assert.DoesNotContain("proxy_port", launcher, StringComparison.Ordinal);
@@ -356,7 +356,7 @@ public class LocalAppPackagingPolicyTests
     [Fact]
     public void NativeWrapper_ImplementsFileSelectionForWebUploads()
     {
-        var source = ReadBundledFile("KouziMailAssistant.swift");
+        var source = ReadBundledFile("MailAssistant.swift");
 
         Assert.Contains("WKUIDelegate", source, StringComparison.Ordinal);
         Assert.Contains("webView.uiDelegate = self", source, StringComparison.Ordinal);
@@ -366,7 +366,7 @@ public class LocalAppPackagingPolicyTests
     [Fact]
     public void NativeWrapper_downloads_attachment_responses_instead_of_rendering_them()
     {
-        var source = ReadBundledFile("KouziMailAssistant.swift");
+        var source = ReadBundledFile("MailAssistant.swift");
 
         Assert.Contains("WKDownloadDelegate", source, StringComparison.Ordinal);
         Assert.Contains("decidePolicyFor navigationResponse", source, StringComparison.Ordinal);
@@ -378,7 +378,7 @@ public class LocalAppPackagingPolicyTests
     [Fact]
     public void NativeWrapper_implements_web_confirmation_dialogs()
     {
-        var source = ReadBundledFile("KouziMailAssistant.swift");
+        var source = ReadBundledFile("MailAssistant.swift");
 
         Assert.Contains("runJavaScriptConfirmPanelWithMessage message", source, StringComparison.Ordinal);
         Assert.Contains("completionHandler(response == .alertFirstButtonReturn)", source, StringComparison.Ordinal);
@@ -387,7 +387,7 @@ public class LocalAppPackagingPolicyTests
     [Fact]
     public void NativeWrapper_routes_command_c_and_command_a_to_the_current_web_selection()
     {
-        var source = ReadBundledFile("KouziMailAssistant.swift");
+        var source = ReadBundledFile("MailAssistant.swift");
 
         Assert.Contains("configureMainMenu()", source, StringComparison.Ordinal);
         Assert.Contains("#selector(NSText.copy(_:))", source, StringComparison.Ordinal);
@@ -397,7 +397,7 @@ public class LocalAppPackagingPolicyTests
     [Fact]
     public void NativeWrapper_routes_command_v_to_the_focused_web_input()
     {
-        var source = ReadBundledFile("KouziMailAssistant.swift");
+        var source = ReadBundledFile("MailAssistant.swift");
 
         Assert.Contains("#selector(NSText.paste(_:))", source, StringComparison.Ordinal);
     }
@@ -414,7 +414,7 @@ public class LocalAppPackagingPolicyTests
     [Fact]
     public void LocalFactoryReset_clears_database_credentials_and_native_webview_data()
     {
-        var source = ReadBundledFile("KouziMailAssistant.swift");
+        var source = ReadBundledFile("MailAssistant.swift");
 
         Assert.Contains("webKitDataDirectory", source, StringComparison.Ordinal);
         Assert.Contains("httpStorageDirectory", source, StringComparison.Ordinal);

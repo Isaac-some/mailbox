@@ -4,7 +4,7 @@ using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 
-namespace KouziMailAssistant.Windows;
+namespace MailAssistant.Windows;
 
 internal static class Program
 {
@@ -19,7 +19,7 @@ internal static class Program
             return;
         }
 
-        using var instanceLock = new Mutex(true, "Local\\KouziMailAssistant", out var isFirstInstance);
+        using var instanceLock = new Mutex(true, "Local\\MailAssistant", out var isFirstInstance);
         if (!isFirstInstance)
         {
             MessageBox.Show("邮箱助手已经在运行。", "邮箱助手", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -89,7 +89,7 @@ internal sealed class MainForm : Form
 
     private readonly string _dataDirectory = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "KouziMailAssistant");
+        "MailAssistant");
     private readonly string _serverDirectory = Path.Combine(AppContext.BaseDirectory, "server");
     private Process? _server;
     private bool _isClosing;
@@ -161,9 +161,9 @@ internal sealed class MainForm : Form
         startInfo.Environment["ASPNETCORE_ENVIRONMENT"] = "Local";
         startInfo.Environment["ASPNETCORE_CONTENTROOT"] = _serverDirectory;
         startInfo.Environment["ASPNETCORE_URLS"] = $"http://127.0.0.1:{LocalPort}";
-        startInfo.Environment["KOUZI_LOCAL_APP"] = "1";
-        startInfo.Environment["KOUZI_DATA_DIRECTORY"] = _dataDirectory;
-        startInfo.Environment["KOUZI_FACTORY_RESET_MARKER"] = ResetMarkerPath;
+        startInfo.Environment["MAIL_ASSISTANT_LOCAL_APP"] = "1";
+        startInfo.Environment["MAIL_ASSISTANT_DATA_DIRECTORY"] = _dataDirectory;
+        startInfo.Environment["MAIL_ASSISTANT_FACTORY_RESET_MARKER"] = ResetMarkerPath;
         startInfo.Environment["ConnectionStrings__DefaultConnection"] = $"Data Source={Path.Combine(_dataDirectory, "mail-archive.sqlite")}";
         startInfo.Environment["DataProtection__KeyPath"] = Path.Combine(_dataDirectory, "keys");
         startInfo.Environment["CredentialEncryption__KeyFilePath"] = credentialKeyPath;

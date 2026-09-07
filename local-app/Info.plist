@@ -5,7 +5,7 @@
     <key>CFBundleDevelopmentRegion</key><string>zh_CN</string>
     <key>CFBundleDisplayName</key><string>邮箱助手</string>
     <key>CFBundleExecutable</key><string>邮箱助手</string>
-    <key>CFBundleIdentifier</key><string>com.kouzi.mailassistant</string>
+    <key>CFBundleIdentifier</key><string>com.mailbox.assistant</string>
     <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
     <key>CFBundleName</key><string>邮箱助手</string>
     <key>CFBundlePackageType</key><string>APPL</string>
@@ -14,7 +14,7 @@
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>LSMinimumSystemVersion</key><string>15.0</string>
     <key>NSHighResolutionCapable</key><true/>
-    <key>NSHumanReadableCopyright</key><string>Copyright 2026 蔻姿</string>
+    <key>NSHumanReadableCopyright</key><string>Copyright 2026 邮箱助手</string>
     <key>NSPrincipalClass</key><string>NSApplication</string>
 </dict>
 </plist>

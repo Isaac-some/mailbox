@@ -21,7 +21,7 @@ public sealed class NetworkHttpClientFactory(
         {
             client.Timeout = TimeSpan.FromSeconds(3);
             client.MaxResponseContentBufferSize = 64 * 1024;
-            client.DefaultRequestHeaders.UserAgent.ParseAdd("KouziMailAssistant/2.1 autoconfig");
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("MailAssistant/2.1 autoconfig");
         }
         else
         {
@@ -46,7 +46,7 @@ public sealed class NetworkHttpClientFactory(
             {
                 using var retry = await CloneAsync(request, cancellationToken);
                 var response = await SendOnceAsync(retry, proxy: null, cancellationToken);
-                response.Headers.TryAddWithoutValidation("X-Kouzi-Network-Fallback", "direct");
+                response.Headers.TryAddWithoutValidation("X-MailAssistant-Network-Fallback", "direct");
                 logger?.LogWarning("Network proxy unavailable for {Host}:{Port}; used device direct connection once", destination.Host, destination.Port);
                 return response;
             }

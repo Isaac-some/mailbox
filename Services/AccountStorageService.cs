@@ -273,7 +273,7 @@ namespace MailArchiver.Services
         }
 
         private static bool IsLocalApp() => string.Equals(
-            Environment.GetEnvironmentVariable("KOUZI_LOCAL_APP"), "1", StringComparison.Ordinal);
+            Environment.GetEnvironmentVariable("MAIL_ASSISTANT_LOCAL_APP"), "1", StringComparison.Ordinal);
 
         private static long ByteLength(string? value) => value == null ? 0 : Encoding.UTF8.GetByteCount(value);
     }

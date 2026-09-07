@@ -13,7 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     private var dataDirectory: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return base.appendingPathComponent("KouziMailAssistant", isDirectory: true)
+        return base.appendingPathComponent("MailAssistant", isDirectory: true)
     }
 
     private var resetMarker: URL {
@@ -23,18 +23,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     private var webKitDataDirectory: URL {
         let base = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
         return base.appendingPathComponent("WebKit", isDirectory: true)
-            .appendingPathComponent(Bundle.main.bundleIdentifier ?? "com.kouzi.mailassistant", isDirectory: true)
+            .appendingPathComponent(Bundle.main.bundleIdentifier ?? "com.mailbox.assistant", isDirectory: true)
     }
 
     private var httpStorageDirectory: URL {
         let base = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
         return base.appendingPathComponent("HTTPStorages", isDirectory: true)
-            .appendingPathComponent(Bundle.main.bundleIdentifier ?? "com.kouzi.mailassistant", isDirectory: true)
+            .appendingPathComponent(Bundle.main.bundleIdentifier ?? "com.mailbox.assistant", isDirectory: true)
     }
 
     private var cacheDirectory: URL {
         let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        return base.appendingPathComponent(Bundle.main.bundleIdentifier ?? "com.kouzi.mailassistant", isDirectory: true)
+        return base.appendingPathComponent(Bundle.main.bundleIdentifier ?? "com.mailbox.assistant", isDirectory: true)
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -143,9 +143,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             environment["ASPNETCORE_ENVIRONMENT"] = "Local"
             environment["ASPNETCORE_CONTENTROOT"] = serverDirectory.path
             environment["ASPNETCORE_URLS"] = "http://127.0.0.1:\(localPort)"
-            environment["KOUZI_LOCAL_APP"] = "1"
-            environment["KOUZI_DATA_DIRECTORY"] = dataDirectory.path
-            environment["KOUZI_FACTORY_RESET_MARKER"] = resetMarker.path
+            environment["MAIL_ASSISTANT_LOCAL_APP"] = "1"
+            environment["MAIL_ASSISTANT_DATA_DIRECTORY"] = dataDirectory.path
+            environment["MAIL_ASSISTANT_FACTORY_RESET_MARKER"] = resetMarker.path
             environment["DOTNET_ROOT"] = runtime.deletingLastPathComponent().path
             environment["DOTNET_MULTILEVEL_LOOKUP"] = "0"
             environment["DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE"] = "false"
@@ -385,7 +385,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 }
 
 @main
-private enum KouziMailAssistantMain {
+private enum MailAssistantMain {
     static func main() {
         let application = NSApplication.shared
         let delegate = AppDelegate()

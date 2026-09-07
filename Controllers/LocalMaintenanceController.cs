@@ -230,7 +230,7 @@ public sealed class LocalMaintenanceController : Controller
             return NotFound();
         }
 
-        var markerPath = Environment.GetEnvironmentVariable("KOUZI_FACTORY_RESET_MARKER");
+        var markerPath = Environment.GetEnvironmentVariable("MAIL_ASSISTANT_FACTORY_RESET_MARKER");
         if (string.IsNullOrWhiteSpace(markerPath))
         {
             _logger.LogError("Factory reset was requested without a native reset marker path.");
@@ -252,5 +252,5 @@ public sealed class LocalMaintenanceController : Controller
     }
 
     private bool IsLocalApp() => _configuration.GetValue<bool>("LocalApp:Enabled") ||
-                                 string.Equals(Environment.GetEnvironmentVariable("KOUZI_LOCAL_APP"), "1", StringComparison.Ordinal);
+                                 string.Equals(Environment.GetEnvironmentVariable("MAIL_ASSISTANT_LOCAL_APP"), "1", StringComparison.Ordinal);
 }
