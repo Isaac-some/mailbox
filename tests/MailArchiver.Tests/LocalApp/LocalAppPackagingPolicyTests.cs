@@ -92,8 +92,8 @@ public class LocalAppPackagingPolicyTests
     {
         var source = ReadBundledFile("Info.plist");
 
-        Assert.Contains("<string>2.0.0</string>", source, StringComparison.Ordinal);
-        Assert.Contains("<string>200</string>", source, StringComparison.Ordinal);
+        Assert.Contains("<string>2.1.1</string>", source, StringComparison.Ordinal);
+        Assert.Contains("<string>211</string>", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -101,8 +101,8 @@ public class LocalAppPackagingPolicyTests
     {
         var source = ReadBundledFile("KouziMailAssistant.Windows.csproj");
 
-        Assert.Contains("<Version>2.0.0</Version>", source, StringComparison.Ordinal);
-        Assert.Contains("<FileVersion>2.0.0.0</FileVersion>", source, StringComparison.Ordinal);
+        Assert.Contains("<Version>2.1.1</Version>", source, StringComparison.Ordinal);
+        Assert.Contains("<FileVersion>2.1.1.0</FileVersion>", source, StringComparison.Ordinal);
         Assert.Contains("<ApplicationIcon>AppIcon.ico</ApplicationIcon>", source, StringComparison.Ordinal);
     }
 
@@ -222,7 +222,7 @@ public class LocalAppPackagingPolicyTests
 
         Assert.DoesNotContain("GetUserMailAccountsAsync", inboxAction, StringComparison.Ordinal);
         Assert.Contains("a.UserMailAccounts.Any", inboxAction, StringComparison.Ordinal);
-        Assert.Contains("allowedUserId: currentUserId.Value", inboxAction, StringComparison.Ordinal);
+        Assert.Contains("allowedUserId: isAdministrator ? null : currentUserId.Value", inboxAction, StringComparison.Ordinal);
         Assert.Contains("MaxSendingAccountOptions = 50", outboundController, StringComparison.Ordinal);
         Assert.Contains(".Take(candidateLimit)", outboundController, StringComparison.Ordinal);
     }
@@ -302,16 +302,13 @@ public class LocalAppPackagingPolicyTests
     }
 
     [Fact]
-    public void Mac_launcher_forwards_an_active_GW_local_proxy_to_the_mail_server()
+    public void Mac_launcher_does_not_read_private_proxy_configuration()
     {
         var launcher = ReadBundledFile("KouziMailAssistant.swift");
 
-        Assert.Contains("Application Support/gw/vortex.json", launcher, StringComparison.Ordinal);
-        Assert.Contains("proxy_port", launcher, StringComparison.Ordinal);
-        Assert.Contains("MailProxy__Enabled", launcher, StringComparison.Ordinal);
-        Assert.Contains("MailProxy__Type", launcher, StringComparison.Ordinal);
-        Assert.Contains("MailProxy__Host", launcher, StringComparison.Ordinal);
-        Assert.Contains("MailProxy__Port", launcher, StringComparison.Ordinal);
+        Assert.DoesNotContain("Application Support/gw/vortex.json", launcher, StringComparison.Ordinal);
+        Assert.DoesNotContain("proxy_port", launcher, StringComparison.Ordinal);
+        Assert.DoesNotContain("MailProxy__", launcher, StringComparison.Ordinal);
     }
 
     [Fact]

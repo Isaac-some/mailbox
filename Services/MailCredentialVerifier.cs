@@ -1,6 +1,7 @@
 using MailArchiver.Models;
 using MailArchiver.Services.MailProviders;
 using MailKit.Net.Imap;
+using MailKit.Net.Proxy;
 using MailKit.Security;
 using Microsoft.Extensions.Options;
 
@@ -15,14 +16,13 @@ public interface IMailCredentialVerifier
 public sealed class MailCredentialVerifier(
     IMailProviderRegistry registry,
     IMailEndpointDiscoveryService discovery,
-    IOptions<MailProxyOptions> proxyOptions) : IMailCredentialVerifier
+    INetworkMailProxyFactory networkMail) : IMailCredentialVerifier
 {
     public async Task VerifyAsync(MailAccount account, CancellationToken cancellationToken = default)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(20));
         using var client = new ImapClient { Timeout = 20_000 };
-        MailProxyClientFactory.Apply(client, proxyOptions.Value);
         client.ServerCertificateValidationCallback = static (_, _, chain, errors) =>
             MailCertificatePolicy.IsAccepted(errors, chain);
         try
@@ -30,9 +30,10 @@ public sealed class MailCredentialVerifier(
             await discovery.DiscoverAsync(account, timeout.Token);
             var provider = registry.For(account);
             var endpoint = provider.GetIncomingEndpoint(account);
-            await client.ConnectAsync(endpoint.Host, endpoint.Port,
-                endpoint.UseSsl ? SecureSocketOptions.SslOnConnect : SecureSocketOptions.StartTls,
-                timeout.Token);
+            await networkMail.ConnectAsync(client, endpoint.Host, endpoint.Port,
+                token => client.ConnectAsync(endpoint.Host, endpoint.Port,
+                    endpoint.UseSsl ? SecureSocketOptions.SslOnConnect : SecureSocketOptions.StartTls,
+                    token), timeout.Token);
             await provider.AuthenticateIncomingAsync(client, account, timeout.Token);
             cancellationToken.ThrowIfCancellationRequested();
             account.CredentialLastCheckedAt = DateTime.UtcNow;
@@ -55,7 +56,8 @@ public sealed class MailCredentialVerifier(
             var failures = ex is AggregateException aggregate
                 ? aggregate.Flatten().InnerExceptions.AsEnumerable() : [ex];
             var networkFailure = failures.Any(error => error is System.IO.IOException
-                or System.Net.Sockets.SocketException or HttpRequestException or SslHandshakeException);
+                or System.Net.Sockets.SocketException or HttpRequestException or SslHandshakeException
+                or ProxyProtocolException);
             throw new InvalidOperationException(networkFailure
                 ? "无法连接邮箱完成校验，本行未导入；请检查网络、代理或邮箱服务设置后重试。"
                 : "邮箱登录校验未通过，本行未导入；请检查授权码是否完整有效、邮箱是否匹配，以及所需的 Client ID 和收件权限。");

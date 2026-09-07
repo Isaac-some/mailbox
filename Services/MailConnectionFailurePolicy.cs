@@ -1,4 +1,5 @@
 using MailKit.Security;
+using MailKit.Net.Proxy;
 using System.Net.Sockets;
 
 namespace MailArchiver.Services;
@@ -10,6 +11,9 @@ public static class MailConnectionFailurePolicy
         var failures = Flatten(exception).ToArray();
         if (failures.Any(IsRateLimit))
             return "邮箱服务暂时限制登录，请稍后重试。";
+
+        if (failures.Any(failure => failure is ProxyProtocolException))
+            return "代理拒绝了邮箱目标连接，请检查代理是否允许该目标主机和端口。";
 
         if (failures.Any(failure => failure is AuthenticationException))
             return "授权码无效，请检查邮箱与授权码是否匹配。";
@@ -46,7 +50,8 @@ public static class MailConnectionFailurePolicy
             or OperationCanceledException
             or IOException
             or HttpRequestException
-            or SslHandshakeException;
+            or SslHandshakeException
+            or ProxyProtocolException;
 
     private static bool IsRateLimit(Exception exception)
         => exception.Message.Contains("rate limit", StringComparison.OrdinalIgnoreCase)

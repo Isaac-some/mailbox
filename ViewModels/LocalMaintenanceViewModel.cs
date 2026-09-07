@@ -1,3 +1,5 @@
+using MailArchiver.Models;
+
 namespace MailArchiver.ViewModels;
 
 public sealed class LocalMaintenanceViewModel
@@ -10,4 +12,8 @@ public sealed class LocalMaintenanceViewModel
     public string DeviceName { get; init; } = string.Empty;
     public string OperatingSystem { get; init; } = string.Empty;
     public string AppVersion { get; init; } = string.Empty;
+    public NetworkMode NetworkMode { get; init; }
+    public NetworkProxyType? NetworkProxyType { get; init; }
+    public string NetworkProxyHost { get; init; } = string.Empty;
+    public int? NetworkProxyPort { get; init; }
 }

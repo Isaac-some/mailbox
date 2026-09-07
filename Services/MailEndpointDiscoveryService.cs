@@ -56,7 +56,7 @@ public sealed class MailEndpointDiscoveryService : IMailEndpointDiscoveryService
         var outgoingDiscovered = false;
         try
         {
-            var client = _httpClientFactory.CreateClient("MailAutoconfig");
+            using var client = _httpClientFactory.CreateClient("MailAutoconfig");
             foreach (var url in GetConfigUrls(domain))
             {
                 try

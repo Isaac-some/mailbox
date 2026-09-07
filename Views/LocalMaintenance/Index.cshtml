@@ -1,4 +1,5 @@
 @model MailArchiver.ViewModels.LocalMaintenanceViewModel
+@using MailArchiver.Models
 @{
     ViewData["Title"] = "本机数据";
 }
@@ -12,6 +13,46 @@
                 <p class="text-muted mb-0">管理这台设备的邮箱助手。</p>
             </div>
         </div>
+
+        <section class="border-top pt-4 mb-5">
+            <h2 class="h5">网络策略</h2>
+            <p class="text-muted">自动模式跟随本机系统代理、PAC、环境代理和 VPN 路由。指定代理只使用你填写的本机代理，失败时不会改走直连。</p>
+            <form asp-action="SaveNetwork" method="post" class="row g-3">
+                @Html.AntiForgeryToken()
+                <div class="col-12 col-md-4">
+                    <label class="form-label" for="network-mode">模式</label>
+                    <select class="form-select" id="network-mode" name="mode">
+                        <option value="System" selected="@(Model.NetworkMode == NetworkMode.System)">自动跟随本机网络</option>
+                        <option value="ExplicitProxy" selected="@(Model.NetworkMode == NetworkMode.ExplicitProxy)">指定本机代理</option>
+                    </select>
+                </div>
+                <div class="col-12 col-md-3">
+                    <label class="form-label" for="proxy-type">代理类型</label>
+                    <select class="form-select" id="proxy-type" name="proxyType">
+                        <option value="Http" selected="@(Model.NetworkProxyType == NetworkProxyType.Http)">HTTP</option>
+                        <option value="Socks5" selected="@(Model.NetworkProxyType == NetworkProxyType.Socks5)">SOCKS5</option>
+                    </select>
+                </div>
+                <div class="col-12 col-md-3">
+                    <label class="form-label" for="proxy-host">本机代理主机</label>
+                    <input class="form-control" id="proxy-host" name="host" value="@Model.NetworkProxyHost" autocomplete="off" />
+                </div>
+                <div class="col-12 col-md-2">
+                    <label class="form-label" for="proxy-port">端口</label>
+                    <input class="form-control" id="proxy-port" name="port" type="number" min="1" max="65535" value="@Model.NetworkProxyPort" />
+                </div>
+                <div class="col-12 col-md-4">
+                    <label class="form-label" for="proxy-user">代理用户名（可选）</label>
+                    <input class="form-control" id="proxy-user" name="username" autocomplete="username" />
+                </div>
+                <div class="col-12 col-md-4">
+                    <label class="form-label" for="proxy-password">代理密码（可选）</label>
+                    <input class="form-control" id="proxy-password" name="password" type="password" autocomplete="new-password" />
+                </div>
+                <div class="col-12"><button type="submit" class="btn btn-primary"><i class="bi bi-check2 me-1" aria-hidden="true"></i>保存网络策略</button></div>
+            </form>
+            <p class="mt-3 mb-0"><a asp-action="Diagnostics"><i class="bi bi-activity me-1" aria-hidden="true"></i>打开网络诊断</a></p>
+        </section>
 
         <section class="border-top pt-4 mb-5">
             <h2 class="h5">本地账号</h2>

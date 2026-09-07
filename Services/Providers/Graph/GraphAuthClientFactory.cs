@@ -1,4 +1,4 @@
-using Azure.Identity;
+using Azure.Core;
 using MailArchiver.Models;
 using Microsoft.Graph;
 using System.Collections.Concurrent;
@@ -19,6 +19,8 @@ namespace MailArchiver.Services.Providers.Graph
     public class GraphAuthClientFactory
     {
         private readonly ILogger<GraphAuthClientFactory> _logger;
+        private readonly INetworkHttpClientFactory _networkClients;
+        private readonly INetworkPolicyResolver _networkResolver;
 
         // MEMORY FIX: Cache GraphServiceClient instances per credential set. Creating a new
         // GraphServiceClient per operation leaks the internally-owned HttpClient/handler chain
@@ -26,20 +28,25 @@ namespace MailArchiver.Services.Providers.Graph
         // has its own MSAL token cache). Credential changes produce a new cache key automatically.
         private readonly ConcurrentDictionary<string, GraphServiceClient> _clientCache = new();
 
-        public GraphAuthClientFactory(ILogger<GraphAuthClientFactory> logger)
+        public GraphAuthClientFactory(
+            ILogger<GraphAuthClientFactory> logger,
+            INetworkHttpClientFactory networkClients,
+            INetworkPolicyResolver networkResolver)
         {
             _logger = logger;
+            _networkClients = networkClients;
+            _networkResolver = networkResolver;
         }
 
         /// <summary>
         /// Builds a cache key from tenant credentials. The client secret is hashed so it is
         /// never kept in plain text as a dictionary key.
         /// </summary>
-        private static string BuildCacheKey(string clientId, string clientSecret, string tenantId)
+        private static string BuildCacheKey(string clientId, string clientSecret, string tenantId, long policyVersion)
         {
             var secretHash = Convert.ToHexString(
                 SHA256.HashData(Encoding.UTF8.GetBytes(clientSecret)));
-            return $"{tenantId}|{clientId}|{secretHash}";
+            return $"{tenantId}|{clientId}|{secretHash}|{policyVersion}";
         }
 
         /// <summary>
@@ -77,16 +84,17 @@ namespace MailArchiver.Services.Providers.Graph
                 throw new InvalidOperationException("TenantId is required for application-permission OAuth (client credentials flow).");
             }
 
-            return _clientCache.GetOrAdd(BuildCacheKey(clientId, clientSecret, tenantId), _ =>
+            var policyVersion = _networkResolver.Resolve(new Uri("https://graph.microsoft.com")).PolicyVersion;
+            return _clientCache.GetOrAdd(BuildCacheKey(clientId, clientSecret, tenantId, policyVersion), _ =>
             {
-                var credential = new ClientSecretCredential(
-                    tenantId: tenantId,
-                    clientId: clientId,
-                    clientSecret: clientSecret);
+                var networkClient = _networkClients.CreateClient("Graph");
+                var credential = new NetworkClientSecretCredential(
+                    tenantId, clientId, clientSecret, _networkClients);
 
                 _logger.LogDebug("Creating new cached GraphServiceClient for tenant {TenantId}", tenantId);
 
                 return new GraphServiceClient(
+                    networkClient,
                     credential,
                     new[] { "https://graph.microsoft.com/.default" });
             });
@@ -187,5 +195,57 @@ namespace MailArchiver.Services.Providers.Graph
 
             return graphServiceClient;
         }
+    private sealed class NetworkClientSecretCredential(
+        string tenantId,
+        string clientId,
+        string clientSecret,
+        INetworkHttpClientFactory clients) : TokenCredential
+    {
+        private readonly SemaphoreSlim _refreshLock = new(1, 1);
+        private AccessToken _cached;
+
+        public override AccessToken GetToken(TokenRequestContext requestContext, CancellationToken cancellationToken)
+            => GetTokenAsync(requestContext, cancellationToken).AsTask().GetAwaiter().GetResult();
+
+        public override async ValueTask<AccessToken> GetTokenAsync(
+            TokenRequestContext requestContext, CancellationToken cancellationToken)
+        {
+            if (_cached.ExpiresOn > DateTimeOffset.UtcNow.AddMinutes(1))
+                return _cached;
+
+            await _refreshLock.WaitAsync(cancellationToken);
+            try
+            {
+                if (_cached.ExpiresOn > DateTimeOffset.UtcNow.AddMinutes(1))
+                    return _cached;
+
+                var scope = requestContext.Scopes.FirstOrDefault() ?? "https://graph.microsoft.com/.default";
+                using var client = clients.CreateClient("MsaOAuth");
+                using var response = await client.PostAsync(
+                    $"https://login.microsoftonline.com/{Uri.EscapeDataString(tenantId)}/oauth2/v2.0/token",
+                    new FormUrlEncodedContent(new Dictionary<string, string>
+                    {
+                        ["grant_type"] = "client_credentials",
+                        ["client_id"] = clientId,
+                        ["client_secret"] = clientSecret,
+                        ["scope"] = scope
+                    }), cancellationToken);
+                var json = await response.Content.ReadAsStringAsync(cancellationToken);
+                if (!response.IsSuccessStatusCode)
+                    throw new InvalidOperationException($"Graph OAuth token request failed (HTTP {(int)response.StatusCode}).");
+                using var document = System.Text.Json.JsonDocument.Parse(json);
+                var token = document.RootElement.GetProperty("access_token").GetString()
+                    ?? throw new InvalidOperationException("Graph OAuth token response did not contain an access token.");
+                var expiresIn = document.RootElement.TryGetProperty("expires_in", out var expiry)
+                    ? expiry.GetInt32() : 3600;
+                _cached = new AccessToken(token, DateTimeOffset.UtcNow.AddSeconds(Math.Max(60, expiresIn - 60)));
+                return _cached;
+            }
+            finally
+            {
+                _refreshLock.Release();
+            }
+        }
+    }
     }
 }

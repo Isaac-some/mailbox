@@ -1,4 +1,5 @@
 using MailArchiver.Data;
+using MailArchiver.Models;
 using MailArchiver.Services;
 using MailArchiver.ViewModels;
 using Microsoft.AspNetCore.Mvc;
@@ -22,6 +23,8 @@ public sealed class LocalMaintenanceController : Controller
     private readonly IPlatformSessionStore _platformSessionStore;
     private readonly ICsvImportService _csvImportService;
     private readonly ILogger<LocalMaintenanceController> _logger;
+    private readonly INetworkPolicyStore _networkPolicy;
+    private readonly INetworkDiagnosticsService _networkDiagnostics;
 
     public LocalMaintenanceController(
         MailArchiverDbContext context,
@@ -32,7 +35,9 @@ public sealed class LocalMaintenanceController : Controller
         IUpstreamMailboxSyncService upstreamSync,
         IPlatformSessionStore platformSessionStore,
         ICsvImportService csvImportService,
-        ILogger<LocalMaintenanceController> logger)
+        ILogger<LocalMaintenanceController> logger,
+        INetworkPolicyStore networkPolicy,
+        INetworkDiagnosticsService networkDiagnostics)
     {
         _context = context;
         _lifetime = lifetime;
@@ -43,6 +48,8 @@ public sealed class LocalMaintenanceController : Controller
         _platformSessionStore = platformSessionStore;
         _csvImportService = csvImportService;
         _logger = logger;
+        _networkPolicy = networkPolicy;
+        _networkDiagnostics = networkDiagnostics;
     }
 
     [HttpGet]
@@ -55,6 +62,7 @@ public sealed class LocalMaintenanceController : Controller
 
         var connection = await _connectionStore.GetStatusAsync(cancellationToken);
         var session = _platformSessionStore.Current;
+        var network = _networkPolicy.GetSnapshot();
         return View(new LocalMaintenanceViewModel
         {
             PlatformConfigured = session is not null,
@@ -64,8 +72,68 @@ public sealed class LocalMaintenanceController : Controller
             InstallationId = connection.InstallationId,
             DeviceName = connection.DeviceName,
             OperatingSystem = connection.OperatingSystem,
-            AppVersion = connection.AppVersion
+            AppVersion = connection.AppVersion,
+            NetworkMode = network.Mode,
+            NetworkProxyType = network.ExplicitProxy?.Type,
+            NetworkProxyHost = network.ExplicitProxy?.Host ?? string.Empty,
+            NetworkProxyPort = network.ExplicitProxy?.Port
         });
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> SaveNetwork(NetworkMode mode, NetworkProxyType? proxyType,
+        string? host, int? port, string? username, string? password, CancellationToken cancellationToken)
+    {
+        if (!IsLocalApp())
+            return NotFound();
+        NetworkProxySettings? proxy = null;
+        if (mode == NetworkMode.ExplicitProxy)
+        {
+            var existing = _networkPolicy.GetSnapshot().ExplicitProxy;
+            var savedPassword = string.IsNullOrWhiteSpace(password)
+                ? existing?.Password
+                : password;
+            proxy = new NetworkProxySettings(proxyType ?? NetworkProxyType.Http,
+                host?.Trim() ?? string.Empty, port ?? 0, username?.Trim(), savedPassword);
+        }
+        try
+        {
+            await _networkPolicy.SaveAsync(new NetworkPolicySettings(mode, proxy), cancellationToken);
+            TempData["SuccessMessage"] = "网络策略已保存。后续新建的邮箱连接会使用新路由。";
+        }
+        catch (InvalidOperationException exception)
+        {
+            TempData["ErrorMessage"] = exception.Message;
+        }
+        return RedirectToAction(nameof(Index));
+    }
+
+    [HttpGet]
+    public IActionResult Diagnostics()
+    {
+        if (!IsLocalApp())
+            return NotFound();
+        return View(new NetworkDiagnosticsViewModel());
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> Diagnostics(string? target, CancellationToken cancellationToken)
+    {
+        if (!IsLocalApp())
+            return NotFound();
+
+        var model = new NetworkDiagnosticsViewModel { Target = target?.Trim() ?? string.Empty };
+        if (!Uri.TryCreate(model.Target, UriKind.Absolute, out var uri)
+            || uri.Scheme != Uri.UriSchemeHttps)
+        {
+            model.Error = "请输入有效的 HTTPS 地址。";
+            return View(model);
+        }
+
+        model.Result = await _networkDiagnostics.TestHttpsAsync(uri, cancellationToken);
+        return View(model);
     }
 
     [HttpPost]

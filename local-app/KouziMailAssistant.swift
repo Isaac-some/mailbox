@@ -152,7 +152,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             environment["ConnectionStrings__DefaultConnection"] = "Data Source=\(dataDirectory.appendingPathComponent("mail-archive.sqlite").path)"
             environment["DataProtection__KeyPath"] = dataDirectory.appendingPathComponent("keys", isDirectory: true).path
             environment["CredentialEncryption__KeyFilePath"] = credentialKeyPath.path
-            applyDetectedMailProxy(to: &environment)
             process.environment = environment
             process.terminationHandler = { [weak self] _ in
                 DispatchQueue.main.async { self?.serverStopped() }
@@ -163,24 +162,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         } catch {
             showFatal("无法启动本机服务：\(error.localizedDescription)")
         }
-    }
-
-    private func applyDetectedMailProxy(to environment: inout [String: String]) {
-        let configURL = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/gw/vortex.json")
-        guard let data = try? Data(contentsOf: configURL),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              object["connected"] as? Bool == true,
-              let portNumber = object["proxy_port"] as? NSNumber else {
-            return
-        }
-
-        let port = portNumber.intValue
-        guard port > 0 && port <= 65535 else { return }
-        environment["MailProxy__Enabled"] = "true"
-        environment["MailProxy__Type"] = "Socks5"
-        environment["MailProxy__Host"] = "127.0.0.1"
-        environment["MailProxy__Port"] = String(port)
     }
 
     private func serverStopped() {

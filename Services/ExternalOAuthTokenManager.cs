@@ -79,7 +79,7 @@ public sealed class ExternalOAuthTokenManager : IExternalOAuthTokenManager
                 if (!string.IsNullOrWhiteSpace(tracked.OAuthRedirectUri))
                     body["redirect_uri"] = tracked.OAuthRedirectUri;
 
-                var client = _httpClientFactory.CreateClient("ExternalMailOAuth");
+                using var client = _httpClientFactory.CreateClient("ExternalMailOAuth");
                 using var response = await client.PostAsync(
                     provider.TokenEndpoint,
                     new FormUrlEncodedContent(body),

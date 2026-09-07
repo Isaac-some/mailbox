@@ -116,8 +116,11 @@ builder.Services.Configure<TenantManagementOptions>(
 // Add Mail Sync Options
 builder.Services.Configure<MailSyncOptions>(
     builder.Configuration.GetSection(MailSyncOptions.MailSync));
-builder.Services.Configure<MailProxyOptions>(
-    builder.Configuration.GetSection(MailProxyOptions.SectionName));
+builder.Services.AddSingleton<INetworkPolicyStore, NetworkPolicyStore>();
+builder.Services.AddSingleton<INetworkPolicyResolver, NetworkPolicyResolver>();
+builder.Services.AddSingleton<INetworkHttpClientFactory, NetworkHttpClientFactory>();
+builder.Services.AddSingleton<INetworkMailProxyFactory, NetworkMailProxyFactory>();
+builder.Services.AddSingleton<INetworkDiagnosticsService, NetworkDiagnosticsService>();
 
 // Add Upload Options
 builder.Services.Configure<UploadOptions>(
@@ -171,38 +174,11 @@ builder.Services.AddOpenApi("v1", openApiOptions =>
 // Add DateTimeHelper
 builder.Services.AddScoped<MailArchiver.Utilities.DateTimeHelper>();
 
-// Add HTTP Client factory (used by VersionUpdateService for GitHub API calls)
-builder.Services.AddHttpClient("GitHubReleases");
-builder.Services.AddHttpClient("MsaOAuth");
-builder.Services.AddHttpClient("ExternalMailOAuth");
-builder.Services.AddHttpClient("UpstreamMailboxSync");
-builder.Services.AddHttpClient("PlatformAuthentication", client =>
-{
-    client.Timeout = TimeSpan.FromSeconds(30);
-})
-.ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
-{
-    AllowAutoRedirect = false,
-    UseCookies = false
-});
-builder.Services.AddHttpClient("LocalAccessManifest", client =>
-{
-    client.Timeout = TimeSpan.FromSeconds(10);
-    client.DefaultRequestHeaders.UserAgent.ParseAdd("KouziMailAssistant/LocalAccess");
-});
-builder.Services.AddHttpClient("MailAutoconfig", client =>
-{
-    client.Timeout = TimeSpan.FromSeconds(3);
-    client.MaxResponseContentBufferSize = 64 * 1024;
-    client.DefaultRequestHeaders.UserAgent.ParseAdd("MailArchiver/1.0 mailbox-autoconfig");
-})
-.ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
-{
-    // Autoconfig must never follow a server-controlled redirect to an unrelated
-    // or private URL. Only the two HTTPS URLs constructed from the mailbox domain
-    // are eligible for discovery.
-    AllowAutoRedirect = false
-});
+// All HTTP traffic, including OAuth, Graph, discovery and platform calls, uses
+// the current network policy snapshot. Names are retained by the compatibility
+// factory so existing services do not need transport-specific code.
+builder.Services.AddSingleton<IHttpClientFactory>(provider =>
+    (IHttpClientFactory)provider.GetRequiredService<INetworkHttpClientFactory>());
 
 // Register CSV import options for bulk IMAP account import
 builder.Services.Configure<CsvImportOptions>(builder.Configuration.GetSection(CsvImportOptions.CsvImport));

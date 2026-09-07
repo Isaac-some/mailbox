@@ -20,8 +20,8 @@ public sealed class CustomDomainMailProviderModule : PasswordAndOAuthMailProvide
     public CustomDomainMailProviderModule(
         IExternalOAuthTokenManager tokenManager,
         ICredentialEncryptionService credentialEncryption,
-        IOptions<MailProxyOptions>? mailProxyOptions = null)
-        : base(tokenManager, credentialEncryption, mailProxyOptions) { }
+        INetworkMailProxyFactory? networkMail = null)
+        : base(tokenManager, credentialEncryption, networkMail) { }
 
     public override MailProviderKind Kind => MailProviderKind.Custom;
     public override string DisplayName => "自定义域名";

@@ -149,13 +149,20 @@ namespace MailArchiver.Controllers
             if (!currentUserId.HasValue)
                 return NotFound();
 
+            var isAdministrator = _authService?.IsCurrentUserAdmin(HttpContext) == true
+                || await _context.Users.AsNoTracking()
+                    .Where(user => user.Id == currentUserId.Value && user.IsAdmin && user.IsActive)
+                    .Select(user => true)
+                    .FirstOrDefaultAsync();
+
             // This view is scoped to one mailbox. Check that mailbox in SQL instead
             // of materializing every account owned by the user.
             var selectedAccount = await _context.MailAccounts
                 .AsNoTracking()
                 .Where(a =>
                     a.Id == model.SelectedAccountId.Value &&
-                    a.UserMailAccounts.Any(ownership => ownership.UserId == currentUserId.Value))
+                    (isAdministrator
+                        || a.UserMailAccounts.Any(ownership => ownership.UserId == currentUserId.Value)))
                 .Select(a => new { a.Id, a.Name, a.EmailAddress, a.LastSync, a.IsEnabled })
                 .FirstOrDefaultAsync();
             if (selectedAccount == null)
@@ -205,7 +212,7 @@ namespace MailArchiver.Controllers
                 model.SortBy,
                 model.SortOrder,
                 useReceivedDateForRange: true,
-                allowedUserId: currentUserId.Value);
+                allowedUserId: isAdministrator ? null : currentUserId.Value);
 
             model.SearchResults = emails;
             model.TotalResults = totalCount;

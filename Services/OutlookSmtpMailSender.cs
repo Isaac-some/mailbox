@@ -1,7 +1,6 @@
 using MailArchiver.Models;
 using MailKit.Net.Smtp;
 using MailKit.Security;
-using Microsoft.Extensions.Options;
 using MimeKit;
 
 namespace MailArchiver.Services;
@@ -26,10 +25,10 @@ public interface IOutlookSmtpMailSender
 
 public sealed class OutlookSmtpMailSender : IOutlookSmtpMailSender
 {
-    private readonly MailProxyOptions _mailProxyOptions;
+    private readonly INetworkMailProxyFactory _networkMail;
 
-    public OutlookSmtpMailSender(IOptions<MailProxyOptions>? mailProxyOptions = null)
-        => _mailProxyOptions = mailProxyOptions?.Value ?? new MailProxyOptions();
+    public OutlookSmtpMailSender(INetworkMailProxyFactory networkMail)
+        => _networkMail = networkMail;
 
     public async Task SendAsync(
         MailAccount account,
@@ -38,10 +37,9 @@ public sealed class OutlookSmtpMailSender : IOutlookSmtpMailSender
         CancellationToken cancellationToken)
     {
         using var client = new SmtpClient();
-        MailProxyClientFactory.Apply(client, _mailProxyOptions);
         client.ServerCertificateValidationCallback = static (_, _, chain, errors) =>
             MailCertificatePolicy.IsAccepted(errors, chain);
-        await client.ConnectAsync("smtp-mail.outlook.com", 587, SecureSocketOptions.StartTls, cancellationToken);
+        await ConnectAsync(client, cancellationToken);
         client.AuthenticationMechanisms.Remove("GSSAPI");
         client.AuthenticationMechanisms.Remove("NEGOTIATE");
         await client.AuthenticateAsync(
@@ -57,10 +55,9 @@ public sealed class OutlookSmtpMailSender : IOutlookSmtpMailSender
         CancellationToken cancellationToken)
     {
         using var client = new SmtpClient();
-        MailProxyClientFactory.Apply(client, _mailProxyOptions);
         client.ServerCertificateValidationCallback = static (_, _, chain, errors) =>
             MailCertificatePolicy.IsAccepted(errors, chain);
-        await client.ConnectAsync("smtp-mail.outlook.com", 587, SecureSocketOptions.StartTls, cancellationToken);
+        await ConnectAsync(client, cancellationToken);
         client.AuthenticationMechanisms.Remove("GSSAPI");
         client.AuthenticationMechanisms.Remove("NEGOTIATE");
         await client.AuthenticateAsync(account.Username ?? account.EmailAddress, password, cancellationToken);
@@ -73,10 +70,9 @@ public sealed class OutlookSmtpMailSender : IOutlookSmtpMailSender
         using var client = new SmtpClient();
         try
         {
-            MailProxyClientFactory.Apply(client, _mailProxyOptions);
             client.ServerCertificateValidationCallback = static (_, _, chain, errors) =>
                 MailCertificatePolicy.IsAccepted(errors, chain);
-            await client.ConnectAsync("smtp-mail.outlook.com", 587, SecureSocketOptions.StartTls, cancellationToken);
+            await ConnectAsync(client, cancellationToken);
             client.AuthenticationMechanisms.Remove("GSSAPI");
             client.AuthenticationMechanisms.Remove("NEGOTIATE");
             await client.AuthenticateAsync(new SaslMechanismOAuth2(token.Username, token.AccessToken), cancellationToken);
@@ -94,10 +90,9 @@ public sealed class OutlookSmtpMailSender : IOutlookSmtpMailSender
         using var client = new SmtpClient();
         try
         {
-            MailProxyClientFactory.Apply(client, _mailProxyOptions);
             client.ServerCertificateValidationCallback = static (_, _, chain, errors) =>
                 MailCertificatePolicy.IsAccepted(errors, chain);
-            await client.ConnectAsync("smtp-mail.outlook.com", 587, SecureSocketOptions.StartTls, cancellationToken);
+            await ConnectAsync(client, cancellationToken);
             client.AuthenticationMechanisms.Remove("GSSAPI");
             client.AuthenticationMechanisms.Remove("NEGOTIATE");
             await client.AuthenticateAsync(account.Username ?? account.EmailAddress, password, cancellationToken);
@@ -109,4 +104,9 @@ public sealed class OutlookSmtpMailSender : IOutlookSmtpMailSender
             return false;
         }
     }
+
+    private Task ConnectAsync(SmtpClient client, CancellationToken cancellationToken)
+        => _networkMail.ConnectAsync(client, "smtp-mail.outlook.com", 587,
+            token => client.ConnectAsync("smtp-mail.outlook.com", 587, SecureSocketOptions.StartTls, token),
+            cancellationToken);
 }

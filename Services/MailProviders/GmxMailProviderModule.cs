@@ -8,8 +8,8 @@ public sealed class GmxMailProviderModule : PasswordAndOAuthMailProviderModule
     public GmxMailProviderModule(
         IExternalOAuthTokenManager tokenManager,
         ICredentialEncryptionService credentialEncryption,
-        IOptions<MailProxyOptions>? mailProxyOptions = null)
-        : base(tokenManager, credentialEncryption, mailProxyOptions) { }
+        INetworkMailProxyFactory? networkMail = null)
+        : base(tokenManager, credentialEncryption, networkMail) { }
 
     public override MailProviderKind Kind => MailProviderKind.Gmx;
     public override string DisplayName => "GMX";
@@ -28,9 +28,19 @@ public sealed class GmxMailProviderModule : PasswordAndOAuthMailProviderModule
     {
         EnsureIdentity(account);
         var ready = HasPassword(account);
+        var smtpVerified = account.CredentialScope is MailCredentialScope.ImapAndSmtp
+            or MailCredentialScope.Smtp;
+        var requiredAction = ready switch
+        {
+            false => "请补充 GMX 应用专用密码。",
+            true when account.CredentialScope == MailCredentialScope.Imap
+                || string.Equals(account.CredentialDetectionStatus, "ImapVerified", StringComparison.OrdinalIgnoreCase)
+                => "已验证收件，但发件 SMTP 尚未验证；请刷新收件箱后重试。",
+            _ => null
+        };
         return new MailAccountCapabilities(
             ready,
-            ready,
-            ready ? null : "请补充 GMX 应用专用密码。");
+            ready && (smtpVerified || account.CredentialScope == MailCredentialScope.Unknown),
+            requiredAction);
     }
 }

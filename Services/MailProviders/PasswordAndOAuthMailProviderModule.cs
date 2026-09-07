@@ -13,16 +13,16 @@ public abstract class PasswordAndOAuthMailProviderModule : IMailProviderModule
 {
     private readonly IExternalOAuthTokenManager _tokenManager;
     private readonly ICredentialEncryptionService _credentialEncryption;
-    private readonly MailProxyOptions _mailProxyOptions;
+    private readonly INetworkMailProxyFactory? _networkMail;
 
     protected PasswordAndOAuthMailProviderModule(
         IExternalOAuthTokenManager tokenManager,
         ICredentialEncryptionService credentialEncryption,
-        IOptions<MailProxyOptions>? mailProxyOptions = null)
+        INetworkMailProxyFactory? networkMail = null)
     {
         _tokenManager = tokenManager;
         _credentialEncryption = credentialEncryption;
-        _mailProxyOptions = mailProxyOptions?.Value ?? new MailProxyOptions();
+        _networkMail = networkMail;
     }
 
     public abstract MailProviderKind Kind { get; }
@@ -97,10 +97,13 @@ public abstract class PasswordAndOAuthMailProviderModule : IMailProviderModule
             throw new InvalidOperationException($"{DisplayName} 账号没有可用的发件凭据。");
 
         using var client = new SmtpClient();
-        MailProxyClientFactory.Apply(client, _mailProxyOptions);
+        var networkMail = _networkMail ?? throw new InvalidOperationException("网络策略服务未配置。");
         client.ServerCertificateValidationCallback = static (_, _, chain, errors) =>
             MailCertificatePolicy.IsAccepted(errors, chain);
-        await client.ConnectAsync(GetSmtpHost(account), GetSmtpPort(account), GetSmtpSocketOptions(account), cancellationToken);
+        var smtpHost = GetSmtpHost(account);
+        var smtpPort = GetSmtpPort(account);
+        await networkMail.ConnectAsync(client, smtpHost, smtpPort,
+            token => client.ConnectAsync(smtpHost, smtpPort, GetSmtpSocketOptions(account), token), cancellationToken);
         account.PreferredOutgoingAuth = await MailCredentialFallback.AuthenticateAsync(
             HasOAuth(account),
             HasPassword(account),
@@ -122,10 +125,13 @@ public abstract class PasswordAndOAuthMailProviderModule : IMailProviderModule
         using var client = new SmtpClient();
         try
         {
-            MailProxyClientFactory.Apply(client, _mailProxyOptions);
+            var networkMail = _networkMail ?? throw new InvalidOperationException("网络策略服务未配置。");
             client.ServerCertificateValidationCallback = static (_, _, chain, errors) =>
                 MailCertificatePolicy.IsAccepted(errors, chain);
-            await client.ConnectAsync(GetSmtpHost(account), GetSmtpPort(account), GetSmtpSocketOptions(account), cancellationToken);
+            var smtpHost = GetSmtpHost(account);
+            var smtpPort = GetSmtpPort(account);
+            await networkMail.ConnectAsync(client, smtpHost, smtpPort,
+                token => client.ConnectAsync(smtpHost, smtpPort, GetSmtpSocketOptions(account), token), cancellationToken);
             account.PreferredOutgoingAuth = await MailCredentialFallback.AuthenticateAsync(
                 HasOAuth(account),
                 HasPassword(account),

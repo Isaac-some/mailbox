@@ -20,11 +20,11 @@ public class MailTransportPolicyTests
             Enabled = true,
             Type = "Socks5",
             Host = "127.0.0.1",
-            Port = 7897
+            Port = 18080
         }));
 
         Assert.Equal("127.0.0.1", proxy.ProxyHost);
-        Assert.Equal(7897, proxy.ProxyPort);
+        Assert.Equal(18080, proxy.ProxyPort);
     }
 
     [Fact]
@@ -38,7 +38,7 @@ public class MailTransportPolicyTests
         }));
 
     [Theory]
-    [InlineData("", 7897)]
+    [InlineData("", 18080)]
     [InlineData("127.0.0.1", 0)]
     [InlineData("127.0.0.1", 65536)]
     public void Enabled_proxy_rejects_invalid_endpoints(string host, int port)
@@ -78,4 +78,30 @@ public class MailTransportPolicyTests
         => Assert.False(MailCertificatePolicy.IsOnlyUnavailableRevocationCheck(
             SslPolicyErrors.RemoteCertificateChainErrors | SslPolicyErrors.RemoteCertificateNameMismatch,
             [X509ChainStatusFlags.RevocationStatusUnknown]));
+
+    [Fact]
+    public void Network_policy_defaults_to_system_mode_without_a_fixed_proxy()
+    {
+        var settings = new NetworkPolicySettings();
+        Assert.Equal(NetworkMode.System, settings.Mode);
+        Assert.Null(settings.ExplicitProxy);
+    }
+
+    [Fact]
+    public void Explicit_proxy_route_disallows_direct_fallback()
+    {
+        var resolver = new NetworkPolicyResolver(new StubNetworkPolicyStore(new NetworkPolicySettings(
+            NetworkMode.ExplicitProxy,
+            new NetworkProxySettings(NetworkProxyType.Http, "127.0.0.1", 8080))));
+        var route = resolver.Resolve(new Uri("https://imap.example.test:993"));
+        Assert.Equal(NetworkRouteType.ExplicitProxy, route.Type);
+        Assert.False(route.AllowDirectFallback);
+    }
+
+    private sealed class StubNetworkPolicyStore(NetworkPolicySettings settings) : INetworkPolicyStore
+    {
+        public NetworkPolicySettings GetSnapshot() => settings;
+        public Task SaveAsync(NetworkPolicySettings value, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+    }
 }
