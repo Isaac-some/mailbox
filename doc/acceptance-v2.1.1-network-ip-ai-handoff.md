@@ -11,7 +11,7 @@
 ## 当前交付状态
 
 - 待测产品：邮箱助手 `v2.1.1`，macOS Apple Silicon，build `211`。
-- DMG 文件名：`邮箱助手-AppleSilicon-v2.1.1.dmg`。
+- DMG 文件名：`MailAssistant-AppleSilicon-v2.1.1.dmg`。
 - SHA-256：`8334b8f6b925af2bcf1e85bfe9561aa104130933be903d300b74aabb0bd801b9`。
 - 已完成的开发侧检查：项目编译、网络策略测试、macOS 打包策略测试、真实页面基础操作检查。
 - 另一台电脑必须完成的检查：安装前后系统代理对比、不同 VPN 节点出口对比、真实邮箱收发、VPN 关闭后的自动直连、指定代理失败不直连、网络切换后的新连接验证。
@@ -45,12 +45,12 @@ VPN 客户端启动、退出、切换节点或接管系统代理时，可能立�
 
 ## 阶段 0：校验安装包
 
-1. 确认文件名为 `邮箱助手-AppleSilicon-v2.1.1.dmg`。
+1. 确认文件名为 `MailAssistant-AppleSilicon-v2.1.1.dmg`。
 2. 在终端执行：
 
    ```sh
    cd '<DMG 所在目录>'
-   shasum -a 256 '邮箱助手-AppleSilicon-v2.1.1.dmg'
+   shasum -a 256 'MailAssistant-AppleSilicon-v2.1.1.dmg'
    ```
 
 3. 将结果与本文末尾 SHA-256 比较，必须完全一致。
@@ -234,5 +234,5 @@ CONNECT 403 是否正确分类：是 / 否 / 未执行
 
 ## 交付物校验
 
-- 文件：`邮箱助手-AppleSilicon-v2.1.1.dmg`
+- 文件：`MailAssistant-AppleSilicon-v2.1.1.dmg`
 - SHA-256：`8334b8f6b925af2bcf1e85bfe9561aa104130933be903d300b74aabb0bd801b9`

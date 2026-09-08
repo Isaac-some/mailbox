@@ -139,7 +139,7 @@ public class LocalAppPackagingPolicyTests
         var source = ReadBundledFile("build-dmg.sh");
 
         Assert.Contains("CFBundleShortVersionString", source, StringComparison.Ordinal);
-        Assert.Contains("AppleSilicon-v$APP_VERSION.dmg", source, StringComparison.Ordinal);
+        Assert.Contains("DMG_PATH=\"$BUILD_DIR/MailAssistant-AppleSilicon-v$APP_VERSION.dmg\"", source, StringComparison.Ordinal);
         Assert.DoesNotContain("AppleSilicon.dmg\"", source, StringComparison.Ordinal);
     }
 
