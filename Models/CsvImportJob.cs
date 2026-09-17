@@ -21,6 +21,7 @@ public sealed class CsvImportJob
     public int UserId { get; set; }
     public string UserName { get; set; } = string.Empty;
     public bool Enabled { get; set; } = true;
+    public bool AllowCrossUserCredentialUpdate { get; set; }
     public DateTime Created { get; set; } = DateTime.UtcNow;
     public DateTime? Started { get; set; }
     public DateTime? Completed { get; set; }

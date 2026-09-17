@@ -101,7 +101,8 @@ public sealed class CsvImportService : BackgroundService, ICsvImportService
                         new MailCredentialIntake(row.Email, row.Password, row.Domain, row.ClientId),
                         enabled: job.Enabled,
                         cancellationToken: cancellationToken,
-                        verifyCredential: false);
+                        verifyCredential: false,
+                        allowCrossUserCredentialUpdate: job.AllowCrossUserCredentialUpdate);
 
                     var display = new CsvImportCreatedRow
                     {

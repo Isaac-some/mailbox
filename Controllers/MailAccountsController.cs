@@ -3351,6 +3351,7 @@ namespace MailArchiver.Controllers
                     UserId = currentUserId.Value,
                     UserName = currentUsername ?? string.Empty,
                     Enabled = model.IsEnabled,
+                    AllowCrossUserCredentialUpdate = IsLocalApp(),
                     TotalRows = latestRows.Count,
                     FailedCount = failedRows.Count,
                     SkippedCount = result.SkippedRows.Count
@@ -3571,6 +3572,8 @@ namespace MailArchiver.Controllers
                 password = credentialIndex >= 0 ? fields[credentialIndex] : string.Empty;
                 clientId = fields.FirstOrDefault(value => Guid.TryParse(value?.Trim(), out _))?.Trim();
             }
+
+            email = CsvImportValuePolicy.NormalizeEmail(email);
 
             if (string.IsNullOrWhiteSpace(email))
             {

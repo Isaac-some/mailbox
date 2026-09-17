@@ -95,8 +95,8 @@ public class LocalAppPackagingPolicyTests
     {
         var source = ReadBundledFile("Info.plist");
 
-        Assert.Contains("<string>2.2.0</string>", source, StringComparison.Ordinal);
-        Assert.Contains("<string>220</string>", source, StringComparison.Ordinal);
+        Assert.Contains("<string>2.2.1</string>", source, StringComparison.Ordinal);
+        Assert.Contains("<string>221</string>", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -104,8 +104,8 @@ public class LocalAppPackagingPolicyTests
     {
         var source = ReadBundledFile("MailAssistant.Windows.csproj");
 
-        Assert.Contains("<Version>2.2.0</Version>", source, StringComparison.Ordinal);
-        Assert.Contains("<FileVersion>2.2.0.0</FileVersion>", source, StringComparison.Ordinal);
+        Assert.Contains("<Version>2.2.1</Version>", source, StringComparison.Ordinal);
+        Assert.Contains("<FileVersion>2.2.1.0</FileVersion>", source, StringComparison.Ordinal);
         Assert.Contains("<ApplicationIcon>AppIcon.ico</ApplicationIcon>", source, StringComparison.Ordinal);
     }
 
@@ -180,6 +180,8 @@ public class LocalAppPackagingPolicyTests
         Assert.Contains("_csvImportService.QueueImport(job)", controller, StringComparison.Ordinal);
         Assert.Contains("new MailCredentialIntake(row.Email, row.Password, row.Domain, row.ClientId)", service, StringComparison.Ordinal);
         Assert.Contains("verifyCredential: false", service, StringComparison.Ordinal);
+        Assert.Contains("AllowCrossUserCredentialUpdate = IsLocalApp()", controller, StringComparison.Ordinal);
+        Assert.Contains("allowCrossUserCredentialUpdate: job.AllowCrossUserCredentialUpdate", service, StringComparison.Ordinal);
         Assert.DoesNotContain("NormalizeAppPassword(row.Password)", controller, StringComparison.Ordinal);
     }
 

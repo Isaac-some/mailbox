@@ -5,6 +5,14 @@ namespace MailArchiver.Tests.Services;
 public class CsvImportHeaderPolicyTests
 {
     [Fact]
+    public void Email_value_removes_leading_rtf_control_words_from_exported_csv()
+    {
+        var email = CsvImportValuePolicy.NormalizeEmail(@"\f0\fs24 \cf0 person@yahoo.com");
+
+        Assert.Equal("person@yahoo.com", email);
+    }
+
+    [Fact]
     public void Accepts_the_canonical_four_column_interface_contract()
     {
         var accepted = CsvImportHeaderPolicy.TryCreateCanonicalIndex(

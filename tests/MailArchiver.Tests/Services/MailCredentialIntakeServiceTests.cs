@@ -114,6 +114,46 @@ public class MailCredentialIntakeServiceTests
     }
 
     [Fact]
+    public async Task Explicit_local_import_override_updates_cross_user_account_without_changing_ownership()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        await fixture.Service.UpsertAsync(
+            fixture.UserId,
+            new MailCredentialIntake("person@yahoo.com", "old-code"),
+            enabled: true,
+            verifyCredential: false);
+
+        var otherUser = new User
+        {
+            Username = "other-user",
+            Email = "other-user@example.com"
+        };
+        fixture.Context.Users.Add(otherUser);
+        await fixture.Context.SaveChangesAsync();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Service.UpsertAsync(
+            otherUser.Id,
+            new MailCredentialIntake("person@yahoo.com", "blocked-code"),
+            enabled: true,
+            verifyCredential: false));
+
+        var result = await fixture.Service.UpsertAsync(
+            otherUser.Id,
+            new MailCredentialIntake("person@yahoo.com", "new-code"),
+            enabled: true,
+            verifyCredential: false,
+            allowCrossUserCredentialUpdate: true);
+
+        Assert.False(result.Created);
+        Assert.Equal("enc:new-code", result.Account.Password);
+        var ownerIds = await fixture.Context.UserMailAccounts
+            .OrderBy(link => link.UserId)
+            .Select(link => link.UserId)
+            .ToListAsync();
+        Assert.Equal([fixture.UserId, otherUser.Id], ownerIds);
+    }
+
+    [Fact]
     public async Task Repeated_identical_intake_preserves_the_successful_route_and_rotated_refresh_token()
     {
         await using var fixture = await Fixture.CreateAsync();
