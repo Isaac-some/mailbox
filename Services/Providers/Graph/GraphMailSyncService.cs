@@ -1,6 +1,7 @@
 using MailArchiver.Data;
 using MailArchiver.Models;
 using MailArchiver.Services.Core;
+using MailArchiver.Services.Providers.Imap;
 using MailArchiver.Services.Shared;
 using MailArchiver.Utilities;
 using Microsoft.EntityFrameworkCore;
@@ -55,8 +56,9 @@ namespace MailArchiver.Services.Providers.Graph
         /// <summary>
         /// Syncs all emails from the M365 mailbox for the specified account.
         /// </summary>
-        public async Task SyncMailAccountAsync(MailAccount account, string? jobId = null)
+        public async Task SyncMailAccountAsync(MailAccount account, string? jobId = null, MailSyncRequestOptions? options = null)
         {
+            var effectiveOptions = (options ?? new MailSyncRequestOptions(account.MailboxSyncLookbackDays)).Normalize();
             _logger.LogInformation("Starting Graph API sync for M365 account: {AccountName}", account.Name);
 
             try
@@ -99,6 +101,13 @@ namespace MailArchiver.Services.Providers.Graph
                     {
                         var fullFolderPath = folderPaths.TryGetValue(folder.Id!, out var path) ? path : folder.DisplayName;
 
+                        if (effectiveOptions.TargetCategory.HasValue
+                            && MailboxFolderClassifier.Classify(fullFolderPath) != effectiveOptions.TargetCategory.Value)
+                        {
+                            processedFolders++;
+                            continue;
+                        }
+
                         if (!string.IsNullOrEmpty(folder.DisplayName) &&
                             (account.ExcludedFoldersList.Any(f => f.Equals(fullFolderPath, StringComparison.OrdinalIgnoreCase)) ||
                              account.ExcludedFoldersList.Any(f => f.Equals(folder.DisplayName, StringComparison.OrdinalIgnoreCase))))
@@ -118,7 +127,8 @@ namespace MailArchiver.Services.Providers.Graph
                             });
                         }
 
-                        var folderResult = await SyncFolderAsync(graphClient, folder, account, jobId, fullFolderPath);
+                        var folderResult = await SyncFolderAsync(
+                            graphClient, folder, account, jobId, fullFolderPath, effectiveOptions);
                         processedEmails += folderResult.ProcessedEmails;
                         newEmails += folderResult.NewEmails;
                         failedEmails += folderResult.FailedEmails;
@@ -160,7 +170,9 @@ namespace MailArchiver.Services.Providers.Graph
                         await _context.SaveChangesAsync();
                     }
 
-                    deletedEmails += await _coreService.EnforceLocalEmailLimitAsync(account.Id);
+                    deletedEmails += await _coreService.EnforceMailboxCategoryLimitsAsync(
+                        trackedAccount ?? account,
+                        effectiveOptions.LookbackDays);
                 }
                 else
                 {
@@ -301,7 +313,8 @@ namespace MailArchiver.Services.Providers.Graph
             MailFolder folder,
             MailAccount account,
             string? jobId,
-            string? fullFolderPath)
+            string? fullFolderPath,
+            MailSyncRequestOptions options)
         {
             var result = new SyncFolderResult();
             var folderNameForStorage = fullFolderPath ?? folder.DisplayName;
@@ -312,12 +325,13 @@ namespace MailArchiver.Services.Providers.Graph
             try
             {
                 bool isOutgoing = _folderService.IsOutgoingFolder(folder);
-                var lastSync = account.LastSync;
-
-                if (lastSync != new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc))
-                {
-                    lastSync = lastSync.AddHours(-12);
-                }
+                var category = MailboxFolderClassifier.Classify(folderNameForStorage);
+                var categoryLimit = options.TargetCategory == category && options.TargetLimit.HasValue
+                    ? options.TargetLimit.Value
+                    : account.IsMailboxCategoryExpanded(category)
+                        ? _mailSyncOptions.ExpandedMessagesPerCategory
+                        : _mailSyncOptions.InitialMessagesPerCategory;
+                var lastSync = DateTime.UtcNow.AddDays(-options.LookbackDays);
 
                 _logger.LogInformation("Syncing folder {FolderName} for account {AccountName} since {LastSync} (UTC)",
                     folder.DisplayName, account.Name, lastSync);
@@ -336,6 +350,12 @@ namespace MailArchiver.Services.Providers.Graph
 
                     if (currentPageMessages.Count == 0)
                         break;
+
+                    var remaining = categoryLimit - totalMessagesFound;
+                    if (remaining <= 0)
+                        break;
+                    if (currentPageMessages.Count > remaining)
+                        currentPageMessages = currentPageMessages.Take(remaining).ToList();
 
                     totalMessagesFound += currentPageMessages.Count;
                     result.ProcessedEmails += currentPageMessages.Count;
@@ -434,6 +454,7 @@ namespace MailArchiver.Services.Providers.Graph
                 var response = await graphClient.Users[account.EmailAddress].MailFolders[folder.Id].Messages.GetAsync((requestConfiguration) =>
                 {
                     requestConfiguration.QueryParameters.Filter = filter;
+                    requestConfiguration.QueryParameters.Orderby = new[] { "receivedDateTime desc" };
                     requestConfiguration.QueryParameters.Select = new string[]
                 {
                     "id", "internetMessageId", "subject", "from", "toRecipients", "ccRecipients", "bccRecipients",
@@ -465,11 +486,13 @@ namespace MailArchiver.Services.Providers.Graph
                     var response = await graphClient.Users[account.EmailAddress].MailFolders[folder.Id].Messages.GetAsync((requestConfiguration) =>
                     {
                         requestConfiguration.QueryParameters.Filter = filter;
+                        requestConfiguration.QueryParameters.Orderby = new[] { "receivedDateTime desc" };
                         requestConfiguration.QueryParameters.Select = new string[]
                         {
                             "id", "internetMessageId", "subject", "from", "sentDateTime", "receivedDateTime", "lastModifiedDateTime",
                             "internetMessageHeaders"
                         };
+                        requestConfiguration.QueryParameters.Orderby = new[] { "receivedDateTime desc" };
                         requestConfiguration.QueryParameters.Top = _batchOptions.BatchSize;
                     });
 

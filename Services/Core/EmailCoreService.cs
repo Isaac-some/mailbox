@@ -1,6 +1,7 @@
 using MailArchiver.Data;
 using MailArchiver.Models;
 using MailArchiver.Models.ViewModels;
+using MailArchiver.Services.Providers.Imap;
 using MailArchiver.Services.Shared;
 using MailArchiver.Utilities;
 using MailArchiver.ViewModels;
@@ -54,7 +55,8 @@ namespace MailArchiver.Services.Core
             string sortBy = "SentDate",
             string sortOrder = "desc",
             bool useReceivedDateForRange = false,
-            int? allowedUserId = null)
+            int? allowedUserId = null,
+            MailboxFolderCategory? folderCategory = null)
         {
             var startTime = DateTime.UtcNow;
 
@@ -77,12 +79,13 @@ namespace MailArchiver.Services.Core
                     sortBy,
                     sortOrder,
                     useReceivedDateForRange,
-                    allowedUserId);
+                    allowedUserId,
+                    folderCategory);
             }
 
             try
             {
-                return await SearchEmailsOptimizedAsync(searchTerm, fromDate, toDate, accountId, folderName, isOutgoing, skip, take, allowedAccountIds, sortBy, sortOrder, useReceivedDateForRange, allowedUserId);
+                return await SearchEmailsOptimizedAsync(searchTerm, fromDate, toDate, accountId, folderName, isOutgoing, skip, take, allowedAccountIds, sortBy, sortOrder, useReceivedDateForRange, allowedUserId, folderCategory);
             }
             catch (Exception ex)
             {
@@ -100,7 +103,8 @@ namespace MailArchiver.Services.Core
                     sortBy,
                     sortOrder,
                     useReceivedDateForRange,
-                    allowedUserId);
+                    allowedUserId,
+                    folderCategory);
             }
         }
 
@@ -117,7 +121,8 @@ namespace MailArchiver.Services.Core
             string sortBy = "SentDate",
             string sortOrder = "desc",
             bool useReceivedDateForRange = false,
-            int? allowedUserId = null)
+            int? allowedUserId = null,
+            MailboxFolderCategory? folderCategory = null)
         {
             var startTime = DateTime.UtcNow;
             var whereConditions = new List<string>();
@@ -300,6 +305,13 @@ namespace MailArchiver.Services.Core
                 paramCounter++;
             }
 
+            if (folderCategory.HasValue)
+            {
+                whereConditions.Add($@"""FolderCategory"" = @param{paramCounter}");
+                parameters.Add(new Npgsql.NpgsqlParameter($"@param{paramCounter}", folderCategory.Value.ToString()));
+                paramCounter++;
+            }
+
             var whereClause = whereConditions.Any() ? "WHERE " + string.Join(" AND ", whereConditions) : "";
 
             // Count query
@@ -336,7 +348,7 @@ namespace MailArchiver.Services.Core
                     )
                     SELECT e.""Id"", e.""MailAccountId"", e.""MessageId"", e.""Subject"", e.""Body"", e.""HtmlBody"",
                            e.""From"", e.""To"", e.""Cc"", e.""Bcc"", e.""SentDate"", e.""ReceivedDate"",
-                           e.""IsOutgoing"", e.""HasAttachments"", e.""FolderName"", e.""IsLocked"",
+                           e.""IsOutgoing"", e.""HasAttachments"", e.""FolderName"", e.""FolderCategory"", e.""IsLocked"",
                            ma.""Id"" as ""AccountId"", ma.""Name"" as ""AccountName"", ma.""EmailAddress"" as ""AccountEmail""
                     FROM ""page"" p
                     INNER JOIN mail_archiver.""ArchivedEmails"" e ON e.""Id"" = p.""Id""
@@ -349,7 +361,7 @@ namespace MailArchiver.Services.Core
                 dataSql = $@"
                     SELECT e.""Id"", e.""MailAccountId"", e.""MessageId"", e.""Subject"", e.""Body"", e.""HtmlBody"",
                            e.""From"", e.""To"", e.""Cc"", e.""Bcc"", e.""SentDate"", e.""ReceivedDate"",
-                           e.""IsOutgoing"", e.""HasAttachments"", e.""FolderName"", e.""IsLocked"",
+                           e.""IsOutgoing"", e.""HasAttachments"", e.""FolderName"", e.""FolderCategory"", e.""IsLocked"",
                            ma.""Id"" as ""AccountId"", ma.""Name"" as ""AccountName"", ma.""EmailAddress"" as ""AccountEmail""
                     FROM mail_archiver.""ArchivedEmails"" e
                     INNER JOIN mail_archiver.""MailAccounts"" ma ON e.""MailAccountId"" = ma.""Id""
@@ -411,6 +423,10 @@ namespace MailArchiver.Services.Core
                     IsOutgoing = reader.GetBoolean(reader.GetOrdinal("IsOutgoing")),
                     HasAttachments = reader.GetBoolean(reader.GetOrdinal("HasAttachments")),
                     FolderName = reader.IsDBNull(reader.GetOrdinal("FolderName")) ? "" : reader.GetString(reader.GetOrdinal("FolderName")),
+                    FolderCategory = reader.IsDBNull(reader.GetOrdinal("FolderCategory"))
+                        || !Enum.TryParse<MailboxFolderCategory>(reader.GetString(reader.GetOrdinal("FolderCategory")), out var category)
+                            ? MailboxFolderCategory.Other
+                            : category,
                     IsLocked = reader.GetBoolean(reader.GetOrdinal("IsLocked")),
                     MailAccount = new MailAccount
                     {
@@ -583,7 +599,8 @@ namespace MailArchiver.Services.Core
             string sortBy = "SentDate",
             string sortOrder = "desc",
             bool useReceivedDateForRange = false,
-            int? allowedUserId = null)
+            int? allowedUserId = null,
+            MailboxFolderCategory? folderCategory = null)
         {
             var baseQuery = _context.ArchivedEmails.AsNoTracking().AsQueryable();
 
@@ -623,6 +640,9 @@ namespace MailArchiver.Services.Core
 
             if (!string.IsNullOrEmpty(folderName))
                 baseQuery = baseQuery.Where(e => e.FolderName.ToLower() == folderName.ToLower());
+
+            if (folderCategory.HasValue)
+                baseQuery = baseQuery.Where(e => e.FolderCategory == folderCategory.Value);
 
             IQueryable<ArchivedEmail> searchQuery = baseQuery;
             if (!string.IsNullOrEmpty(searchTerm))
@@ -817,6 +837,90 @@ namespace MailArchiver.Services.Core
             }
 
             return deleted;
+        }
+
+        public async Task<int> EnforceMailboxCategoryLimitsAsync(
+            MailAccount account,
+            int lookbackDays,
+            CancellationToken cancellationToken = default)
+        {
+            var cutoff = DateTime.UtcNow.AddDays(-Math.Clamp(lookbackDays, 1, 30));
+            var initialLimit = Math.Max(1, _mailSyncOptions.InitialMessagesPerCategory);
+            var expandedLimit = Math.Max(initialLimit, _mailSyncOptions.ExpandedMessagesPerCategory);
+            var batchSize = Math.Clamp(_batchOptions.BatchSize, 1, 100);
+            var deleted = 0;
+
+            foreach (var category in Enum.GetValues<MailboxFolderCategory>())
+            {
+                var limit = account.IsMailboxCategoryExpanded(category) ? expandedLimit : initialLimit;
+                while (true)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var emailIds = await _context.ArchivedEmails
+                        .Where(email => email.MailAccountId == account.Id && email.FolderCategory == category)
+                        .OrderByDescending(email => email.ReceivedDate)
+                        .ThenByDescending(email => email.Id)
+                        .Select(email => new { email.Id, email.ReceivedDate })
+                        .Skip(limit)
+                        .Select(email => email.Id)
+                        .Take(batchSize)
+                        .ToListAsync(cancellationToken);
+
+                    if (emailIds.Count == 0)
+                        break;
+
+                    deleted += await DeleteArchivedEmailsAsync(emailIds, cancellationToken);
+                }
+
+                var expiredIds = await _context.ArchivedEmails
+                    .Where(email => email.MailAccountId == account.Id
+                        && email.FolderCategory == category
+                        && email.ReceivedDate < cutoff)
+                    .Select(email => email.Id)
+                    .Take(batchSize)
+                    .ToListAsync(cancellationToken);
+                while (expiredIds.Count > 0)
+                {
+                    deleted += await DeleteArchivedEmailsAsync(expiredIds, cancellationToken);
+                    expiredIds = await _context.ArchivedEmails
+                        .Where(email => email.MailAccountId == account.Id
+                            && email.FolderCategory == category
+                            && email.ReceivedDate < cutoff)
+                        .Select(email => email.Id)
+                        .Take(batchSize)
+                        .ToListAsync(cancellationToken);
+                }
+            }
+
+            if (deleted > 0)
+            {
+                await _context.AttachmentContents
+                    .Where(content => !content.Attachments.Any())
+                    .ExecuteDeleteAsync(cancellationToken);
+                _logger.LogInformation(
+                    "Mailbox category retention removed {Count} email(s) for account {AccountId}",
+                    deleted,
+                    account.Id);
+            }
+
+            return deleted;
+        }
+
+        private async Task<int> DeleteArchivedEmailsAsync(
+            IReadOnlyCollection<int> emailIds,
+            CancellationToken cancellationToken)
+        {
+            await _context.ArchivedEmails
+                .Where(email => emailIds.Contains(email.Id) && email.IsLocked)
+                .ExecuteUpdateAsync(
+                    updates => updates.SetProperty(email => email.IsLocked, false),
+                    cancellationToken);
+            await _context.EmailAttachments
+                .Where(attachment => emailIds.Contains(attachment.ArchivedEmailId))
+                .ExecuteDeleteAsync(cancellationToken);
+            return await _context.ArchivedEmails
+                .Where(email => emailIds.Contains(email.Id))
+                .ExecuteDeleteAsync(cancellationToken);
         }
 
         #endregion
@@ -1149,7 +1253,8 @@ namespace MailArchiver.Services.Core
             MimeMessage message,
             bool isOutgoing,
             string? folderName = null,
-            DateTimeOffset? receivedDate = null)
+            DateTimeOffset? receivedDate = null,
+            MailboxFolderCategory? folderCategory = null)
         {
             // Extract date with fallback handling for malformed Date headers
             var emailDate = ExtractEmailDate(message);
@@ -1175,17 +1280,21 @@ namespace MailArchiver.Services.Core
             if (existingEmail != null)
             {
                 var cleanFolderName = MailContentHelper.CleanText(folderName ?? string.Empty);
+                var resolvedFolderCategory = folderCategory ?? MailboxFolderClassifier.Classify(cleanFolderName);
                 var needsReceivedDateUpdate = existingEmail.ReceivedDate != convertedReceivedDate;
                 var needsFolderUpdate = existingEmail.FolderName != cleanFolderName;
+                var needsCategoryUpdate = existingEmail.FolderCategory != resolvedFolderCategory;
                 var oldFolder = existingEmail.FolderName;
 
-                if (needsReceivedDateUpdate || needsFolderUpdate)
+                if (needsReceivedDateUpdate || needsFolderUpdate || needsCategoryUpdate)
                     await UpdateExistingEmailMetadataAsync(
                         existingEmail,
                         convertedReceivedDate,
                         cleanFolderName,
+                        resolvedFolderCategory,
                         needsReceivedDateUpdate,
-                        needsFolderUpdate);
+                        needsFolderUpdate,
+                        needsCategoryUpdate);
 
                 if (needsFolderUpdate)
                     _logger.LogInformation("Updated folder for existing email: {Subject} from '{OldFolder}' to '{NewFolder}'",
@@ -1384,6 +1493,7 @@ namespace MailArchiver.Services.Core
                     OriginalBodyHtml = (hasNullBytesInHtml || (!string.IsNullOrEmpty(originalHtmlBody) && originalHtmlBody != htmlBody)) 
                         ? Encoding.UTF8.GetBytes(hasNullBytesInHtml ? rawHtmlBody! : originalHtmlBody!) : null,
                     FolderName = cleanFolderName,
+                    FolderCategory = folderCategory ?? MailboxFolderClassifier.Classify(cleanFolderName),
                     RawHeaders = rawHeaders, // Store raw headers for forensic/compliance purposes
                     Attachments = new List<EmailAttachment>() // Initialize collection for hash calculation
                 };
@@ -1828,16 +1938,20 @@ namespace MailArchiver.Services.Core
             ArchivedEmail existingEmail,
             DateTime receivedDate,
             string folderName,
+            MailboxFolderCategory folderCategory,
             bool updateReceivedDate,
-            bool updateFolder)
+            bool updateFolder,
+            bool updateCategory)
         {
-            var mustTemporarilyUnlock = updateReceivedDate && existingEmail.IsLocked;
+            var mustTemporarilyUnlock = (updateReceivedDate || updateFolder || updateCategory) && existingEmail.IsLocked;
             if (!mustTemporarilyUnlock)
             {
                 if (updateReceivedDate)
                     existingEmail.ReceivedDate = receivedDate;
                 if (updateFolder)
                     existingEmail.FolderName = folderName;
+                if (updateCategory)
+                    existingEmail.FolderCategory = folderCategory;
                 await _context.SaveChangesAsync();
                 return;
             }
@@ -1851,6 +1965,8 @@ namespace MailArchiver.Services.Core
                 existingEmail.ReceivedDate = receivedDate;
                 if (updateFolder)
                     existingEmail.FolderName = folderName;
+                if (updateCategory)
+                    existingEmail.FolderCategory = folderCategory;
                 await _context.SaveChangesAsync();
 
                 existingEmail.IsLocked = true;

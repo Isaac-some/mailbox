@@ -32,6 +32,14 @@ public static class SupportedMailProviderPolicy
                 return true;
             }
 
+            if (OutlookDomainPolicy.IsOutlookDomain(domain))
+            {
+                preset = new ImapProviderPreset(
+                    "Outlook", "outlook.office365.com", 993, true,
+                    "smtp-mail.outlook.com", 587, true);
+                return true;
+            }
+
             preset = domain switch
             {
                 "gmail.com" or "googlemail.com" => new ImapProviderPreset(
@@ -43,9 +51,6 @@ public static class SupportedMailProviderPolicy
                 "gmx.net" or "gmx.de" => new ImapProviderPreset(
                     "GMX", "imap.gmx.net", 993, true,
                     "mail.gmx.net", 587, true),
-                "outlook.com" or "hotmail.com" or "live.com" or "msn.com" => new ImapProviderPreset(
-                    "Outlook", "outlook.office365.com", 993, true,
-                    "smtp-mail.outlook.com", 587, true),
                 _ => new ImapProviderPreset(
                     "自定义域名", $"imap.{domain}", 993, true,
                     $"smtp.{domain}", 587, true)

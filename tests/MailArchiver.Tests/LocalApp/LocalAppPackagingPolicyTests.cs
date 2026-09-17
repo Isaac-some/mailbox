@@ -10,7 +10,10 @@ public class LocalAppPackagingPolicyTests
         using var document = JsonDocument.Parse(ReadBundledFile("appsettings.Local.json"));
         var mailSync = document.RootElement.GetProperty("MailSync");
 
-        Assert.True(mailSync.GetProperty("SyncInboxOnly").GetBoolean());
+        Assert.False(mailSync.GetProperty("SyncInboxOnly").GetBoolean());
+        Assert.Equal(7, mailSync.GetProperty("LookbackDays").GetInt32());
+        Assert.Equal(10, mailSync.GetProperty("InitialMessagesPerCategory").GetInt32());
+        Assert.Equal(30, mailSync.GetProperty("ExpandedMessagesPerCategory").GetInt32());
         Assert.True(mailSync.GetProperty("MaxConcurrentSyncs").GetInt32() > 0);
     }
 
@@ -75,14 +78,14 @@ public class LocalAppPackagingPolicyTests
     }
 
     [Fact]
-    public void Every_synchronized_mailbox_provider_enforces_the_local_message_cap()
+    public void Every_synchronized_mailbox_provider_enforces_category_message_caps()
     {
         Assert.Contains(
-            "EnforceLocalEmailLimitAsync(account.Id)",
+            "EnforceMailboxCategoryLimitsAsync(",
             ReadBundledFile("ImapMailSyncService.cs"),
             StringComparison.Ordinal);
         Assert.Contains(
-            "EnforceLocalEmailLimitAsync(account.Id)",
+            "EnforceMailboxCategoryLimitsAsync(",
             ReadBundledFile("GraphMailSyncService.cs"),
             StringComparison.Ordinal);
     }
@@ -92,8 +95,8 @@ public class LocalAppPackagingPolicyTests
     {
         var source = ReadBundledFile("Info.plist");
 
-        Assert.Contains("<string>2.1.1</string>", source, StringComparison.Ordinal);
-        Assert.Contains("<string>211</string>", source, StringComparison.Ordinal);
+        Assert.Contains("<string>2.2.0</string>", source, StringComparison.Ordinal);
+        Assert.Contains("<string>220</string>", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -101,8 +104,8 @@ public class LocalAppPackagingPolicyTests
     {
         var source = ReadBundledFile("MailAssistant.Windows.csproj");
 
-        Assert.Contains("<Version>2.1.1</Version>", source, StringComparison.Ordinal);
-        Assert.Contains("<FileVersion>2.1.1.0</FileVersion>", source, StringComparison.Ordinal);
+        Assert.Contains("<Version>2.2.0</Version>", source, StringComparison.Ordinal);
+        Assert.Contains("<FileVersion>2.2.0.0</FileVersion>", source, StringComparison.Ordinal);
         Assert.Contains("<ApplicationIcon>AppIcon.ico</ApplicationIcon>", source, StringComparison.Ordinal);
     }
 

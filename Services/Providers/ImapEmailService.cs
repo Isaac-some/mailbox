@@ -40,8 +40,8 @@ namespace MailArchiver.Services.Providers
         // IProviderEmailService
         // ========================================
 
-        public Task SyncMailAccountAsync(MailAccount account, string? jobId = null)
-            => _syncService.SyncMailAccountAsync(account, jobId);
+        public Task SyncMailAccountAsync(MailAccount account, string? jobId = null, MailSyncRequestOptions? options = null)
+            => _syncService.SyncMailAccountAsync(account, jobId, options);
 
         public async Task<bool> TestConnectionAsync(MailAccount account)
             => await _syncService.TestConnectionAsync(account);

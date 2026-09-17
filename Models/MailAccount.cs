@@ -69,6 +69,17 @@ public class MailAccount
     public int? SyncIntervalMinutes { get; set; }
     public int? FullSyncIntervalHours { get; set; }
     public DateTime? LastFullSync { get; set; }
+
+    // Lightweight mailbox preferences. A category starts at 10 messages and
+    // remains expanded to 30 after the user explicitly asks for more.
+    public int MailboxSyncLookbackDays { get; set; } = 7;
+    public int ExpandedMailboxCategories { get; set; }
+
+    public bool IsMailboxCategoryExpanded(MailboxFolderCategory category) =>
+        (ExpandedMailboxCategories & category.ToExpansionFlag()) != 0;
+
+    public void ExpandMailboxCategory(MailboxFolderCategory category) =>
+        ExpandedMailboxCategories |= category.ToExpansionFlag();
     
     [NotMapped]
     public List<string> ExcludedFoldersList

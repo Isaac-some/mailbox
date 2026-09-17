@@ -97,6 +97,10 @@ namespace MailArchiver.Data
                 .HasColumnType("text");
 
             modelBuilder.Entity<ArchivedEmail>()
+                .HasIndex(e => new { e.MailAccountId, e.FolderCategory, e.ReceivedDate })
+                .HasDatabaseName("IX_ArchivedEmails_Account_Category_ReceivedDate");
+
+            modelBuilder.Entity<ArchivedEmail>()
                 .Property(e => e.RawHeaders)
                 .HasColumnType("text")
                 .IsRequired(false);
@@ -255,6 +259,11 @@ namespace MailArchiver.Data
                 .Property(e => e.Provider)
                 .HasConversion<string>()
                 .HasMaxLength(10);
+
+            modelBuilder.Entity<ArchivedEmail>()
+                .Property(e => e.FolderCategory)
+                .HasConversion<string>()
+                .HasMaxLength(16);
 
             modelBuilder.Entity<MailAccount>()
                 .Property(e => e.MailProviderKind)

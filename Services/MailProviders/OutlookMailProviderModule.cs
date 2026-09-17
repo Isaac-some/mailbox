@@ -1,4 +1,3 @@
-using MailAddress = System.Net.Mail.MailAddress;
 using MailArchiver.Models;
 using MailKit.Net.Imap;
 using MailKit.Security;
@@ -8,11 +7,6 @@ namespace MailArchiver.Services.MailProviders;
 
 public sealed class OutlookMailProviderModule : IMailProviderModule
 {
-    private static readonly HashSet<string> KnownDomains = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "outlook.com", "hotmail.com", "live.com", "msn.com"
-    };
-
     private readonly IMsaTokenManager _tokenManager;
     private readonly IOutlookGraphMailSender _graphMailSender;
     private readonly IOutlookSmtpMailSender? _smtpMailSender;
@@ -35,14 +29,7 @@ public sealed class OutlookMailProviderModule : IMailProviderModule
 
     public bool SupportsAddress(string emailAddress)
     {
-        try
-        {
-            return KnownDomains.Contains(new MailAddress(emailAddress.Trim()).Host);
-        }
-        catch (FormatException)
-        {
-            return false;
-        }
+        return OutlookDomainPolicy.IsOutlookAddress(emailAddress);
     }
 
     public ImapEndpoint GetIncomingEndpoint(MailAccount account)

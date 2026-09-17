@@ -71,6 +71,60 @@ public class LocalAppSqliteRegressionTests
         Assert.Equal("newly-received", remaining);
     }
 
+    [Fact]
+    public async Task Category_limits_keep_each_mailbox_category_independently()
+    {
+        await using var database = await CreateDatabaseAsync();
+        var account = await SeedAccountAsync(database.Context);
+        account.ExpandMailboxCategory(MailboxFolderCategory.Sent);
+        database.Context.ArchivedEmails.AddRange(
+            BuildEmail(account, "inbox-new", DateTime.UtcNow, category: MailboxFolderCategory.Inbox),
+            BuildEmail(account, "inbox-old", DateTime.UtcNow.AddMinutes(-1), category: MailboxFolderCategory.Inbox),
+            BuildEmail(account, "sent-1", DateTime.UtcNow, category: MailboxFolderCategory.Sent),
+            BuildEmail(account, "sent-2", DateTime.UtcNow.AddMinutes(-1), category: MailboxFolderCategory.Sent),
+            BuildEmail(account, "sent-3", DateTime.UtcNow.AddMinutes(-2), category: MailboxFolderCategory.Sent),
+            BuildEmail(account, "sent-4", DateTime.UtcNow.AddMinutes(-3), category: MailboxFolderCategory.Sent),
+            BuildEmail(account, "junk", DateTime.UtcNow, category: MailboxFolderCategory.Junk));
+        await database.Context.SaveChangesAsync();
+
+        var service = CreateService(database.Context, new MailSyncOptions
+        {
+            InitialMessagesPerCategory = 1,
+            ExpandedMessagesPerCategory = 3
+        });
+        await service.EnforceMailboxCategoryLimitsAsync(account, 7);
+
+        var remaining = await database.Context.ArchivedEmails
+            .AsNoTracking()
+            .GroupBy(email => email.FolderCategory)
+            .ToDictionaryAsync(group => group.Key, group => group.Count());
+        Assert.Equal(1, remaining[MailboxFolderCategory.Inbox]);
+        Assert.Equal(3, remaining[MailboxFolderCategory.Sent]);
+        Assert.Equal(1, remaining[MailboxFolderCategory.Junk]);
+    }
+
+    [Fact]
+    public async Task Search_filters_normalized_folder_category_and_orders_by_received_date()
+    {
+        await using var database = await CreateDatabaseAsync();
+        var account = await SeedAccountAsync(database.Context);
+        database.Context.ArchivedEmails.AddRange(
+            BuildEmail(account, "older-junk", DateTime.UtcNow.AddMinutes(-2), category: MailboxFolderCategory.Junk),
+            BuildEmail(account, "newer-junk", DateTime.UtcNow.AddMinutes(-1), category: MailboxFolderCategory.Junk),
+            BuildEmail(account, "inbox", DateTime.UtcNow, category: MailboxFolderCategory.Inbox));
+        await database.Context.SaveChangesAsync();
+
+        var service = CreateService(database.Context);
+        var (emails, total) = await service.SearchEmailsAsync(
+            null!, null, null, account.Id, null!, null, 0, 20,
+            sortBy: "ReceivedDate",
+            sortOrder: "desc",
+            folderCategory: MailboxFolderCategory.Junk);
+
+        Assert.Equal(2, total);
+        Assert.Equal(new[] { "newer-junk", "older-junk" }, emails.Select(email => email.Subject));
+    }
+
     private static async Task<TestDatabase> CreateDatabaseAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");
@@ -102,7 +156,8 @@ public class LocalAppSqliteRegressionTests
         MailAccount account,
         string subject,
         DateTime receivedDate,
-        DateTime? sentDate = null) =>
+        DateTime? sentDate = null,
+        MailboxFolderCategory category = MailboxFolderCategory.Inbox) =>
         new()
         {
             MailAccountId = account.Id,
@@ -119,7 +174,8 @@ public class LocalAppSqliteRegressionTests
             ReceivedDate = receivedDate,
             IsOutgoing = false,
             HasAttachments = false,
-            FolderName = "INBOX"
+            FolderName = category == MailboxFolderCategory.Inbox ? "INBOX" : category.ToDisplayName(),
+            FolderCategory = category
         };
 
     private static EmailCoreService CreateService(

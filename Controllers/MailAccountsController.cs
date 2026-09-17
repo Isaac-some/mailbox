@@ -1468,7 +1468,11 @@ namespace MailArchiver.Controllers
         // POST: MailAccounts/Sync/5
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> Sync(int id)
+        public async Task<IActionResult> Sync(
+            int id,
+            int? lookbackDays = null,
+            MailboxFolderCategory? folderCategory = null,
+            bool loadMore = false)
         {
             var isMailboxRefresh = string.Equals(
                 Request.Headers["X-Requested-With"],
@@ -1523,6 +1527,30 @@ namespace MailArchiver.Controllers
                 return RedirectToAction(nameof(Index));
             }
 
+            if (lookbackDays.HasValue && lookbackDays.Value is not (7 or 30))
+            {
+                const string message = "同步范围只能选择最近 7 天或 30 天。";
+                if (isMailboxRefresh)
+                    return BadRequest(new { message });
+                TempData["ErrorMessage"] = message;
+                return RedirectToAction("Index", "Emails", new { SelectedAccountId = id });
+            }
+
+            if (loadMore && (!folderCategory.HasValue || !Enum.IsDefined(folderCategory.Value)))
+            {
+                const string message = "请选择要查看更多的邮件分类。";
+                if (isMailboxRefresh)
+                    return BadRequest(new { message });
+                TempData["ErrorMessage"] = message;
+                return RedirectToAction("Index", "Emails", new { SelectedAccountId = id });
+            }
+
+            if (lookbackDays.HasValue)
+                account.MailboxSyncLookbackDays = lookbackDays.Value;
+            if (loadMore && folderCategory.HasValue)
+                account.ExpandMailboxCategory(folderCategory.Value);
+            await _context.SaveChangesAsync();
+
             // MSA accounts need either OAuth or an explicitly imported password
             // fallback. Do not block password-only Outlook rows before the provider
             // module gets a chance to authenticate them over IMAP/SMTP.
@@ -1536,7 +1564,14 @@ namespace MailArchiver.Controllers
                 return RedirectToAction(nameof(Edit), new { id });
             }
 
-            var queueStatus = _onDemandSyncQueue.Enqueue(id, MailSyncRequestPriority.Interactive);
+            var syncOptions = new MailSyncRequestOptions(
+                account.MailboxSyncLookbackDays,
+                loadMore ? folderCategory : null,
+                loadMore ? 30 : null);
+            var queueStatus = _onDemandSyncQueue.Enqueue(
+                id,
+                MailSyncRequestPriority.Interactive,
+                options: syncOptions);
             if (isMailboxRefresh)
             {
                 return Json(new

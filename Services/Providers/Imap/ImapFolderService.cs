@@ -68,6 +68,11 @@ namespace MailArchiver.Services.Providers.Imap
                                 allFolders.Add(folder);
                             }
                         }
+
+                        // LIST commonly returns only the namespace's direct children.
+                        // Walk through NoSelect containers as well, because providers such
+                        // as Gmail keep selectable system folders below one.
+                        await AddSelectableDescendantsAsync(rootFolders, allFolders);
                     }
                     catch (Exception getFoldersEx)
                     {
@@ -158,6 +163,46 @@ namespace MailArchiver.Services.Providers.Imap
             }
 
             return allFolders;
+        }
+
+        private async Task AddSelectableDescendantsAsync(
+            IEnumerable<IMailFolder> roots,
+            List<IMailFolder> allFolders)
+        {
+            var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var knownSelectable = allFolders
+                .Select(folder => folder.FullName)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var toProcess = new Queue<IMailFolder>(roots.Where(folder =>
+                !folder.Attributes.HasFlag(FolderAttributes.NonExistent)));
+
+            while (toProcess.Count > 0)
+            {
+                var current = toProcess.Dequeue();
+                if (!visited.Add(current.FullName))
+                    continue;
+
+                try
+                {
+                    var children = await current.GetSubfoldersAsync(false);
+                    foreach (var child in children)
+                    {
+                        if (child.Attributes.HasFlag(FolderAttributes.NonExistent))
+                            continue;
+
+                        toProcess.Enqueue(child);
+                        if (!child.Attributes.HasFlag(FolderAttributes.NoSelect)
+                            && knownSelectable.Add(child.FullName))
+                        {
+                            allFolders.Add(child);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Could not enumerate subfolders for {FolderName}", current.FullName);
+                }
+            }
         }
 
         /// <summary>

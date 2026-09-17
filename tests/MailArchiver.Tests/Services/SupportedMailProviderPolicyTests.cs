@@ -37,10 +37,17 @@ public class SupportedMailProviderPolicyTests
         Assert.False(resolved);
     }
 
-    [Fact]
-    public void TryResolve_uses_outlook_hosts_for_microsoft_consumer_domains()
+    [Theory]
+    [InlineData("reader@outlook.com")]
+    [InlineData("reader@outlook.sg")]
+    [InlineData("reader@outlook.fr")]
+    [InlineData("reader@outlook.es")]
+    [InlineData("reader@outlook.com.au")]
+    [InlineData("reader@outlook.de")]
+    [InlineData("reader@outlook.jp")]
+    public void TryResolve_uses_outlook_hosts_for_microsoft_consumer_domains(string email)
     {
-        var resolved = SupportedMailProviderPolicy.TryResolve("reader@outlook.com", out var preset);
+        var resolved = SupportedMailProviderPolicy.TryResolve(email, out var preset);
 
         Assert.True(resolved);
         Assert.Equal("Outlook", preset.Provider);
@@ -57,5 +64,15 @@ public class SupportedMailProviderPolicyTests
         Assert.Equal("自定义域名", preset.Provider);
         Assert.Equal("imap.corp.example", preset.ImapServer);
         Assert.Equal("smtp.corp.example", preset.SmtpServer);
+    }
+
+    [Fact]
+    public void TryResolve_does_not_treat_unknown_outlook_domain_as_microsoft_consumer_domain()
+    {
+        var resolved = SupportedMailProviderPolicy.TryResolve("reader@outlook.example", out var preset);
+
+        Assert.True(resolved);
+        Assert.Equal("自定义域名", preset.Provider);
+        Assert.Equal("imap.outlook.example", preset.ImapServer);
     }
 }

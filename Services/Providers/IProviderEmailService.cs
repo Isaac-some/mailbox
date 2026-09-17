@@ -13,7 +13,7 @@ namespace MailArchiver.Services.Providers
         /// <param name="account">The mail account to sync</param>
         /// <param name="jobId">Optional sync job ID for progress tracking</param>
         /// <returns>Task</returns>
-        Task SyncMailAccountAsync(MailAccount account, string? jobId = null);
+        Task SyncMailAccountAsync(MailAccount account, string? jobId = null, MailSyncRequestOptions? options = null);
 
         /// <summary>
         /// Tests the connection to the email provider

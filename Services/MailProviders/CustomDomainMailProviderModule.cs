@@ -13,7 +13,7 @@ public sealed class CustomDomainMailProviderModule : PasswordAndOAuthMailProvide
 {
     private static readonly HashSet<string> BuiltInDomains = new(StringComparer.OrdinalIgnoreCase)
     {
-        "gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com", "msn.com",
+        "gmail.com", "googlemail.com",
         "gmx.com", "gmx.net", "gmx.de"
     };
 
@@ -31,6 +31,7 @@ public sealed class CustomDomainMailProviderModule : PasswordAndOAuthMailProvide
         var domain = DomainOf(emailAddress);
         return !string.IsNullOrWhiteSpace(domain) &&
             !BuiltInDomains.Contains(domain) &&
+            !OutlookDomainPolicy.IsOutlookDomain(domain) &&
             !domain.StartsWith("yahoo.", StringComparison.OrdinalIgnoreCase);
     }
 

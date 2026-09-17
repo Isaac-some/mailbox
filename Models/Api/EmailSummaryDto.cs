@@ -13,6 +13,7 @@ public class EmailSummaryDto
     public bool IsOutgoing { get; set; }
     public bool HasAttachments { get; set; }
     public string FolderName { get; set; } = string.Empty;
+    public MailboxFolderCategory FolderCategory { get; set; }
 
     public static EmailSummaryDto FromEntity(ArchivedEmail e)
     {
@@ -26,7 +27,8 @@ public class EmailSummaryDto
             SentDate = e.SentDate,
             IsOutgoing = e.IsOutgoing,
             HasAttachments = e.HasAttachments,
-            FolderName = e.FolderName
+            FolderName = e.FolderName,
+            FolderCategory = e.FolderCategory
         };
     }
 }

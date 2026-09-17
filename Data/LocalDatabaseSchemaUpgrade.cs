@@ -32,6 +32,8 @@ public static class LocalDatabaseSchemaUpgrade
             await EnsureNullableTextColumnAsync(connection, "MailAccounts", "ImportedDomain", cancellationToken);
             await EnsureTextColumnAsync(connection, "MailAccounts", "PreferredIncomingAuth", "Unknown", cancellationToken);
             await EnsureTextColumnAsync(connection, "MailAccounts", "PreferredOutgoingAuth", "Unknown", cancellationToken);
+            await EnsureIntegerColumnAsync(connection, "MailAccounts", "MailboxSyncLookbackDays", 7, cancellationToken);
+            await EnsureIntegerColumnAsync(connection, "MailAccounts", "ExpandedMailboxCategories", 0, cancellationToken);
             if (await HasColumnAsync(connection, "MailAccounts", "Provider", cancellationToken))
             {
                 await ExecuteAsync(connection, @"
@@ -45,6 +47,32 @@ public static class LocalDatabaseSchemaUpgrade
                     ELSE ""MailProviderKind""
                 END
                 WHERE ""MailProviderKind"" IS NULL;", cancellationToken);
+            }
+
+            if (await HasTableAsync(connection, "ArchivedEmails", cancellationToken))
+            {
+                var needsFolderCategoryBackfill = !await HasColumnAsync(
+                    connection, "ArchivedEmails", "FolderCategory", cancellationToken);
+                await EnsureTextColumnAsync(connection, "ArchivedEmails", "FolderCategory", "Other", cancellationToken);
+                if (needsFolderCategoryBackfill)
+                {
+                    await ExecuteAsync(connection, @"
+                        UPDATE ""ArchivedEmails""
+                        SET ""FolderCategory"" = CASE
+                            WHEN LOWER(""FolderName"") IN ('inbox', '收件箱', 'posteingang') THEN 'Inbox'
+                            WHEN LOWER(""FolderName"") IN ('bulk', 'junk', 'junk email', 'junk e-mail', 'spam', 'spamverdacht', '垃圾邮件') THEN 'Junk'
+                            WHEN LOWER(""FolderName"") LIKE '%sent%' OR LOWER(""FolderName"") LIKE '%已发送%' OR LOWER(""FolderName"") LIKE '%gesendet%' THEN 'Sent'
+                            WHEN LOWER(""FolderName"") LIKE '%trash%' OR LOWER(""FolderName"") LIKE '%deleted%' OR LOWER(""FolderName"") LIKE '%已删除%'
+                                OR LOWER(""FolderName"") IN ('gelöscht', 'geloescht', 'geloscht') THEN 'Trash'
+                            WHEN LOWER(""FolderName"") LIKE '%draft%' OR LOWER(""FolderName"") LIKE '%草稿%' THEN 'Drafts'
+                            WHEN LOWER(""FolderName"") LIKE '%archive%' OR LOWER(""FolderName"") LIKE '%归档%' THEN 'Archive'
+                            WHEN ""IsOutgoing"" <> 0 THEN 'Sent'
+                            ELSE 'Other'
+                        END;", cancellationToken);
+                }
+                await ExecuteAsync(connection,
+                    "CREATE INDEX IF NOT EXISTS \"IX_ArchivedEmails_Account_Category_ReceivedDate\" ON \"ArchivedEmails\" (\"MailAccountId\", \"FolderCategory\", \"ReceivedDate\");",
+                    cancellationToken);
             }
 
             await ExecuteAsync(connection, @"
@@ -151,6 +179,21 @@ public static class LocalDatabaseSchemaUpgrade
         await alter.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    private static async Task EnsureIntegerColumnAsync(
+        System.Data.Common.DbConnection connection,
+        string table,
+        string column,
+        int defaultValue,
+        CancellationToken cancellationToken)
+    {
+        if (await HasColumnAsync(connection, table, column, cancellationToken))
+            return;
+
+        await using var alter = connection.CreateCommand();
+        alter.CommandText = $"ALTER TABLE \"{table}\" ADD COLUMN \"{column}\" INTEGER NOT NULL DEFAULT {defaultValue};";
+        await alter.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     private static async Task EnsureNullableBooleanColumnAsync(
         System.Data.Common.DbConnection connection,
         string table,
@@ -181,5 +224,19 @@ public static class LocalDatabaseSchemaUpgrade
         }
 
         return false;
+    }
+
+    private static async Task<bool> HasTableAsync(
+        System.Data.Common.DbConnection connection,
+        string table,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = $table LIMIT 1;";
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = "$table";
+        parameter.Value = table;
+        command.Parameters.Add(parameter);
+        return await command.ExecuteScalarAsync(cancellationToken) != null;
     }
 }

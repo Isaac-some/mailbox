@@ -7,7 +7,12 @@
     var selectedEmail = Model.SearchResults?.FirstOrDefault(email => email.Id == Model.SelectedEmailId);
     var totalPages = Math.Max(1, Model.TotalPages);
     var syncState = ViewBag.SyncState as string;
-    ViewData["Title"] = account?.Name ?? "收件箱";
+    var categories = Enum.GetValues<MailboxFolderCategory>()
+        .OrderBy(category => category == MailboxFolderCategory.Other ? 99 : (int)category)
+        .ToList();
+    var currentCategoryName = Model.SelectedFolderCategory?.ToDisplayName() ?? "全部邮件";
+    var initialCategoryLimit = 10;
+    ViewData["Title"] = account?.Name ?? "全部邮件";
 }
 
 <div class="mailbox-page" data-mailbox-sync-account="@account?.Id">
@@ -17,14 +22,23 @@
                 <i class="bi bi-arrow-left" aria-hidden="true"></i>
             </a>
             <div>
-                <p class="mailbox-header__eyebrow">收件箱</p>
+                <p class="mailbox-header__eyebrow">@currentCategoryName</p>
                 <h1>@account?.Name</h1>
                 <p>@account?.EmailAddress</p>
             </div>
         </div>
         <div class="mailbox-header__actions">
-            <form id="mailbox-refresh-form" asp-controller="MailAccounts" asp-action="Sync" asp-route-id="@account?.Id" method="post">
+            <form id="mailbox-refresh-form" class="mailbox-sync-form" data-mailbox-sync-form asp-controller="MailAccounts" asp-action="Sync" asp-route-id="@account?.Id" method="post">
                 @Html.AntiForgeryToken()
+                <div class="mailbox-window" aria-label="同步时间范围">
+                    <label class="@(Model.MailboxSyncLookbackDays == 7 ? "selected" : "")">
+                        <input type="radio" name="lookbackDays" value="7" checked="@(Model.MailboxSyncLookbackDays == 7 ? "checked" : null)" />7天
+                    </label>
+                    <label class="@(Model.MailboxSyncLookbackDays == 30 ? "selected" : "")" title="30 天同步时间可能更长">
+                        <input type="radio" name="lookbackDays" value="30" checked="@(Model.MailboxSyncLookbackDays == 30 ? "checked" : null)" />30天
+                    </label>
+                </div>
+                <span class="mailbox-window__note" data-mailbox-window-note hidden="@(Model.MailboxSyncLookbackDays != 30 ? "hidden" : null)">30 天同步较慢</span>
                 <button type="submit" class="btn btn-primary btn-sm" data-mailbox-refresh-button>
                     <i class="bi bi-arrow-clockwise" aria-hidden="true"></i>
                     刷新邮件
@@ -48,6 +62,7 @@
     <section class="mailbox-toolbar">
         <form asp-action="Index" method="get" class="mailbox-search">
             <input type="hidden" name="SelectedAccountId" value="@Model.SelectedAccountId" />
+            <input type="hidden" name="SelectedFolderCategory" value="@Model.SelectedFolderCategory" />
             <input type="hidden" name="PageNumber" value="1" />
             <i class="bi bi-search" aria-hidden="true"></i>
             <input type="search" name="SearchTerm" value="@Model.SearchTerm" placeholder="搜索主题或发件人" aria-label="搜索主题或发件人" autocomplete="off" />
@@ -57,6 +72,26 @@
             @Model.TotalResults.ToString("N0") 封邮件 · 最近 @ViewBag.LookbackDays 天
         </span>
     </section>
+
+    <nav class="mailbox-folder-filter" aria-label="邮件文件夹分类">
+        <a asp-action="Index"
+           asp-route-SelectedAccountId="@Model.SelectedAccountId"
+           asp-route-SearchTerm="@Model.SearchTerm"
+           class="@(Model.SelectedFolderCategory == null ? "selected" : "")">
+            全部 <span>@Model.FolderCategoryCounts.Values.Sum()</span>
+        </a>
+        @foreach (var category in categories)
+        {
+            var count = Model.FolderCategoryCounts.GetValueOrDefault(category);
+            <a asp-action="Index"
+               asp-route-SelectedAccountId="@Model.SelectedAccountId"
+               asp-route-SelectedFolderCategory="@category"
+               asp-route-SearchTerm="@Model.SearchTerm"
+               class="@(Model.SelectedFolderCategory == category ? "selected" : "")">
+                @category.ToDisplayName() <span>@count</span>
+            </a>
+        }
+    </nav>
 
     <section class="mailbox-split">
         <div class="mailbox-list" aria-label="邮件列表">
@@ -68,6 +103,7 @@
                     <a asp-action="Index"
                        asp-route-SelectedAccountId="@Model.SelectedAccountId"
                        asp-route-SelectedEmailId="@email.Id"
+                       asp-route-SelectedFolderCategory="@Model.SelectedFolderCategory"
                        asp-route-SearchTerm="@Model.SearchTerm"
                        asp-route-PageNumber="@Model.PageNumber"
                        asp-route-PageSize="@Model.PageSize"
@@ -77,6 +113,13 @@
                             <time data-time-format="short" data-utc-time="@email.ReceivedDate.ToString("yyyy-MM-ddTHH:mm:ss")">@email.ReceivedDate.ToString("MM-dd HH:mm")</time>
                         </div>
                         <div class="mail-item__subject">@(string.IsNullOrWhiteSpace(email.Subject) ? "(无主题)" : email.Subject)</div>
+                        <div class="mail-item__folder">
+                            <span class="mail-folder-badge mail-folder-badge--@email.FolderCategory.ToString().ToLowerInvariant()">@email.FolderCategory.ToDisplayName()</span>
+                            @if (!string.IsNullOrWhiteSpace(email.FolderName))
+                            {
+                                <span>@email.FolderName</span>
+                            }
+                        </div>
                         <div class="mail-item__preview">@((email.Body ?? string.Empty).Replace("\r", " ").Replace("\n", " ").Trim())</div>
                     </a>
                 }
@@ -85,7 +128,7 @@
             {
                 <div class="mailbox-empty">
                     <i class="bi bi-inbox" aria-hidden="true"></i>
-                    <strong>收件箱为空</strong>
+                    <strong>@currentCategoryName 暂无邮件</strong>
                     <span>点击右上角刷新邮件。</span>
                 </div>
             }
@@ -100,7 +143,9 @@
                         <strong>@selectedEmail.From</strong>
                         <span>收件于 <time data-utc-time="@selectedEmail.ReceivedDate.ToString("yyyy-MM-ddTHH:mm:ss")">@selectedEmail.ReceivedDate.ToString("yyyy-MM-dd HH:mm")</time></span>
                     </p>
-                    <a asp-controller="Emails" asp-action="Details" asp-route-id="@selectedEmail.Id" class="mail-viewer__details">
+                    <a asp-controller="Emails" asp-action="Details" asp-route-id="@selectedEmail.Id"
+                       asp-route-returnUrl="@(Context.Request.Path + Context.Request.QueryString)"
+                       class="mail-viewer__details">
                         打开完整邮件 <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i>
                     </a>
                 </header>
@@ -120,19 +165,33 @@
         </article>
     </section>
 
+    @if (Model.SelectedFolderCategory.HasValue && !Model.IsSelectedCategoryExpanded
+        && Model.FolderCategoryCounts.GetValueOrDefault(Model.SelectedFolderCategory.Value) >= initialCategoryLimit)
+    {
+        <form class="mailbox-load-more mailbox-sync-form" data-mailbox-sync-form asp-controller="MailAccounts" asp-action="Sync" asp-route-id="@account?.Id" method="post">
+            @Html.AntiForgeryToken()
+            <input type="hidden" name="lookbackDays" value="@Model.MailboxSyncLookbackDays" />
+            <input type="hidden" name="folderCategory" value="@Model.SelectedFolderCategory" />
+            <input type="hidden" name="loadMore" value="true" />
+            <button type="submit" class="btn btn-light btn-sm">
+                <i class="bi bi-chevron-down" aria-hidden="true"></i> 查看更多，最多 30 封
+            </button>
+        </form>
+    }
+
     @if (totalPages > 1)
     {
         <nav class="mailbox-pagination" aria-label="邮件分页">
             @if (Model.PageNumber > 1)
             {
-                <a asp-action="Index" asp-route-SelectedAccountId="@Model.SelectedAccountId" asp-route-SearchTerm="@Model.SearchTerm" asp-route-PageNumber="@(Model.PageNumber - 1)" asp-route-PageSize="@Model.PageSize" class="btn btn-light btn-sm">
+                <a asp-action="Index" asp-route-SelectedAccountId="@Model.SelectedAccountId" asp-route-SelectedFolderCategory="@Model.SelectedFolderCategory" asp-route-SearchTerm="@Model.SearchTerm" asp-route-PageNumber="@(Model.PageNumber - 1)" asp-route-PageSize="@Model.PageSize" class="btn btn-light btn-sm">
                     <i class="bi bi-chevron-left" aria-hidden="true"></i> 上一页
                 </a>
             }
             <span>第 @Model.PageNumber / @totalPages 页</span>
             @if (Model.PageNumber < totalPages)
             {
-                <a asp-action="Index" asp-route-SelectedAccountId="@Model.SelectedAccountId" asp-route-SearchTerm="@Model.SearchTerm" asp-route-PageNumber="@(Model.PageNumber + 1)" asp-route-PageSize="@Model.PageSize" class="btn btn-light btn-sm">
+                <a asp-action="Index" asp-route-SelectedAccountId="@Model.SelectedAccountId" asp-route-SelectedFolderCategory="@Model.SelectedFolderCategory" asp-route-SearchTerm="@Model.SearchTerm" asp-route-PageNumber="@(Model.PageNumber + 1)" asp-route-PageSize="@Model.PageSize" class="btn btn-light btn-sm">
                     下一页 <i class="bi bi-chevron-right" aria-hidden="true"></i>
                 </a>
             }
@@ -149,7 +208,7 @@
         const statusMessage = document.getElementById('mailbox-sync-message');
         const syncError = document.getElementById('mailbox-sync-error');
         const refreshForm = document.getElementById('mailbox-refresh-form');
-        const refreshButton = document.querySelector('[data-mailbox-refresh-button]');
+        const syncForms = document.querySelectorAll('[data-mailbox-sync-form]');
         if (!page || !page.dataset.mailboxSyncAccount || !token || !status) return;
 
         const accountId = page.dataset.mailboxSyncAccount;
@@ -180,21 +239,23 @@
             if (active && statusMessage) statusMessage.textContent = message;
         };
 
-        refreshForm?.addEventListener('submit', async (event) => {
+        const submitSync = async (event) => {
             event.preventDefault();
-            if (refreshButton?.disabled) return;
+            const form = event.currentTarget;
+            const submitButton = form.querySelector('button[type="submit"]');
+            if (submitButton?.disabled) return;
 
-            refreshButton.disabled = true;
+            submitButton.disabled = true;
             if (syncError) syncError.hidden = true;
             setStatus(true);
             try {
-                const response = await fetch(refreshForm.action, {
+                const response = await fetch(form.action, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
                         'X-Requested-With': 'XMLHttpRequest'
                     },
-                    body: new URLSearchParams(new FormData(refreshForm)),
+                    body: new URLSearchParams(new FormData(form)),
                     credentials: 'same-origin'
                 });
                 const result = await response.json().catch(() => ({}));
@@ -206,8 +267,18 @@
                 setStatus(false);
                 showSyncError(error.message || '暂时无法启动同步，请稍后再试。');
             } finally {
-                refreshButton.disabled = false;
+                submitButton.disabled = false;
             }
+        };
+        syncForms.forEach(form => form.addEventListener('submit', submitSync));
+
+        document.querySelectorAll('.mailbox-window input').forEach(input => {
+            input.addEventListener('change', () => {
+                document.querySelectorAll('.mailbox-window label').forEach(label =>
+                    label.classList.toggle('selected', label.querySelector('input')?.checked));
+                const note = document.querySelector('[data-mailbox-window-note]');
+                if (note) note.hidden = input.value !== '30' || !input.checked;
+            });
         });
 
         // The account list marks a deliberate mailbox open with autoSync=true.

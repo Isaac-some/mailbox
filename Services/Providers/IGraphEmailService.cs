@@ -14,7 +14,7 @@ namespace MailArchiver.Services.Providers
         /// <param name="account">The M365 mail account</param>
         /// <param name="jobId">Optional sync job ID for progress tracking</param>
         /// <returns>Task</returns>
-        Task SyncMailAccountAsync(MailAccount account, string? jobId = null);
+        Task SyncMailAccountAsync(MailAccount account, string? jobId = null, MailSyncRequestOptions? options = null);
 
         /// <summary>
         /// Tests the connection to Microsoft Graph API
