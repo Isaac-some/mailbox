@@ -369,7 +369,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTo
             environment["MAIL_ASSISTANT_DATA_DIRECTORY"] = dataDirectory.path
             environment["MAIL_ASSISTANT_FACTORY_RESET_MARKER"] = resetMarker.path
             environment["ReleaseNotes__AppVersion"] = Bundle.main.object(
-                forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.3.0"
+                forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.3.1"
             environment["DOTNET_ROOT"] = runtime.deletingLastPathComponent().path
             environment["DOTNET_MULTILEVEL_LOOKUP"] = "0"
             environment["DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE"] = "false"

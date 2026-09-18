@@ -95,8 +95,8 @@ public class LocalAppPackagingPolicyTests
     {
         var source = ReadBundledFile("Info.plist");
 
-        Assert.Contains("<string>2.3.0</string>", source, StringComparison.Ordinal);
-        Assert.Contains("<string>230</string>", source, StringComparison.Ordinal);
+        Assert.Contains("<string>2.3.1</string>", source, StringComparison.Ordinal);
+        Assert.Contains("<string>231</string>", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -104,9 +104,30 @@ public class LocalAppPackagingPolicyTests
     {
         var source = ReadBundledFile("MailAssistant.Windows.csproj");
 
-        Assert.Contains("<Version>2.3.0</Version>", source, StringComparison.Ordinal);
-        Assert.Contains("<FileVersion>2.3.0.0</FileVersion>", source, StringComparison.Ordinal);
+        Assert.Contains("<Version>2.3.1</Version>", source, StringComparison.Ordinal);
+        Assert.Contains("<FileVersion>2.3.1.0</FileVersion>", source, StringComparison.Ordinal);
         Assert.Contains("<ApplicationIcon>AppIcon.ico</ApplicationIcon>", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WindowsWrapper_supports_persistent_compact_and_always_on_top_modes()
+    {
+        var source = ReadBundledFile("WindowsProgram.cs");
+
+        Assert.Contains("CompactWidth { get; set; } = 420", source, StringComparison.Ordinal);
+        Assert.Contains("CompactHeight { get; set; } = 860", source, StringComparison.Ordinal);
+        Assert.Contains("new Size(360, 560)", source, StringComparison.Ordinal);
+        Assert.Contains("TopMost = alwaysOnTop", source, StringComparison.Ordinal);
+        Assert.Contains("window-preferences.json", source, StringComparison.Ordinal);
+        Assert.Contains("手机窄窗", source, StringComparison.Ordinal);
+        Assert.Contains("始终置顶", source, StringComparison.Ordinal);
+        Assert.Contains("ApplyWindowMode", source, StringComparison.Ordinal);
+        Assert.Contains("JsonSerializer.Serialize(_windowPreferences)", source, StringComparison.Ordinal);
+        Assert.Contains("AutoScaleMode = AutoScaleMode.Dpi", source, StringComparison.Ordinal);
+        Assert.Contains("if (!_canSaveWindowPreferences)", source, StringComparison.Ordinal);
+        Assert.True(
+            source.IndexOf("MigrateExistingDataIfNeeded();", StringComparison.Ordinal) <
+            source.IndexOf("_canSaveWindowPreferences = true;", StringComparison.Ordinal));
     }
 
     [Fact]
