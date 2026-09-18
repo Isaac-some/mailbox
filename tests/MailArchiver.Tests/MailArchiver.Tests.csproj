@@ -37,6 +37,8 @@
     <None Include="..\..\local-app\Info.plist" Link="Info.plist" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\local-app\build-dmg.sh" Link="build-dmg.sh" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\script\build_and_run.sh" Link="build_and_run.sh" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\script\bootstrap-local-build-tools.sh" Link="bootstrap-local-build-tools.sh" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\script\build-local-macos-release.sh" Link="build-local-macos-release.sh" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\windows-app\MailAssistant.Windows.csproj" Link="MailAssistant.Windows.csproj" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\windows-app\Program.cs" Link="WindowsProgram.cs" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Views\MailAccounts\Delete.cshtml" Link="Delete.cshtml" CopyToOutputDirectory="PreserveNewest" />
@@ -57,6 +59,7 @@
     <None Include="..\..\Services\Core\EmailCoreService.cs" Link="EmailCoreService.cs" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Services\CsvImportService.cs" Link="CsvImportService.cs" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\wwwroot\css\site.css" Link="site.css" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\wwwroot\css\mailbox.css" Link="mailbox.css" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Attributes\StrictReadOnlyArchiveFilter.cs" Link="StrictReadOnlyArchiveFilter.cs" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Services\Providers\Imap\ImapMailSyncService.cs" Link="ImapMailSyncService.cs" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Services\Providers\Graph\GraphMailSyncService.cs" Link="GraphMailSyncService.cs" CopyToOutputDirectory="PreserveNewest" />

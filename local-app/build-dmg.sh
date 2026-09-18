@@ -8,7 +8,14 @@ APP_NAME="邮箱助手"
 APP_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$SCRIPT_DIR/Info.plist")"
 DMG_PATH="$BUILD_DIR/MailAssistant-AppleSilicon-v$APP_VERSION.dmg"
 ICON_FILE="$SCRIPT_DIR/AppIcon.icns"
-DOTNET_BIN="${DOTNET_BIN:-dotnet}"
+LOCAL_DOTNET="$PROJECT_DIR/.local-tools/dotnet/dotnet"
+if [[ -n "${DOTNET_BIN:-}" ]]; then
+  DOTNET_BIN="$DOTNET_BIN"
+elif [[ -x "$LOCAL_DOTNET" ]]; then
+  DOTNET_BIN="$LOCAL_DOTNET"
+else
+  DOTNET_BIN="dotnet"
+fi
 DOTNET_RUNTIME_ROOT="${DOTNET_RUNTIME_ROOT:-}"
 DOTNET_BROTLI_LIB_DIR="${DOTNET_BROTLI_LIB_DIR:-}"
 SERVER_PUBLISH_DIR="${SERVER_PUBLISH_DIR:-}"
@@ -78,6 +85,7 @@ else
     -p:CompressionEnabled=false \
     -p:BuildInParallel=false \
     -p:UseSharedCompilation=false \
+    -p:NuGetAudit=false \
     -p:PublishTrimmed=false
 fi
 

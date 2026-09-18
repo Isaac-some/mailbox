@@ -4,7 +4,20 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 OUTPUT_DIR="${MAIL_ASSISTANT_WINDOWS_OUTPUT_DIR:-$SCRIPT_DIR/build/邮箱助手-Windows-x64}"
-DOTNET_COMMAND="${DOTNET_BIN:-dotnet}"
+LOCAL_TOOLS_DIR="${MAIL_ASSISTANT_TOOLS_DIR:-$PROJECT_DIR/.local-tools}"
+LOCAL_DOTNET="$LOCAL_TOOLS_DIR/dotnet/dotnet"
+if [[ -n "${DOTNET_BIN:-}" ]]; then
+  DOTNET_COMMAND="$DOTNET_BIN"
+elif [[ -x "$LOCAL_DOTNET" ]]; then
+  DOTNET_COMMAND="$LOCAL_DOTNET"
+else
+  DOTNET_COMMAND="dotnet"
+fi
+export DOTNET_ROOT="$(dirname "$DOTNET_COMMAND")"
+export DOTNET_CLI_HOME="${DOTNET_CLI_HOME:-$LOCAL_TOOLS_DIR/dotnet-home}"
+export NUGET_PACKAGES="${NUGET_PACKAGES:-$LOCAL_TOOLS_DIR/nuget-packages}"
+export DOTNET_CLI_TELEMETRY_OPTOUT=1
+export DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
 WORK_DIR="$(mktemp -d "${TMPDIR:-/private/tmp}/mail-assistant-windows-build.XXXXXX")"
 STAGING_DIR="$WORK_DIR/邮箱助手-Windows-x64"
 SERVER_DIR="$STAGING_DIR/server"
@@ -25,6 +38,7 @@ mkdir -p "$SERVER_DIR"
   --nodeReuse:false \
   -p:BuildInParallel=false \
   -p:UseSharedCompilation=false \
+  -p:NuGetAudit=false \
   -p:PublishSingleFile=false \
   -p:PublishTrimmed=false
 
@@ -43,6 +57,7 @@ fi
   --nodeReuse:false \
   -p:BuildInParallel=false \
   -p:UseSharedCompilation=false \
+  -p:NuGetAudit=false \
   -p:PublishSingleFile=true \
   -p:IncludeNativeLibrariesForSelfExtract=true \
   -p:PublishTrimmed=false

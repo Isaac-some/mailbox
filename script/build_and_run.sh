@@ -4,6 +4,8 @@ set -euo pipefail
 MODE="${1:-run}"
 APP_NAME="邮箱助手"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+LOCAL_TOOLS_DIR="${MAIL_ASSISTANT_TOOLS_DIR:-$ROOT_DIR/.local-tools}"
+LOCAL_DOTNET="$LOCAL_TOOLS_DIR/dotnet/dotnet"
 RUN_ROOT="${MAIL_ASSISTANT_RUN_ROOT:-/private/tmp/mail-assistant-run}"
 PUBLISH_DIR="$RUN_ROOT/server"
 APP_OUTPUT_DIR="$RUN_ROOT/app"
@@ -12,6 +14,8 @@ APP_BUNDLE="$APP_OUTPUT_DIR/$APP_NAME.app"
 resolve_dotnet() {
   if [[ -n "${DOTNET_BIN:-}" ]]; then
     printf '%s\n' "$DOTNET_BIN"
+  elif [[ -x "$LOCAL_DOTNET" ]]; then
+    printf '%s\n' "$LOCAL_DOTNET"
   elif command -v dotnet >/dev/null 2>&1; then
     command -v dotnet
   elif [[ -x /private/tmp/mail-assistant-dotnet-sdk/dotnet ]]; then
@@ -23,6 +27,11 @@ resolve_dotnet() {
 }
 
 DOTNET_COMMAND="$(resolve_dotnet)"
+export DOTNET_ROOT="$(dirname "$DOTNET_COMMAND")"
+export DOTNET_CLI_HOME="${DOTNET_CLI_HOME:-$LOCAL_TOOLS_DIR/dotnet-home}"
+export NUGET_PACKAGES="${NUGET_PACKAGES:-$LOCAL_TOOLS_DIR/nuget-packages}"
+export DOTNET_CLI_TELEMETRY_OPTOUT=1
+export DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
 RUNTIME_PATH="$($DOTNET_COMMAND --list-runtimes | awk '/^Microsoft.NETCore.App/ {gsub(/[\[\]]/, "", $NF); print $NF; exit}')"
 if [[ -z "$RUNTIME_PATH" ]]; then
   printf '%s\n' "未找到 Microsoft.NETCore.App 运行时。" >&2
@@ -72,6 +81,7 @@ rm -rf "$PUBLISH_DIR" "$APP_OUTPUT_DIR"
   --nodeReuse:false \
   -p:BuildInParallel=false \
   -p:UseSharedCompilation=false \
+  -p:NuGetAudit=false \
   -p:PublishTrimmed=false
 
 DOTNET_BIN="$DOTNET_COMMAND" \

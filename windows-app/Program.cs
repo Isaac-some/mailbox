@@ -187,7 +187,7 @@ internal sealed class MainForm : Form
         startInfo.Environment["MAIL_ASSISTANT_DATA_DIRECTORY"] = _dataDirectory;
         startInfo.Environment["MAIL_ASSISTANT_FACTORY_RESET_MARKER"] = ResetMarkerPath;
         startInfo.Environment["ReleaseNotes__AppVersion"] =
-            typeof(Program).Assembly.GetName().Version?.ToString(3) ?? "2.2.1";
+            typeof(Program).Assembly.GetName().Version?.ToString(3) ?? "2.3.0";
         startInfo.Environment["ConnectionStrings__DefaultConnection"] = $"Data Source={Path.Combine(_dataDirectory, "mail-archive.sqlite")}";
         startInfo.Environment["DataProtection__KeyPath"] = Path.Combine(_dataDirectory, "keys");
         startInfo.Environment["CredentialEncryption__KeyFilePath"] = credentialKeyPath;

@@ -95,8 +95,8 @@ public class LocalAppPackagingPolicyTests
     {
         var source = ReadBundledFile("Info.plist");
 
-        Assert.Contains("<string>2.2.1</string>", source, StringComparison.Ordinal);
-        Assert.Contains("<string>221</string>", source, StringComparison.Ordinal);
+        Assert.Contains("<string>2.3.0</string>", source, StringComparison.Ordinal);
+        Assert.Contains("<string>230</string>", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -104,8 +104,8 @@ public class LocalAppPackagingPolicyTests
     {
         var source = ReadBundledFile("MailAssistant.Windows.csproj");
 
-        Assert.Contains("<Version>2.2.1</Version>", source, StringComparison.Ordinal);
-        Assert.Contains("<FileVersion>2.2.1.0</FileVersion>", source, StringComparison.Ordinal);
+        Assert.Contains("<Version>2.3.0</Version>", source, StringComparison.Ordinal);
+        Assert.Contains("<FileVersion>2.3.0.0</FileVersion>", source, StringComparison.Ordinal);
         Assert.Contains("<ApplicationIcon>AppIcon.ico</ApplicationIcon>", source, StringComparison.Ordinal);
     }
 
@@ -405,6 +405,47 @@ public class LocalAppPackagingPolicyTests
         var source = ReadBundledFile("MailAssistant.swift");
 
         Assert.Contains("#selector(NSText.paste(_:))", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NativeWrapper_supports_persistent_compact_and_always_on_top_modes()
+    {
+        var source = ReadBundledFile("MailAssistant.swift");
+
+        Assert.Contains("case compact", source, StringComparison.Ordinal);
+        Assert.Contains("NSSize(width: 420, height: 860)", source, StringComparison.Ordinal);
+        Assert.Contains("NSSize(width: 360, height: 560)", source, StringComparison.Ordinal);
+        Assert.Contains("UserDefaults.standard", source, StringComparison.Ordinal);
+        Assert.Contains("NSWindow.Level.floating", source, StringComparison.Ordinal);
+        Assert.Contains("手机窄窗", source, StringComparison.Ordinal);
+        Assert.Contains("始终置顶", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Mac_release_can_bootstrap_and_reuse_repository_local_build_tools()
+    {
+        var bootstrap = ReadBundledFile("bootstrap-local-build-tools.sh");
+        var release = ReadBundledFile("build-local-macos-release.sh");
+
+        Assert.Contains(".local-tools", bootstrap, StringComparison.Ordinal);
+        Assert.Contains("10.0.401", bootstrap, StringComparison.Ordinal);
+        Assert.Contains("dot.net/v1/dotnet-install.sh", bootstrap, StringComparison.Ordinal);
+        Assert.Contains("bootstrap-local-build-tools.sh", release, StringComparison.Ordinal);
+        Assert.Contains("local-app/build-dmg.sh", release, StringComparison.Ordinal);
+        Assert.Contains("NUGET_PACKAGES", release, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AccountList_uses_card_rows_without_horizontal_scrolling_on_narrow_windows()
+    {
+        var page = ReadBundledFile("MailAccountsIndex.cshtml");
+        var styles = ReadBundledFile("mailbox.css");
+
+        Assert.Contains("data-label=\"邮箱地址\"", page, StringComparison.Ordinal);
+        Assert.Contains("data-label=\"最近同步\"", page, StringComparison.Ordinal);
+        Assert.Contains("content: attr(data-label);", styles, StringComparison.Ordinal);
+        Assert.Contains(".account-table tbody tr", styles, StringComparison.Ordinal);
+        Assert.DoesNotContain(".account-table {\n    min-width: 760px;", styles, StringComparison.Ordinal);
     }
 
     [Fact]

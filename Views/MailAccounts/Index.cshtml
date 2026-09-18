@@ -91,12 +91,12 @@
                     {
                         rowNumber++;
                         <tr>
-                            <td class="account-table__index text-muted">@rowNumber</td>
-                            <td>
+                            <td class="account-table__index text-muted" data-label="序号">@rowNumber</td>
+                            <td data-label="邮箱地址">
                                 <div class="account-address">@item.EmailAddress</div>
                                 <div class="account-name">@item.Name · @item.ProviderLabel</div>
                             </td>
-                            <td>
+                            <td data-label="状态">
                                 @if (item.IsEnabled)
                                 {
                                     <span class="status-badge status-badge--ok"><span aria-hidden="true"></span>正常</span>
@@ -118,7 +118,7 @@
                                     <div class="small text-muted mt-1">@item.RequiredAction</div>
                                 }
                             </td>
-                            <td class="account-last-sync">
+                            <td class="account-last-sync" data-label="最近同步">
                                 @if (item.LastSync > new DateTime(1970, 1, 1))
                                 {
                                     <span class="utc-timestamp" data-utc-time="@item.LastSync.Value.ToString("yyyy-MM-ddTHH:mm:ss")">@item.LastSync.Value.ToString("yyyy-MM-dd HH:mm")</span>
@@ -129,7 +129,7 @@
                                 }
                                 <div class="account-sync-result d-none" data-sync-result="@item.Id" aria-live="polite"></div>
                             </td>
-                            <td>
+                            <td data-label="操作">
                                 <div class="account-row-actions">
                                     <a asp-controller="Emails" asp-action="Index" asp-route-SelectedAccountId="@item.Id" asp-route-autoSync="true"
                                        class="btn btn-primary btn-sm account-view-btn">
