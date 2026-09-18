@@ -2,6 +2,8 @@
 @model MailArchiver.Models.ViewModels.CsvImportResultViewModel
 @{
     ViewData["Title"] = Localizer["CsvImportResult"];
+    var verificationAction = Model.Status == "AwaitingVerification" ? "VerifyCsvImport" : "RetryCsvImportVerification";
+    var verificationButtonText = Model.Status == "AwaitingVerification" ? "验证本批账号" : "重试失败账号";
 }
 
 <div class="container">
@@ -57,10 +59,60 @@
         </div>
     </div>
 
+    @if (Model.PendingVerificationCount > 0 || (Model.Status == "CompletedWithErrors" && Model.VerificationFailedCount > 0))
+    {
+        <div class="alert alert-info d-flex justify-content-between align-items-center gap-3">
+            <div>
+                @if (Model.PendingVerificationCount > 0)
+                {
+                    <span><strong>已保存，等待验证：</strong>@Model.PendingVerificationCount 个账号尚未连接邮箱服务器。</span>
+                    @if (Model.FormatWarningCount > 0)
+                    {
+                        <span>其中 @Model.FormatWarningCount 个 Gmail 授权码格式待确认。</span>
+                    }
+                }
+                else
+                {
+                    <span><strong>仍有账号验证失败：</strong>可只重试失败账号。</span>
+                }
+                @if (Model.WarningCount > 0)
+                {
+                    <span class="d-block small mt-1">字段警告 @Model.WarningCount 条：CSV 域名与邮箱地址冲突的行已按邮箱地址处理。</span>
+                }
+            </div>
+            @if ((Model.Status == "AwaitingVerification" || Model.Status == "CompletedWithErrors") && !string.IsNullOrWhiteSpace(Model.JobId))
+            {
+                <form asp-action="@verificationAction" method="post">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" name="jobId" value="@Model.JobId" />
+                    <button type="submit" class="btn btn-primary btn-sm">@verificationButtonText</button>
+                </form>
+            }
+        </div>
+    }
+
+    @if (Model.WarningCount > 0 && Model.PendingVerificationCount == 0 && Model.VerificationFailedCount == 0)
+    {
+        <div class="alert alert-warning">字段警告 @Model.WarningCount 条：CSV 域名与邮箱地址冲突的行已按邮箱地址处理。</div>
+    }
+
+    @if (Model.VerificationSuccessCount > 0 || Model.VerificationFailedCount > 0)
+    {
+        <div class="alert @(Model.VerificationFailedCount > 0 ? "alert-warning" : "alert-success")">
+            已验证成功 @Model.VerificationSuccessCount 个，验证失败 @Model.VerificationFailedCount 个。
+            @if (Model.VerificationFailedCount > 0)
+            {
+                <span class="d-block small mt-1">
+                    格式 @Model.VerificationFormatFailureCount · 认证 @Model.VerificationAuthFailureCount · 网络/TLS @Model.VerificationNetworkFailureCount · 服务商限流 @Model.VerificationRateLimitCount
+                </span>
+            }
+        </div>
+    }
+
     @if (Model.CreatedRows.Any() || Model.UpdatedRows.Any())
     {
         <div class="alert alert-info">
-            <i class="bi bi-info-circle me-2"></i>已识别并保存邮箱与授权码，尚未连接邮箱服务器。打开邮箱或手动刷新时才会验证授权码并下载邮件。
+            <i class="bi bi-info-circle me-2"></i>“已新增”和“覆盖更新”只代表凭证已保存，不代表邮箱已验证或可以收信。
         </div>
     }
 

@@ -3361,7 +3361,8 @@ namespace MailArchiver.Controllers
                 job.SkippedSamples.AddRange(result.SkippedRows.Take(100));
                 _csvImportService.QueueImport(job);
 
-                return RedirectToAction(nameof(CsvImportStatus), new { jobId = job.JobId });
+                TempData["CsvImportJobId"] = job.JobId;
+                return RedirectToAction(nameof(Index));
             }
             catch (Exception ex)
             {
@@ -3377,7 +3378,7 @@ namespace MailArchiver.Controllers
             var job = await GetOwnedCsvImportJobAsync(jobId);
             if (job is null)
                 return NotFound();
-            if (job.Status is CsvImportJobStatus.Completed or CsvImportJobStatus.CompletedWithErrors or CsvImportJobStatus.Failed)
+            if (job.Status is CsvImportJobStatus.AwaitingVerification or CsvImportJobStatus.Completed or CsvImportJobStatus.CompletedWithErrors or CsvImportJobStatus.Failed)
                 return View("CsvImportResult", ToCsvImportResult(job));
             return View(job);
         }
@@ -3392,14 +3393,59 @@ namespace MailArchiver.Controllers
             {
                 jobId = job.JobId,
                 status = job.Status.ToString(),
+                lastUpdated = job.LastUpdated,
                 total = job.TotalRows,
                 processed = job.ProcessedRows,
                 created = job.CreatedCount,
                 updated = job.UpdatedCount,
                 skipped = job.SkippedCount,
                 failed = job.FailedCount,
+                pendingVerification = job.PendingVerificationCount,
+                formatWarnings = job.FormatWarningCount,
+                warnings = job.WarningCount,
+                verificationProcessed = job.VerificationProcessedCount,
+                verificationSuccess = job.VerificationSuccessCount,
+                verificationFailed = job.VerificationFailedCount,
+                verificationFormatFailures = job.VerificationFormatFailureCount,
+                verificationAuthFailures = job.VerificationAuthFailureCount,
+                verificationNetworkFailures = job.VerificationNetworkFailureCount,
+                verificationRateLimits = job.VerificationRateLimitCount,
+                verificationTotal = job.VerificationTotalCount,
+                verificationStarted = job.VerificationStarted,
                 error = job.ErrorMessage
             });
+        }
+
+        [HttpGet]
+        public Task<IActionResult> VerifyCsvImportStatusJson(string jobId)
+            => CsvImportStatusJson(jobId);
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> VerifyCsvImport(string jobId)
+        {
+            var job = await GetOwnedCsvImportJobAsync(jobId);
+            if (job is null)
+                return NotFound();
+            var started = _csvImportService.StartVerification(jobId);
+            if (Request.Headers.Accept.Any(value => value.Contains("application/json", StringComparison.OrdinalIgnoreCase)))
+                return Json(new { started, status = job.Status.ToString(), jobId });
+            TempData["CsvImportJobId"] = jobId;
+            return RedirectToAction(nameof(Index));
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> RetryCsvImportVerification(string jobId)
+        {
+            var job = await GetOwnedCsvImportJobAsync(jobId);
+            if (job is null)
+                return NotFound();
+            var started = _csvImportService.RetryVerification(jobId);
+            if (Request.Headers.Accept.Any(value => value.Contains("application/json", StringComparison.OrdinalIgnoreCase)))
+                return Json(new { started, status = job.Status.ToString(), jobId });
+            TempData["CsvImportJobId"] = jobId;
+            return RedirectToAction(nameof(Index));
         }
 
         private async Task<CsvImportJob?> GetOwnedCsvImportJobAsync(string jobId)
@@ -3415,10 +3461,21 @@ namespace MailArchiver.Controllers
         private static CsvImportResultViewModel ToCsvImportResult(CsvImportJob job)
             => new()
             {
+                JobId = job.JobId,
+                Status = job.Status.ToString(),
                 CreatedCount = job.CreatedCount,
                 UpdatedCount = job.UpdatedCount,
                 SkippedCount = job.SkippedCount,
                 FailedCount = job.FailedCount,
+                PendingVerificationCount = job.PendingVerificationCount,
+                FormatWarningCount = job.FormatWarningCount,
+                WarningCount = job.WarningCount,
+                VerificationSuccessCount = job.VerificationSuccessCount,
+                VerificationFailedCount = job.VerificationFailedCount,
+                VerificationFormatFailureCount = job.VerificationFormatFailureCount,
+                VerificationAuthFailureCount = job.VerificationAuthFailureCount,
+                VerificationNetworkFailureCount = job.VerificationNetworkFailureCount,
+                VerificationRateLimitCount = job.VerificationRateLimitCount,
                 ErrorMessage = job.ErrorMessage,
                 CreatedRows = job.CreatedSamples,
                 UpdatedRows = job.UpdatedSamples,
@@ -3604,6 +3661,16 @@ namespace MailArchiver.Controllers
                 return null;
             }
 
+            // Routing must always follow the actual mailbox address, so a stale
+            // CSV domain cannot redirect credentials to another provider.
+            var emailDomain = email[(email.LastIndexOf('@') + 1)..].ToLowerInvariant();
+            var importedDomain = domain?.Trim().TrimStart('@').ToLowerInvariant();
+            var importWarning = !string.IsNullOrWhiteSpace(importedDomain)
+                && !string.Equals(importedDomain, emailDomain, StringComparison.OrdinalIgnoreCase)
+                ? "CSV 域名与邮箱地址不一致，已按邮箱地址处理。"
+                : null;
+            domain = emailDomain;
+
             if (string.IsNullOrWhiteSpace(password))
             {
                 failedRows.Add(new CsvImportFailedRow
@@ -3621,7 +3688,8 @@ namespace MailArchiver.Controllers
                 Email = email,
                 Password = password,
                 Domain = domain,
-                ClientId = clientId
+                ClientId = clientId,
+                ImportWarning = importWarning
             };
         }
 
@@ -3684,8 +3752,8 @@ namespace MailArchiver.Controllers
                 .Select(candidate =>
                 {
                     var normalized = MailCredentialInputPolicy.Normalize(candidate.Value);
-                    var score = normalized.Length == 16 ? 100 : normalized.Length >= 8 ? 50 : 0;
-                    if (normalized.All(char.IsDigit)) score -= 30;
+                    var score = normalized.Length == 16 ? 100 : normalized.Length >= 8 ? 50 : 10;
+                    if (normalized.All(char.IsDigit)) score -= 5;
                     if (normalized.Contains("未使用", StringComparison.OrdinalIgnoreCase)) score -= 100;
                     return (candidate.Index, score, Length: normalized.Length);
                 })

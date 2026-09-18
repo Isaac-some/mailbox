@@ -27,6 +27,9 @@ public sealed class GmxMailProviderModule : PasswordAndOAuthMailProviderModule
     public override MailAccountCapabilities Inspect(MailAccount account)
     {
         EnsureIdentity(account);
+        var importedStatus = GetImportedCredentialStatus(account);
+        if (importedStatus is not null)
+            return importedStatus;
         var ready = HasPassword(account);
         var smtpVerified = account.CredentialScope is MailCredentialScope.ImapAndSmtp
             or MailCredentialScope.Smtp;

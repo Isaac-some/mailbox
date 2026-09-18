@@ -63,12 +63,24 @@ public abstract class PasswordAndOAuthMailProviderModule : IMailProviderModule
     public virtual MailAccountCapabilities Inspect(MailAccount account)
     {
         EnsureIdentity(account);
+        var importedStatus = GetImportedCredentialStatus(account);
+        if (importedStatus is not null)
+            return importedStatus;
         var hasCredential = HasPassword(account) || HasOAuth(account);
         return new MailAccountCapabilities(
             hasCredential,
             hasCredential,
             hasCredential ? null : $"请补充 {DisplayName} 应用专用密码或 OAuth 授权。");
     }
+
+    internal static MailAccountCapabilities? GetImportedCredentialStatus(MailAccount account)
+        => account.CredentialDetectionStatus?.ToLowerInvariant() switch
+        {
+            "pendingverification" => new MailAccountCapabilities(false, false, "已保存，等待验证"),
+            "formatneedsconfirmation" => new MailAccountCapabilities(false, false, "凭证格式待确认"),
+            "verificationfailed" => new MailAccountCapabilities(false, false, "凭证验证失败，请检查后重试"),
+            _ => null
+        };
 
     public async Task AuthenticateIncomingAsync(
         ImapClient client,

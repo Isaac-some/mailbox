@@ -27,7 +27,7 @@ public static class CsvImportHeaderPolicy
             ["credential"] = [
                 "imap授权码", "imap授权凭据", "imap app password", "imap密码",
                 "smtp授权码", "smtp授权凭据", "smtp app password", "smtp密码",
-                "授权码", "授权凭据", "应用专用密码", "app password", "credential",
+                "授权码", "授权凭据", "应用专用密码", "app password", "app_password", "application password", "credential",
                 "password", "密码", "refresh token", "refresh_token", "token"],
             ["domain"] = ["domain", "域名", "邮箱域名"],
             ["client_id"] = ["client_id", "client id", "cilent id", "cilent_id", "客户端id"]
@@ -92,11 +92,12 @@ public static class CsvImportHeaderPolicy
         => FlexibleAliases[canonical].Any(alias => NormalizeHeader(alias) == normalized);
 
     private static int CredentialPriority(string normalized)
-        => normalized.Contains("imap", StringComparison.OrdinalIgnoreCase) ? 100
+        => normalized == "credential" ? 120
+            : normalized is "授权码" or "授权凭据" ? 110
+            : normalized.Contains("imap", StringComparison.OrdinalIgnoreCase) ? 100
             : normalized.Contains("smtp", StringComparison.OrdinalIgnoreCase) ? 95
-            : normalized.Contains("授权", StringComparison.OrdinalIgnoreCase) ? 90
-            : normalized.Contains("应用专用", StringComparison.OrdinalIgnoreCase) || normalized.Contains("app password", StringComparison.OrdinalIgnoreCase) ? 80
-            : normalized.Contains("credential", StringComparison.OrdinalIgnoreCase) ? 70
+            : normalized.Contains("应用专用", StringComparison.OrdinalIgnoreCase) || normalized.Contains("apppassword", StringComparison.OrdinalIgnoreCase) || normalized.Contains("app_password", StringComparison.OrdinalIgnoreCase) ? 90
+            : normalized.Contains("credential", StringComparison.OrdinalIgnoreCase) ? 80
             : normalized.Contains("password", StringComparison.OrdinalIgnoreCase) || normalized == "密码" ? 60
             : normalized.Contains("refresh", StringComparison.OrdinalIgnoreCase) ? 50
             : 40;

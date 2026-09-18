@@ -57,6 +57,20 @@ public class MailCredentialIntakeServiceTests
     }
 
     [Fact]
+    public async Task Intake_uses_the_mailbox_domain_when_csv_domain_is_stale()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+
+        var result = await fixture.Service.UpsertAsync(
+            fixture.UserId,
+            new MailCredentialIntake("person@yahoo.com", "main-credential", "wrong.example"),
+            enabled: true,
+            verifyCredential: false);
+
+        Assert.Equal("yahoo.com", result.Account.ImportedDomain);
+    }
+
+    [Fact]
     public async Task Intake_normalizes_copied_credentials_and_verifies_before_saving()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -105,7 +119,7 @@ public class MailCredentialIntakeServiceTests
         Assert.Single(await fixture.Context.MailAccounts.ToListAsync());
         Assert.Equal("enc:newsecret", second.Account.Password);
         Assert.Equal("newsecret", second.Account.OAuthRefreshToken);
-        Assert.Null(second.Account.ImportedDomain);
+        Assert.Equal("outlook.com", second.Account.ImportedDomain);
         Assert.Equal("new-client", second.Account.ClientId);
         Assert.Null(second.Account.OAuthAccessToken);
         Assert.Equal(MailAuthenticationMethod.Password, second.Account.PreferredIncomingAuth);
@@ -205,7 +219,7 @@ public class MailCredentialIntakeServiceTests
         var stored = await fixture.Context.MailAccounts.SingleAsync();
         Assert.Equal("enc:old-code", stored.Password);
         Assert.Equal("rotated-token", stored.OAuthRefreshToken);
-        Assert.Equal("old.example", stored.ImportedDomain);
+        Assert.Equal("yahoo.com", stored.ImportedDomain);
         Assert.Null(stored.ClientId);
         Assert.True(stored.IsEnabled);
         Assert.Equal(MailAuthenticationMethod.Password, stored.PreferredOutgoingAuth);

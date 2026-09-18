@@ -6,6 +6,8 @@ public enum CsvImportJobStatus
 {
     Queued,
     Running,
+    AwaitingVerification,
+    Verifying,
     Completed,
     CompletedWithErrors,
     Failed
@@ -32,6 +34,19 @@ public sealed class CsvImportJob
     public int UpdatedCount { get; set; }
     public int SkippedCount { get; set; }
     public int FailedCount { get; set; }
+    public int PendingVerificationCount { get; set; }
+    public int FormatWarningCount { get; set; }
+    public int WarningCount { get; set; }
+    public int VerificationProcessedCount { get; set; }
+    public int VerificationSuccessCount { get; set; }
+    public int VerificationFailedCount { get; set; }
+    public int VerificationFormatFailureCount { get; set; }
+    public int VerificationAuthFailureCount { get; set; }
+    public int VerificationNetworkFailureCount { get; set; }
+    public int VerificationRateLimitCount { get; set; }
+    public int VerificationTotalCount { get; set; }
+    public DateTime LastUpdated { get; set; } = DateTime.UtcNow;
+    public bool VerificationStarted { get; set; }
     public string? ErrorMessage { get; set; }
     public List<CsvImportCreatedRow> CreatedSamples { get; } = new();
     public List<CsvImportCreatedRow> UpdatedSamples { get; } = new();
@@ -39,4 +54,6 @@ public sealed class CsvImportJob
     public List<CsvImportFailedRow> FailedSamples { get; } = new();
 
     internal List<CsvParsedRow> Rows { get; } = new();
+    internal List<int> AccountIds { get; } = new();
+    internal List<int> VerificationFailedAccountIds { get; } = new();
 }

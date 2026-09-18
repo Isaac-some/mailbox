@@ -95,8 +95,8 @@ public class LocalAppPackagingPolicyTests
     {
         var source = ReadBundledFile("Info.plist");
 
-        Assert.Contains("<string>2.3.2</string>", source, StringComparison.Ordinal);
-        Assert.Contains("<string>232</string>", source, StringComparison.Ordinal);
+        Assert.Contains("<string>2.3.3</string>", source, StringComparison.Ordinal);
+        Assert.Contains("<string>233</string>", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -104,8 +104,8 @@ public class LocalAppPackagingPolicyTests
     {
         var source = ReadBundledFile("MailAssistant.Windows.csproj");
 
-        Assert.Contains("<Version>2.3.2</Version>", source, StringComparison.Ordinal);
-        Assert.Contains("<FileVersion>2.3.2.0</FileVersion>", source, StringComparison.Ordinal);
+        Assert.Contains("<Version>2.3.3</Version>", source, StringComparison.Ordinal);
+        Assert.Contains("<FileVersion>2.3.3.0</FileVersion>", source, StringComparison.Ordinal);
         Assert.Contains("<ApplicationIcon>AppIcon.ico</ApplicationIcon>", source, StringComparison.Ordinal);
     }
 
@@ -196,8 +196,8 @@ public class LocalAppPackagingPolicyTests
         var service = ReadBundledFile("CsvImportService.cs");
 
         Assert.Contains("不在导入时连接邮箱服务器", page, StringComparison.Ordinal);
-        Assert.Contains("能识别到有效邮箱和非空授权码即导入成功", page, StringComparison.Ordinal);
-        Assert.Contains("打开邮箱或点击刷新时才连接邮箱服务器", page, StringComparison.Ordinal);
+        Assert.Contains("已保存，等待验证", page, StringComparison.Ordinal);
+        Assert.Contains("导入完成后可点击“验证本批账号”", page, StringComparison.Ordinal);
         Assert.Contains("_csvImportService.QueueImport(job)", controller, StringComparison.Ordinal);
         Assert.Contains("new MailCredentialIntake(row.Email, row.Password, row.Domain, row.ClientId)", service, StringComparison.Ordinal);
         Assert.Contains("verifyCredential: false", service, StringComparison.Ordinal);
@@ -211,15 +211,17 @@ public class LocalAppPackagingPolicyTests
     {
         var controller = ReadBundledFile("MailAccountsController.cs");
         var service = ReadBundledFile("CsvImportService.cs");
-        var statusPage = ReadBundledFile("MailAccountsCsvImportStatus.cshtml");
+        var layout = ReadBundledFile("Layout.cshtml");
         var importAction = controller[
             controller.IndexOf("public async Task<IActionResult> ImportCsv", StringComparison.Ordinal)
             ..controller.IndexOf("private async Task<AccountImportFileParseResult>", StringComparison.Ordinal)];
         Assert.Contains("_csvImportService.QueueImport(job)", importAction, StringComparison.Ordinal);
-        Assert.Contains("RedirectToAction(nameof(CsvImportStatus)", importAction, StringComparison.Ordinal);
+        Assert.Contains("TempData[\"CsvImportJobId\"]", importAction, StringComparison.Ordinal);
+        Assert.Contains("RedirectToAction(nameof(Index))", importAction, StringComparison.Ordinal);
         Assert.DoesNotContain("await _mailCredentialIntake.UpsertAsync", importAction, StringComparison.Ordinal);
         Assert.Contains("verifyCredential: false", service, StringComparison.Ordinal);
-        Assert.Contains("文件已识别，后台任务已受理", statusPage, StringComparison.Ordinal);
+        Assert.Contains("csvImportTasks", layout, StringComparison.Ordinal);
+        Assert.Contains("CsvImportStatusJson", layout, StringComparison.Ordinal);
     }
 
     [Fact]

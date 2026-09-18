@@ -51,6 +51,9 @@ public sealed class OutlookMailProviderModule : IMailProviderModule
     public MailAccountCapabilities Inspect(MailAccount account)
     {
         EnsureIdentity(account);
+        var importedStatus = PasswordAndOAuthMailProviderModule.GetImportedCredentialStatus(account);
+        if (importedStatus is not null)
+            return importedStatus;
         var canReceive = !string.IsNullOrWhiteSpace(account.OAuthRefreshToken)
             || !string.IsNullOrWhiteSpace(account.Password);
         var canSend = MsaOAuthScopePolicy.CanAttemptSend(

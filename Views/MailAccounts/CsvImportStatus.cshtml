@@ -39,7 +39,7 @@
 (() => {
     const statusUrl = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(statusUrl));
     const resultUrl = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(resultUrl));
-    const labels = { Queued: '排队中', Running: '后台导入中', Completed: '导入完成', CompletedWithErrors: '导入完成，部分失败', Failed: '导入失败' };
+    const labels = { Queued: '排队中', Running: '后台保存中', AwaitingVerification: '等待验证', Verifying: '后台验证中', Completed: '任务完成', CompletedWithErrors: '任务完成，部分失败', Failed: '任务失败' };
     async function refresh() {
         try {
             const response = await fetch(statusUrl, { cache: 'no-store' });

@@ -75,6 +75,23 @@ public class CsvImportHeaderPolicyTests
     }
 
     [Fact]
+    public void Explicit_credential_column_wins_over_imap_alias_column()
+    {
+        var accepted = CsvImportHeaderPolicy.TryCreateFlexibleIndex(
+            ["email", "password", "credential", "imap授权码"],
+            out var columns);
+
+        Assert.True(accepted);
+        Assert.Equal(2, columns["credential"]);
+
+        accepted = CsvImportHeaderPolicy.TryCreateFlexibleIndex(
+            ["email", "imap授权码", "credential"], out columns);
+
+        Assert.True(accepted);
+        Assert.Equal(2, columns["credential"]);
+    }
+
+    [Fact]
     public void Flexible_mode_accepts_the_supplied_yahoo_and_gmx_export_shape()
     {
         var accepted = CsvImportHeaderPolicy.TryCreateFlexibleIndex(

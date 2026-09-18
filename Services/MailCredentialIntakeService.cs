@@ -85,7 +85,10 @@ public sealed class MailCredentialIntakeService
             MailProviderKind = provider.Kind
         };
 
-        var domain = NormalizeDomain(input.Domain);
+        var domain = NormalizeDomain(input.Domain) ?? email[(email.LastIndexOf('@') + 1)..].ToLowerInvariant();
+        var actualDomain = email[(email.LastIndexOf('@') + 1)..].ToLowerInvariant();
+        if (!string.Equals(domain, actualDomain, StringComparison.OrdinalIgnoreCase))
+            domain = actualDomain;
         // The standard export repeats the IMAP code in its 2FA/ClientId column
         // for Yahoo and GMX. Only Outlook's OAuth flow consumes that field.
         var clientId = provider.Kind == MailProviderKind.Outlook && !string.IsNullOrWhiteSpace(input.ClientId)
