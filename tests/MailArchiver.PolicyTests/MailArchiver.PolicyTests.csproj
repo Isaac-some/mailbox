@@ -52,6 +52,7 @@
     <None Include="..\..\Views\OutboundMailTasks\Index.cshtml" Link="OutboundMailTasksIndex.cshtml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Views\OutboundMail\Index.cshtml" Link="OutboundMailIndex.cshtml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Views\Emails\Index.cshtml" Link="EmailsIndex.cshtml" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\Views\Emails\Details.cshtml" Link="EmailsDetails.cshtml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Views\LocalMaintenance\Index.cshtml" Link="LocalMaintenanceIndex.cshtml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Controllers\MailAccountsController.cs" Link="MailAccountsController.cs" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Controllers\LocalMaintenanceController.cs" Link="LocalMaintenanceController.cs" CopyToOutputDirectory="PreserveNewest" />

@@ -96,7 +96,7 @@ if [[ -d "$PROJECT_DIR/wwwroot" && ! -d "$APP_BUILD_PATH/Contents/Resources/serv
   ditto "$PROJECT_DIR/wwwroot" "$APP_BUILD_PATH/Contents/Resources/server/wwwroot"
 fi
 
-for excluded_directory in local-app tests; do
+for excluded_directory in local-app mailbox-service-v2 tests windows-app; do
   if [[ -e "$APP_BUILD_PATH/Contents/Resources/server/$excluded_directory" ]]; then
     print -u2 "服务发布物错误包含目录：$excluded_directory"
     exit 4

@@ -72,6 +72,13 @@ for required_file in \
   fi
 done
 
+for excluded_directory in local-app mailbox-service-v2 tests windows-app; do
+  if [[ -e "$SERVER_DIR/$excluded_directory" ]]; then
+    printf '%s\n' "服务发布物错误包含目录：$excluded_directory" >&2
+    exit 4
+  fi
+done
+
 mv "$STAGING_DIR/MailAssistant.exe" "$STAGING_DIR/邮箱助手.exe"
 cp "$SCRIPT_DIR/README.md" "$STAGING_DIR/README.md"
 

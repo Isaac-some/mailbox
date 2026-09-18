@@ -541,7 +541,10 @@ namespace MailArchiver.Services.Providers.Imap
 
                 var folderCategory = MailboxFolderClassifier.Classify(folder.Name, folder.FullName, folder.Attributes);
                 bool isOutgoing = folderCategory == MailboxFolderCategory.Sent || _folderService.IsOutgoingFolder(folder);
-                var lookbackCutoff = DateTime.UtcNow.AddDays(-options.LookbackDays);
+                // Some IMAP servers expose delayed or inaccurate INTERNALDATE values.
+                // Discover a wider UID window, then keep the selected 7/30-day view
+                // boundary in the local archive query.
+                var lookbackCutoff = DateTime.UtcNow.AddDays(-options.RemoteDiscoveryLookbackDays);
                 var lastSync = lookbackCutoff;
                 const bool isFullSync = false;
 

@@ -5,6 +5,8 @@ public sealed record MailSyncRequestOptions(
     MailboxFolderCategory? TargetCategory = null,
     int? TargetLimit = null)
 {
+    public int RemoteDiscoveryLookbackDays => Math.Max(30, LookbackDays);
+
     public MailSyncRequestOptions Normalize() => this with
     {
         LookbackDays = LookbackDays == 30 ? 30 : 7,

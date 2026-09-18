@@ -331,7 +331,7 @@ namespace MailArchiver.Services.Providers.Graph
                     : account.IsMailboxCategoryExpanded(category)
                         ? _mailSyncOptions.ExpandedMessagesPerCategory
                         : _mailSyncOptions.InitialMessagesPerCategory;
-                var lastSync = DateTime.UtcNow.AddDays(-options.LookbackDays);
+                var lastSync = DateTime.UtcNow.AddDays(-options.RemoteDiscoveryLookbackDays);
 
                 _logger.LogInformation("Syncing folder {FolderName} for account {AccountName} since {LastSync} (UTC)",
                     folder.DisplayName, account.Name, lastSync);

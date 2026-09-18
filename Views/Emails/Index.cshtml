@@ -12,6 +12,14 @@
         .ToList();
     var currentCategoryName = Model.SelectedFolderCategory?.ToDisplayName() ?? "全部邮件";
     var initialCategoryLimit = 10;
+    var mailboxReturnUrl = Url.Action("Index", "Emails", new
+    {
+        Model.SelectedAccountId,
+        Model.SelectedFolderCategory,
+        Model.SearchTerm,
+        Model.PageNumber,
+        Model.PageSize
+    });
     ViewData["Title"] = account?.Name ?? "全部邮件";
 }
 
@@ -107,6 +115,7 @@
                        asp-route-SearchTerm="@Model.SearchTerm"
                        asp-route-PageNumber="@Model.PageNumber"
                        asp-route-PageSize="@Model.PageSize"
+                       data-mobile-details-url="@Url.Action("Details", "Emails", new { id = email.Id, returnUrl = mailboxReturnUrl })"
                        class="mail-item @(isSelected ? "mail-item--selected" : "")">
                         <div class="mail-item__topline">
                             <strong>@(string.IsNullOrWhiteSpace(email.From) ? "未知发件人" : email.From)</strong>
@@ -209,6 +218,18 @@
         const syncError = document.getElementById('mailbox-sync-error');
         const refreshForm = document.getElementById('mailbox-refresh-form');
         const syncForms = document.querySelectorAll('[data-mailbox-sync-form]');
+
+        const compactWindow = window.matchMedia('(max-width: 768px)');
+        document.querySelectorAll('[data-mobile-details-url]').forEach(item => {
+            item.addEventListener('click', event => {
+                if (!compactWindow.matches || event.button !== 0
+                    || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+
+                event.preventDefault();
+                window.location.assign(item.dataset.mobileDetailsUrl);
+            });
+        });
+
         if (!page || !page.dataset.mailboxSyncAccount || !token || !status) return;
 
         const accountId = page.dataset.mailboxSyncAccount;

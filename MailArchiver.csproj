@@ -2,18 +2,18 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
-    <Version>2.3.1</Version>
-    <AssemblyVersion>2.3.1.0</AssemblyVersion>
-    <FileVersion>2.3.1.0</FileVersion>
+    <Version>2.3.2</Version>
+    <AssemblyVersion>2.3.2.0</AssemblyVersion>
+    <FileVersion>2.3.2.0</FileVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <GenerateRuntimeConfigurationFiles>true</GenerateRuntimeConfigurationFiles>
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Remove="local-app\**;tests\**;windows-app\**" />
-    <Content Remove="local-app\**;tests\**;windows-app\**" />
-    <None Remove="local-app\**;tests\**;windows-app\**" />
+    <Compile Remove="local-app\**;mailbox-service-v2\**;tests\**;windows-app\**" />
+    <Content Remove="local-app\**;mailbox-service-v2\**;tests\**;windows-app\**" />
+    <None Remove="local-app\**;mailbox-service-v2\**;tests\**;windows-app\**" />
   </ItemGroup>
 
   <ItemGroup>

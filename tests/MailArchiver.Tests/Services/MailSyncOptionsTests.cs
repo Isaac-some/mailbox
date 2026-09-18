@@ -27,4 +27,13 @@ public class MailSyncOptionsTests
         Assert.Null(merged.TargetCategory);
         Assert.Null(merged.TargetLimit);
     }
+
+    [Fact]
+    public void Seven_day_view_keeps_a_thirty_day_remote_discovery_window()
+    {
+        var options = new MailSyncRequestOptions(7).Normalize();
+
+        Assert.Equal(7, options.LookbackDays);
+        Assert.Equal(30, options.RemoteDiscoveryLookbackDays);
+    }
 }

@@ -95,8 +95,8 @@ public class LocalAppPackagingPolicyTests
     {
         var source = ReadBundledFile("Info.plist");
 
-        Assert.Contains("<string>2.3.1</string>", source, StringComparison.Ordinal);
-        Assert.Contains("<string>231</string>", source, StringComparison.Ordinal);
+        Assert.Contains("<string>2.3.2</string>", source, StringComparison.Ordinal);
+        Assert.Contains("<string>232</string>", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -104,8 +104,8 @@ public class LocalAppPackagingPolicyTests
     {
         var source = ReadBundledFile("MailAssistant.Windows.csproj");
 
-        Assert.Contains("<Version>2.3.1</Version>", source, StringComparison.Ordinal);
-        Assert.Contains("<FileVersion>2.3.1.0</FileVersion>", source, StringComparison.Ordinal);
+        Assert.Contains("<Version>2.3.2</Version>", source, StringComparison.Ordinal);
+        Assert.Contains("<FileVersion>2.3.2.0</FileVersion>", source, StringComparison.Ordinal);
         Assert.Contains("<ApplicationIcon>AppIcon.ico</ApplicationIcon>", source, StringComparison.Ordinal);
     }
 
@@ -534,10 +534,23 @@ public class LocalAppPackagingPolicyTests
     public void Mailbox_received_dates_are_rendered_through_the_fixed_Beijing_converter()
     {
         var page = ReadBundledFile("EmailsIndex.cshtml");
+        var details = ReadBundledFile("EmailsDetails.cshtml");
 
         Assert.Contains("data-utc-time=", page, StringComparison.Ordinal);
         Assert.Contains("@email.ReceivedDate.ToString(\"MM-dd HH:mm\")", page, StringComparison.Ordinal);
         Assert.Contains("@selectedEmail.ReceivedDate.ToString(\"yyyy-MM-dd HH:mm\")", page, StringComparison.Ordinal);
+        Assert.Contains("Model.Email.IsOutgoing ? Model.Email.SentDate : Model.Email.ReceivedDate", details, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Compact_mailbox_opens_the_full_message_when_an_item_is_selected()
+    {
+        var page = ReadBundledFile("EmailsIndex.cshtml");
+
+        Assert.Contains("data-mobile-details-url", page, StringComparison.Ordinal);
+        Assert.Contains("window.matchMedia('(max-width: 768px)')", page, StringComparison.Ordinal);
+        Assert.Contains("window.location.assign(item.dataset.mobileDetailsUrl)", page, StringComparison.Ordinal);
+        Assert.Contains("returnUrl = mailboxReturnUrl", page, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -575,11 +588,12 @@ public class LocalAppPackagingPolicyTests
     }
 
     [Fact]
-    public void Imap_sync_probes_recent_inbox_uids_and_prefers_internal_delivery_dates()
+    public void Imap_sync_probes_recent_inbox_uids_with_a_safe_remote_discovery_window()
     {
         var source = ReadBundledFile("ImapMailSyncService.cs");
 
         Assert.Contains("IncludeRecentInboxCandidatesAsync", source, StringComparison.Ordinal);
+        Assert.Contains("options.RemoteDiscoveryLookbackDays", source, StringComparison.Ordinal);
         Assert.Contains(
             "summary.InternalDate?.UtcDateTime\n                        ?? summary.Envelope?.Date?.UtcDateTime",
             source,

@@ -1904,18 +1904,15 @@ namespace MailArchiver.Services.Core
         }
 
         /// <summary>
-        /// Resolves when the mailbox actually received a message. The IMAP INTERNALDATE is
-        /// authoritative; the newest Received header is the best portable fallback; the
-        /// sender supplied Date header is used only when neither mailbox value is available.
+        /// Resolves when the recipient mail server accepted a message. The first Received
+        /// header is the final delivery hop and is preferred over IMAP INTERNALDATE, which
+        /// some providers rewrite when a message is fetched, moved, or re-indexed.
         /// </summary>
         private DateTimeOffset ResolveReceivedDate(
             MimeMessage message,
             DateTimeOffset sentDate,
             DateTimeOffset? serverReceivedDate)
         {
-            if (serverReceivedDate.HasValue)
-                return serverReceivedDate.Value;
-
             try
             {
                 foreach (var header in message.Headers.Where(header => header.Id == HeaderId.Received))
@@ -1930,6 +1927,9 @@ namespace MailArchiver.Services.Core
                 _logger.LogDebug(ex, "Could not resolve received time from headers for email Subject={Subject}",
                     message.Subject);
             }
+
+            if (serverReceivedDate.HasValue)
+                return serverReceivedDate.Value;
 
             return sentDate;
         }
