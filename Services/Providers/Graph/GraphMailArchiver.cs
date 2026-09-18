@@ -1,5 +1,6 @@
 using MailArchiver.Data;
 using MailArchiver.Models;
+using MailArchiver.Services.Providers.Imap;
 using MailArchiver.Services.Shared;
 using MailArchiver.Utilities;
 using Microsoft.EntityFrameworkCore;
@@ -170,6 +171,7 @@ namespace MailArchiver.Services.Providers.Graph
                     var convertedReceivedDate = graphReceivedDate.HasValue
                         ? _dateTimeHelper.ConvertToDisplayTimeZone(graphReceivedDate.Value)
                         : (DateTime?)null;
+                    var folderCategory = MailboxFolderClassifier.Classify(cleanFolderName);
                     var needsFolderUpdate = existingInfo.FolderName != cleanFolderName;
                     var needsReceivedDateUpdate = convertedReceivedDate.HasValue
                         && existingInfo.ReceivedDate != convertedReceivedDate.Value;
@@ -183,6 +185,7 @@ namespace MailArchiver.Services.Providers.Graph
                                 existingEmail,
                                 convertedReceivedDate,
                                 cleanFolderName,
+                                folderCategory,
                                 needsReceivedDateUpdate,
                                 needsFolderUpdate);
                             _context.ChangeTracker.Clear();
@@ -207,6 +210,7 @@ namespace MailArchiver.Services.Providers.Graph
             ArchivedEmail existingEmail,
             DateTime? receivedDate,
             string folderName,
+            MailboxFolderCategory folderCategory,
             bool updateReceivedDate,
             bool updateFolder)
         {
@@ -216,7 +220,10 @@ namespace MailArchiver.Services.Providers.Graph
                 if (updateReceivedDate)
                     existingEmail.ReceivedDate = receivedDate!.Value;
                 if (updateFolder)
+                {
                     existingEmail.FolderName = folderName;
+                    existingEmail.FolderCategory = folderCategory;
+                }
                 await _context.SaveChangesAsync();
                 return;
             }
@@ -229,7 +236,10 @@ namespace MailArchiver.Services.Providers.Graph
 
                 existingEmail.ReceivedDate = receivedDate!.Value;
                 if (updateFolder)
+                {
                     existingEmail.FolderName = folderName;
+                    existingEmail.FolderCategory = folderCategory;
+                }
                 await _context.SaveChangesAsync();
 
                 existingEmail.IsLocked = true;
@@ -364,6 +374,7 @@ namespace MailArchiver.Services.Providers.Graph
                     ? Encoding.UTF8.GetBytes(originalHtmlBody!)
                     : null,
                 FolderName = cleanFolderName,
+                FolderCategory = MailboxFolderClassifier.Classify(cleanFolderName),
                 Attachments = new List<EmailAttachment>(),
                 RawHeaders = ExtractGraphRawHeaders(message)
             };

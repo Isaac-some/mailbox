@@ -99,22 +99,13 @@ namespace MailArchiver.Controllers
                 return RedirectToAction("Index", "MailAccounts");
             }
 
-            // This surface is an inbox, not the archive-wide search screen.
-            model.SelectedFolder = "INBOX";
-            model.IsOutgoing = false;
+            // The mailbox surface is category-based; raw provider folder names stay metadata.
+            model.SelectedFolder = null;
+            model.IsOutgoing = null;
+            if (model.SelectedFolderCategory.HasValue && !Enum.IsDefined(model.SelectedFolderCategory.Value))
+                model.SelectedFolderCategory = null;
             model.SortBy = "ReceivedDate";
             model.SortOrder = "desc";
-
-            var lookbackDays = Math.Max(1, _configuration.GetValue<int?>("MailSync:LookbackDays") ?? 30);
-            var lookbackCutoff = DateTime.UtcNow.Date.AddDays(-lookbackDays);
-            if (!model.FromDate.HasValue || model.FromDate.Value < lookbackCutoff)
-            {
-                model.FromDate = lookbackCutoff;
-            }
-            if (!model.ToDate.HasValue || model.ToDate.Value.Date > DateTime.UtcNow.Date)
-            {
-                model.ToDate = DateTime.UtcNow.Date;
-            }
             if (model.PageNumber <= 0) model.PageNumber = 1;
             
             // Validate and set page size to allowed values
@@ -142,12 +133,15 @@ namespace MailArchiver.Controllers
                 model.DirectionOptions[2].Text = _localizer["Outgoing"];
             }
 
-            // Store search state for return navigation
-            StoreSearchState(model);
-
             var currentUserId = _authService?.GetCurrentUserId(HttpContext);
             if (!currentUserId.HasValue)
                 return NotFound();
+
+            var isAdministrator = _authService?.IsCurrentUserAdmin(HttpContext) == true
+                || await _context.Users.AsNoTracking()
+                    .Where(user => user.Id == currentUserId.Value && user.IsAdmin && user.IsActive)
+                    .Select(user => true)
+                    .FirstOrDefaultAsync();
 
             // This view is scoped to one mailbox. Check that mailbox in SQL instead
             // of materializing every account owned by the user.
@@ -155,13 +149,44 @@ namespace MailArchiver.Controllers
                 .AsNoTracking()
                 .Where(a =>
                     a.Id == model.SelectedAccountId.Value &&
-                    a.UserMailAccounts.Any(ownership => ownership.UserId == currentUserId.Value))
-                .Select(a => new { a.Id, a.Name, a.EmailAddress, a.LastSync, a.IsEnabled })
+                    (isAdministrator
+                        || a.UserMailAccounts.Any(ownership => ownership.UserId == currentUserId.Value)))
+                .Select(a => new
+                {
+                    a.Id,
+                    a.Name,
+                    a.EmailAddress,
+                    a.LastSync,
+                    a.IsEnabled,
+                    a.MailboxSyncLookbackDays,
+                    a.ExpandedMailboxCategories
+                })
                 .FirstOrDefaultAsync();
             if (selectedAccount == null)
             {
                 return NotFound();
             }
+            var lookbackDays = selectedAccount.MailboxSyncLookbackDays == 30 ? 30 : 7;
+            var lookbackCutoff = DateTime.UtcNow.Date.AddDays(-lookbackDays);
+            if (!model.FromDate.HasValue || model.FromDate.Value < lookbackCutoff)
+                model.FromDate = lookbackCutoff;
+            if (!model.ToDate.HasValue || model.ToDate.Value.Date > DateTime.UtcNow.Date)
+                model.ToDate = DateTime.UtcNow.Date;
+
+            model.MailboxSyncLookbackDays = lookbackDays;
+            model.IsSelectedCategoryExpanded = model.SelectedFolderCategory.HasValue
+                && (selectedAccount.ExpandedMailboxCategories
+                    & model.SelectedFolderCategory.Value.ToExpansionFlag()) != 0;
+            model.FolderCategoryCounts = await _context.ArchivedEmails
+                .AsNoTracking()
+                .Where(email => email.MailAccountId == selectedAccount.Id
+                    && email.ReceivedDate >= lookbackCutoff
+                    && email.ReceivedDate < DateTime.UtcNow.Date.AddDays(1))
+                .GroupBy(email => email.FolderCategory)
+                .Select(group => new { Category = group.Key, Count = group.Count() })
+                .ToDictionaryAsync(item => item.Category, item => item.Count);
+
+            StoreSearchState(model);
             var allowedAccountIds = new List<int> { selectedAccount.Id };
             ViewBag.SelectedAccount = selectedAccount;
             ViewBag.LookbackDays = lookbackDays;
@@ -178,11 +203,7 @@ namespace MailArchiver.Controllers
                 }
             };
 
-            // Keep the legacy search model populated for shared service code.
-            model.FolderOptions = new List<SelectListItem>
-            {
-                new SelectListItem { Text = "INBOX", Value = "INBOX", Selected = true }
-            };
+            model.FolderOptions = new List<SelectListItem>();
 
             // Berechnen der Anzahl zu überspringender Elemente für die Paginierung
             int skip = (model.PageNumber - 1) * model.PageSize;
@@ -205,7 +226,8 @@ namespace MailArchiver.Controllers
                 model.SortBy,
                 model.SortOrder,
                 useReceivedDateForRange: true,
-                allowedUserId: currentUserId.Value);
+                allowedUserId: isAdministrator ? null : currentUserId.Value,
+                folderCategory: model.SelectedFolderCategory);
 
             model.SearchResults = emails;
             model.TotalResults = totalCount;

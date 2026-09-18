@@ -6,7 +6,7 @@ param(
 $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $serverOutput = Join-Path $OutputDirectory "server"
-$wrapperProject = Join-Path $PSScriptRoot "KouziMailAssistant.Windows.csproj"
+$wrapperProject = Join-Path $PSScriptRoot "MailAssistant.Windows.csproj"
 $serverProject = Join-Path $projectRoot "MailArchiver.csproj"
 
 if (Test-Path $OutputDirectory) {
@@ -31,7 +31,7 @@ dotnet publish $wrapperProject `
     -p:IncludeNativeLibrariesForSelfExtract=true `
     -p:PublishTrimmed=false
 
-$launcher = Join-Path $OutputDirectory "KouziMailAssistant.exe"
+$launcher = Join-Path $OutputDirectory "MailAssistant.exe"
 $userLauncher = Join-Path $OutputDirectory "邮箱助手.exe"
 $serverExecutable = Join-Path $serverOutput "MailArchiver.exe"
 $localSettings = Join-Path $serverOutput "appsettings.Local.json"

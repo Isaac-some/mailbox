@@ -232,8 +232,8 @@ The optional REST API is **disabled by default**. See the [REST API guide](API.m
 - `Api__RateLimitPerMinute`: Fixed-window request budget per API key per minute (default `120`).
 
 ### 📨 On-demand Mail Refresh Settings
-- `MailSync__LookbackDays`: Maximum age of messages fetched during the initial sync. The default is `30`; set to `0` only if historical full-mailbox imports are explicitly required.
-- `MailSync__SyncInboxOnly`: Sync only the inbox. The local Docker default is `true`, which matches the lightweight mailbox UI and avoids scanning every remote folder.
+- `MailSync__LookbackDays`: Maximum age shown and retained for ordinary sync. The default is `7`; mailbox users can persist a 30-day window per account. Providers are searched with a minimum 30-day safety window so unreliable server dates cannot hide newly delivered messages; results outside the selected range remain excluded locally.
+- `MailSync__SyncInboxOnly`: Legacy compatibility setting. The Docker default is `false`; synchronization scans every selectable folder and applies per-category limits.
 - `MailSync__TimeoutMinutes`: The timeout for the sync operation in minutes.
 - `MailSync__ConnectionTimeoutSeconds`: The connection timeout for IMAP connections in seconds.
 - `MailSync__CommandTimeoutSeconds`: The command timeout for IMAP commands in seconds.

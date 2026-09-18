@@ -5,6 +5,14 @@ namespace MailArchiver.Tests.Services;
 public class CsvImportHeaderPolicyTests
 {
     [Fact]
+    public void Email_value_removes_leading_rtf_control_words_from_exported_csv()
+    {
+        var email = CsvImportValuePolicy.NormalizeEmail(@"\f0\fs24 \cf0 person@yahoo.com");
+
+        Assert.Equal("person@yahoo.com", email);
+    }
+
+    [Fact]
     public void Accepts_the_canonical_four_column_interface_contract()
     {
         var accepted = CsvImportHeaderPolicy.TryCreateCanonicalIndex(
@@ -64,6 +72,23 @@ public class CsvImportHeaderPolicyTests
         Assert.Equal(1, columns["email"]);
         Assert.Equal(2, columns["credential"]);
         Assert.Equal(4, columns["domain"]);
+    }
+
+    [Fact]
+    public void Explicit_credential_column_wins_over_imap_alias_column()
+    {
+        var accepted = CsvImportHeaderPolicy.TryCreateFlexibleIndex(
+            ["email", "password", "credential", "imap授权码"],
+            out var columns);
+
+        Assert.True(accepted);
+        Assert.Equal(2, columns["credential"]);
+
+        accepted = CsvImportHeaderPolicy.TryCreateFlexibleIndex(
+            ["email", "imap授权码", "credential"], out columns);
+
+        Assert.True(accepted);
+        Assert.Equal(2, columns["credential"]);
     }
 
     [Fact]

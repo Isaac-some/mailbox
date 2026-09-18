@@ -10,7 +10,10 @@ public class LocalAppPackagingPolicyTests
         using var document = JsonDocument.Parse(ReadBundledFile("appsettings.Local.json"));
         var mailSync = document.RootElement.GetProperty("MailSync");
 
-        Assert.True(mailSync.GetProperty("SyncInboxOnly").GetBoolean());
+        Assert.False(mailSync.GetProperty("SyncInboxOnly").GetBoolean());
+        Assert.Equal(7, mailSync.GetProperty("LookbackDays").GetInt32());
+        Assert.Equal(10, mailSync.GetProperty("InitialMessagesPerCategory").GetInt32());
+        Assert.Equal(30, mailSync.GetProperty("ExpandedMessagesPerCategory").GetInt32());
         Assert.True(mailSync.GetProperty("MaxConcurrentSyncs").GetInt32() > 0);
     }
 
@@ -75,14 +78,14 @@ public class LocalAppPackagingPolicyTests
     }
 
     [Fact]
-    public void Every_synchronized_mailbox_provider_enforces_the_local_message_cap()
+    public void Every_synchronized_mailbox_provider_enforces_category_message_caps()
     {
         Assert.Contains(
-            "EnforceLocalEmailLimitAsync(account.Id)",
+            "EnforceMailboxCategoryLimitsAsync(",
             ReadBundledFile("ImapMailSyncService.cs"),
             StringComparison.Ordinal);
         Assert.Contains(
-            "EnforceLocalEmailLimitAsync(account.Id)",
+            "EnforceMailboxCategoryLimitsAsync(",
             ReadBundledFile("GraphMailSyncService.cs"),
             StringComparison.Ordinal);
     }
@@ -92,18 +95,39 @@ public class LocalAppPackagingPolicyTests
     {
         var source = ReadBundledFile("Info.plist");
 
-        Assert.Contains("<string>2.0.0</string>", source, StringComparison.Ordinal);
-        Assert.Contains("<string>200</string>", source, StringComparison.Ordinal);
+        Assert.Contains("<string>2.3.3</string>", source, StringComparison.Ordinal);
+        Assert.Contains("<string>233</string>", source, StringComparison.Ordinal);
     }
 
     [Fact]
     public void WindowsRelease_matches_the_macOS_feature_version()
     {
-        var source = ReadBundledFile("KouziMailAssistant.Windows.csproj");
+        var source = ReadBundledFile("MailAssistant.Windows.csproj");
 
-        Assert.Contains("<Version>2.0.0</Version>", source, StringComparison.Ordinal);
-        Assert.Contains("<FileVersion>2.0.0.0</FileVersion>", source, StringComparison.Ordinal);
+        Assert.Contains("<Version>2.3.3</Version>", source, StringComparison.Ordinal);
+        Assert.Contains("<FileVersion>2.3.3.0</FileVersion>", source, StringComparison.Ordinal);
         Assert.Contains("<ApplicationIcon>AppIcon.ico</ApplicationIcon>", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WindowsWrapper_supports_persistent_compact_and_always_on_top_modes()
+    {
+        var source = ReadBundledFile("WindowsProgram.cs");
+
+        Assert.Contains("CompactWidth { get; set; } = 420", source, StringComparison.Ordinal);
+        Assert.Contains("CompactHeight { get; set; } = 860", source, StringComparison.Ordinal);
+        Assert.Contains("new Size(360, 560)", source, StringComparison.Ordinal);
+        Assert.Contains("TopMost = alwaysOnTop", source, StringComparison.Ordinal);
+        Assert.Contains("window-preferences.json", source, StringComparison.Ordinal);
+        Assert.Contains("手机窄窗", source, StringComparison.Ordinal);
+        Assert.Contains("始终置顶", source, StringComparison.Ordinal);
+        Assert.Contains("ApplyWindowMode", source, StringComparison.Ordinal);
+        Assert.Contains("JsonSerializer.Serialize(_windowPreferences)", source, StringComparison.Ordinal);
+        Assert.Contains("AutoScaleMode = AutoScaleMode.Dpi", source, StringComparison.Ordinal);
+        Assert.Contains("if (!_canSaveWindowPreferences)", source, StringComparison.Ordinal);
+        Assert.True(
+            source.IndexOf("MigrateExistingDataIfNeeded();", StringComparison.Ordinal) <
+            source.IndexOf("_canSaveWindowPreferences = true;", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -139,7 +163,7 @@ public class LocalAppPackagingPolicyTests
         var source = ReadBundledFile("build-dmg.sh");
 
         Assert.Contains("CFBundleShortVersionString", source, StringComparison.Ordinal);
-        Assert.Contains("AppleSilicon-v$APP_VERSION.dmg", source, StringComparison.Ordinal);
+        Assert.Contains("DMG_PATH=\"$BUILD_DIR/MailAssistant-AppleSilicon-v$APP_VERSION.dmg\"", source, StringComparison.Ordinal);
         Assert.DoesNotContain("AppleSilicon.dmg\"", source, StringComparison.Ordinal);
     }
 
@@ -172,11 +196,13 @@ public class LocalAppPackagingPolicyTests
         var service = ReadBundledFile("CsvImportService.cs");
 
         Assert.Contains("不在导入时连接邮箱服务器", page, StringComparison.Ordinal);
-        Assert.Contains("能识别到有效邮箱和非空授权码即导入成功", page, StringComparison.Ordinal);
-        Assert.Contains("打开邮箱或点击刷新时才连接邮箱服务器", page, StringComparison.Ordinal);
+        Assert.Contains("已保存，等待验证", page, StringComparison.Ordinal);
+        Assert.Contains("导入完成后可点击“验证本批账号”", page, StringComparison.Ordinal);
         Assert.Contains("_csvImportService.QueueImport(job)", controller, StringComparison.Ordinal);
         Assert.Contains("new MailCredentialIntake(row.Email, row.Password, row.Domain, row.ClientId)", service, StringComparison.Ordinal);
         Assert.Contains("verifyCredential: false", service, StringComparison.Ordinal);
+        Assert.Contains("AllowCrossUserCredentialUpdate = IsLocalApp()", controller, StringComparison.Ordinal);
+        Assert.Contains("allowCrossUserCredentialUpdate: job.AllowCrossUserCredentialUpdate", service, StringComparison.Ordinal);
         Assert.DoesNotContain("NormalizeAppPassword(row.Password)", controller, StringComparison.Ordinal);
     }
 
@@ -185,15 +211,17 @@ public class LocalAppPackagingPolicyTests
     {
         var controller = ReadBundledFile("MailAccountsController.cs");
         var service = ReadBundledFile("CsvImportService.cs");
-        var statusPage = ReadBundledFile("MailAccountsCsvImportStatus.cshtml");
+        var layout = ReadBundledFile("Layout.cshtml");
         var importAction = controller[
             controller.IndexOf("public async Task<IActionResult> ImportCsv", StringComparison.Ordinal)
             ..controller.IndexOf("private async Task<AccountImportFileParseResult>", StringComparison.Ordinal)];
         Assert.Contains("_csvImportService.QueueImport(job)", importAction, StringComparison.Ordinal);
-        Assert.Contains("RedirectToAction(nameof(CsvImportStatus)", importAction, StringComparison.Ordinal);
+        Assert.Contains("TempData[\"CsvImportJobId\"]", importAction, StringComparison.Ordinal);
+        Assert.Contains("RedirectToAction(nameof(Index))", importAction, StringComparison.Ordinal);
         Assert.DoesNotContain("await _mailCredentialIntake.UpsertAsync", importAction, StringComparison.Ordinal);
         Assert.Contains("verifyCredential: false", service, StringComparison.Ordinal);
-        Assert.Contains("文件已识别，后台任务已受理", statusPage, StringComparison.Ordinal);
+        Assert.Contains("csvImportTasks", layout, StringComparison.Ordinal);
+        Assert.Contains("CsvImportStatusJson", layout, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -222,7 +250,7 @@ public class LocalAppPackagingPolicyTests
 
         Assert.DoesNotContain("GetUserMailAccountsAsync", inboxAction, StringComparison.Ordinal);
         Assert.Contains("a.UserMailAccounts.Any", inboxAction, StringComparison.Ordinal);
-        Assert.Contains("allowedUserId: currentUserId.Value", inboxAction, StringComparison.Ordinal);
+        Assert.Contains("allowedUserId: isAdministrator ? null : currentUserId.Value", inboxAction, StringComparison.Ordinal);
         Assert.Contains("MaxSendingAccountOptions = 50", outboundController, StringComparison.Ordinal);
         Assert.Contains(".Take(candidateLimit)", outboundController, StringComparison.Ordinal);
     }
@@ -302,16 +330,13 @@ public class LocalAppPackagingPolicyTests
     }
 
     [Fact]
-    public void Mac_launcher_forwards_an_active_GW_local_proxy_to_the_mail_server()
+    public void Mac_launcher_does_not_read_private_proxy_configuration()
     {
-        var launcher = ReadBundledFile("KouziMailAssistant.swift");
+        var launcher = ReadBundledFile("MailAssistant.swift");
 
-        Assert.Contains("Application Support/gw/vortex.json", launcher, StringComparison.Ordinal);
-        Assert.Contains("proxy_port", launcher, StringComparison.Ordinal);
-        Assert.Contains("MailProxy__Enabled", launcher, StringComparison.Ordinal);
-        Assert.Contains("MailProxy__Type", launcher, StringComparison.Ordinal);
-        Assert.Contains("MailProxy__Host", launcher, StringComparison.Ordinal);
-        Assert.Contains("MailProxy__Port", launcher, StringComparison.Ordinal);
+        Assert.DoesNotContain("Application Support/gw/vortex.json", launcher, StringComparison.Ordinal);
+        Assert.DoesNotContain("proxy_port", launcher, StringComparison.Ordinal);
+        Assert.DoesNotContain("MailProxy__", launcher, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -359,7 +384,7 @@ public class LocalAppPackagingPolicyTests
     [Fact]
     public void NativeWrapper_ImplementsFileSelectionForWebUploads()
     {
-        var source = ReadBundledFile("KouziMailAssistant.swift");
+        var source = ReadBundledFile("MailAssistant.swift");
 
         Assert.Contains("WKUIDelegate", source, StringComparison.Ordinal);
         Assert.Contains("webView.uiDelegate = self", source, StringComparison.Ordinal);
@@ -369,7 +394,7 @@ public class LocalAppPackagingPolicyTests
     [Fact]
     public void NativeWrapper_downloads_attachment_responses_instead_of_rendering_them()
     {
-        var source = ReadBundledFile("KouziMailAssistant.swift");
+        var source = ReadBundledFile("MailAssistant.swift");
 
         Assert.Contains("WKDownloadDelegate", source, StringComparison.Ordinal);
         Assert.Contains("decidePolicyFor navigationResponse", source, StringComparison.Ordinal);
@@ -381,7 +406,7 @@ public class LocalAppPackagingPolicyTests
     [Fact]
     public void NativeWrapper_implements_web_confirmation_dialogs()
     {
-        var source = ReadBundledFile("KouziMailAssistant.swift");
+        var source = ReadBundledFile("MailAssistant.swift");
 
         Assert.Contains("runJavaScriptConfirmPanelWithMessage message", source, StringComparison.Ordinal);
         Assert.Contains("completionHandler(response == .alertFirstButtonReturn)", source, StringComparison.Ordinal);
@@ -390,7 +415,7 @@ public class LocalAppPackagingPolicyTests
     [Fact]
     public void NativeWrapper_routes_command_c_and_command_a_to_the_current_web_selection()
     {
-        var source = ReadBundledFile("KouziMailAssistant.swift");
+        var source = ReadBundledFile("MailAssistant.swift");
 
         Assert.Contains("configureMainMenu()", source, StringComparison.Ordinal);
         Assert.Contains("#selector(NSText.copy(_:))", source, StringComparison.Ordinal);
@@ -400,9 +425,50 @@ public class LocalAppPackagingPolicyTests
     [Fact]
     public void NativeWrapper_routes_command_v_to_the_focused_web_input()
     {
-        var source = ReadBundledFile("KouziMailAssistant.swift");
+        var source = ReadBundledFile("MailAssistant.swift");
 
         Assert.Contains("#selector(NSText.paste(_:))", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NativeWrapper_supports_persistent_compact_and_always_on_top_modes()
+    {
+        var source = ReadBundledFile("MailAssistant.swift");
+
+        Assert.Contains("case compact", source, StringComparison.Ordinal);
+        Assert.Contains("NSSize(width: 420, height: 860)", source, StringComparison.Ordinal);
+        Assert.Contains("NSSize(width: 360, height: 560)", source, StringComparison.Ordinal);
+        Assert.Contains("UserDefaults.standard", source, StringComparison.Ordinal);
+        Assert.Contains("NSWindow.Level.floating", source, StringComparison.Ordinal);
+        Assert.Contains("手机窄窗", source, StringComparison.Ordinal);
+        Assert.Contains("始终置顶", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Mac_release_can_bootstrap_and_reuse_repository_local_build_tools()
+    {
+        var bootstrap = ReadBundledFile("bootstrap-local-build-tools.sh");
+        var release = ReadBundledFile("build-local-macos-release.sh");
+
+        Assert.Contains(".local-tools", bootstrap, StringComparison.Ordinal);
+        Assert.Contains("10.0.401", bootstrap, StringComparison.Ordinal);
+        Assert.Contains("dot.net/v1/dotnet-install.sh", bootstrap, StringComparison.Ordinal);
+        Assert.Contains("bootstrap-local-build-tools.sh", release, StringComparison.Ordinal);
+        Assert.Contains("local-app/build-dmg.sh", release, StringComparison.Ordinal);
+        Assert.Contains("NUGET_PACKAGES", release, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AccountList_uses_card_rows_without_horizontal_scrolling_on_narrow_windows()
+    {
+        var page = ReadBundledFile("MailAccountsIndex.cshtml");
+        var styles = ReadBundledFile("mailbox.css");
+
+        Assert.Contains("data-label=\"邮箱地址\"", page, StringComparison.Ordinal);
+        Assert.Contains("data-label=\"最近同步\"", page, StringComparison.Ordinal);
+        Assert.Contains("content: attr(data-label);", styles, StringComparison.Ordinal);
+        Assert.Contains(".account-table tbody tr", styles, StringComparison.Ordinal);
+        Assert.DoesNotContain(".account-table {\n    min-width: 760px;", styles, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -417,12 +483,28 @@ public class LocalAppPackagingPolicyTests
     [Fact]
     public void LocalFactoryReset_clears_database_credentials_and_native_webview_data()
     {
-        var source = ReadBundledFile("KouziMailAssistant.swift");
+        var source = ReadBundledFile("MailAssistant.swift");
 
         Assert.Contains("webKitDataDirectory", source, StringComparison.Ordinal);
         Assert.Contains("httpStorageDirectory", source, StringComparison.Ordinal);
         Assert.Contains("cacheDirectory", source, StringComparison.Ordinal);
         Assert.Contains("let directories = [dataDirectory, webKitDataDirectory, httpStorageDirectory, cacheDirectory]", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NativeLaunchers_migrate_a_single_existing_local_data_directory_without_legacy_brand_dependencies()
+    {
+        var mac = ReadBundledFile("MailAssistant.swift");
+        var windows = ReadBundledFile("WindowsProgram.cs");
+
+        Assert.Contains("migrateExistingDataIfNeeded()", mac, StringComparison.Ordinal);
+        Assert.Contains("mail-archive.sqlite", mac, StringComparison.Ordinal);
+        Assert.Contains("credential-encryption.key", mac, StringComparison.Ordinal);
+        Assert.Contains("MigrateExistingDataIfNeeded();", windows, StringComparison.Ordinal);
+        Assert.Contains("Directory.Move(candidates[0], _dataDirectory);", windows, StringComparison.Ordinal);
+        var retiredBrand = string.Concat("Ko", "uzi");
+        Assert.DoesNotContain(retiredBrand, mac, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(retiredBrand, windows, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -454,10 +536,23 @@ public class LocalAppPackagingPolicyTests
     public void Mailbox_received_dates_are_rendered_through_the_fixed_Beijing_converter()
     {
         var page = ReadBundledFile("EmailsIndex.cshtml");
+        var details = ReadBundledFile("EmailsDetails.cshtml");
 
         Assert.Contains("data-utc-time=", page, StringComparison.Ordinal);
         Assert.Contains("@email.ReceivedDate.ToString(\"MM-dd HH:mm\")", page, StringComparison.Ordinal);
         Assert.Contains("@selectedEmail.ReceivedDate.ToString(\"yyyy-MM-dd HH:mm\")", page, StringComparison.Ordinal);
+        Assert.Contains("Model.Email.IsOutgoing ? Model.Email.SentDate : Model.Email.ReceivedDate", details, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Compact_mailbox_opens_the_full_message_when_an_item_is_selected()
+    {
+        var page = ReadBundledFile("EmailsIndex.cshtml");
+
+        Assert.Contains("data-mobile-details-url", page, StringComparison.Ordinal);
+        Assert.Contains("window.matchMedia('(max-width: 768px)')", page, StringComparison.Ordinal);
+        Assert.Contains("window.location.assign(item.dataset.mobileDetailsUrl)", page, StringComparison.Ordinal);
+        Assert.Contains("returnUrl = mailboxReturnUrl", page, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -495,11 +590,12 @@ public class LocalAppPackagingPolicyTests
     }
 
     [Fact]
-    public void Imap_sync_probes_recent_inbox_uids_and_prefers_internal_delivery_dates()
+    public void Imap_sync_probes_recent_inbox_uids_with_a_safe_remote_discovery_window()
     {
         var source = ReadBundledFile("ImapMailSyncService.cs");
 
         Assert.Contains("IncludeRecentInboxCandidatesAsync", source, StringComparison.Ordinal);
+        Assert.Contains("options.RemoteDiscoveryLookbackDays", source, StringComparison.Ordinal);
         Assert.Contains(
             "summary.InternalDate?.UtcDateTime\n                        ?? summary.Envelope?.Date?.UtcDateTime",
             source,

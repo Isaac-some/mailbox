@@ -33,11 +33,14 @@
     <None Include="..\..\appsettings.json" Link="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Program.cs" Link="Program.cs" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Views\Shared\_Layout.cshtml" Link="Layout.cshtml" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="..\..\local-app\KouziMailAssistant.swift" Link="KouziMailAssistant.swift" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\local-app\MailAssistant.swift" Link="MailAssistant.swift" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\local-app\Info.plist" Link="Info.plist" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\local-app\build-dmg.sh" Link="build-dmg.sh" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\script\build_and_run.sh" Link="build_and_run.sh" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="..\..\windows-app\KouziMailAssistant.Windows.csproj" Link="KouziMailAssistant.Windows.csproj" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\script\bootstrap-local-build-tools.sh" Link="bootstrap-local-build-tools.sh" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\script\build-local-macos-release.sh" Link="build-local-macos-release.sh" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\windows-app\MailAssistant.Windows.csproj" Link="MailAssistant.Windows.csproj" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\windows-app\Program.cs" Link="WindowsProgram.cs" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Views\MailAccounts\Delete.cshtml" Link="Delete.cshtml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Views\MailAccounts\Index.cshtml" Link="MailAccountsIndex.cshtml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Views\MailAccounts\Create.cshtml" Link="MailAccountsCreate.cshtml" CopyToOutputDirectory="PreserveNewest" />
@@ -49,6 +52,7 @@
     <None Include="..\..\Views\OutboundMailTasks\Index.cshtml" Link="OutboundMailTasksIndex.cshtml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Views\OutboundMail\Index.cshtml" Link="OutboundMailIndex.cshtml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Views\Emails\Index.cshtml" Link="EmailsIndex.cshtml" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\Views\Emails\Details.cshtml" Link="EmailsDetails.cshtml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Views\LocalMaintenance\Index.cshtml" Link="LocalMaintenanceIndex.cshtml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Controllers\MailAccountsController.cs" Link="MailAccountsController.cs" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Controllers\LocalMaintenanceController.cs" Link="LocalMaintenanceController.cs" CopyToOutputDirectory="PreserveNewest" />
@@ -57,6 +61,7 @@
     <None Include="..\..\Services\Core\EmailCoreService.cs" Link="EmailCoreService.cs" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Services\CsvImportService.cs" Link="CsvImportService.cs" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\wwwroot\css\site.css" Link="site.css" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\wwwroot\css\mailbox.css" Link="mailbox.css" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Attributes\StrictReadOnlyArchiveFilter.cs" Link="StrictReadOnlyArchiveFilter.cs" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Services\Providers\Imap\ImapMailSyncService.cs" Link="ImapMailSyncService.cs" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Services\Providers\Graph\GraphMailSyncService.cs" Link="GraphMailSyncService.cs" CopyToOutputDirectory="PreserveNewest" />

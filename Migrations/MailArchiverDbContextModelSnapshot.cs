@@ -75,6 +75,9 @@ namespace MailArchiver.Migrations
                     b.Property<int?>("FullSyncIntervalHours")
                         .HasColumnType("integer");
 
+                    b.Property<int>("ExpandedMailboxCategories")
+                        .HasColumnType("integer");
+
                     b.Property<string>("ImportedDomain")
                         .HasColumnType("text");
 
@@ -104,6 +107,9 @@ namespace MailArchiver.Migrations
                     b.Property<string>("MailProviderKind")
                         .HasMaxLength(16)
                         .HasColumnType("character varying(16)");
+
+                    b.Property<int>("MailboxSyncLookbackDays")
+                        .HasColumnType("integer");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -206,6 +212,11 @@ namespace MailArchiver.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("FolderCategory")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
                     b.Property<string>("From")
                         .IsRequired()
                         .HasColumnType("text");
@@ -269,6 +280,9 @@ namespace MailArchiver.Migrations
                         .HasDatabaseName("IX_ArchivedEmails_ContentHash");
 
                     b.HasIndex("MailAccountId");
+
+                    b.HasIndex("MailAccountId", "FolderCategory", "ReceivedDate")
+                        .HasDatabaseName("IX_ArchivedEmails_Account_Category_ReceivedDate");
 
                     b.HasIndex("SentDate");
 

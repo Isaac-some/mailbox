@@ -36,7 +36,8 @@ public interface IOnDemandMailSyncQueue
     MailSyncQueueStatus Enqueue(
         int accountId,
         MailSyncRequestPriority priority,
-        MailSyncRequestKind kind = MailSyncRequestKind.Synchronize);
+        MailSyncRequestKind kind = MailSyncRequestKind.Synchronize,
+        MailSyncRequestOptions? options = null);
 
     MailSyncQueueStatus GetStatus(int accountId);
 }
@@ -71,7 +72,8 @@ public sealed class OnDemandMailSyncQueue : BackgroundService, IOnDemandMailSync
     public MailSyncQueueStatus Enqueue(
         int accountId,
         MailSyncRequestPriority priority,
-        MailSyncRequestKind kind = MailSyncRequestKind.Synchronize)
+        MailSyncRequestKind kind = MailSyncRequestKind.Synchronize,
+        MailSyncRequestOptions? options = null)
     {
         lock (_queueLock)
         {
@@ -82,10 +84,18 @@ public sealed class OnDemandMailSyncQueue : BackgroundService, IOnDemandMailSync
                     return existing.ToStatus();
                 }
 
-                // A mailbox opened by a user must not remain behind a bulk job.
-                if (priority <= existing.Priority && kind == existing.Kind)
+                if (kind == existing.Kind)
                 {
-                    return existing.ToStatus();
+                    // A broader request upgrades the queued work without allowing a
+                    // background request to demote an interactive one.
+                    priority = (MailSyncRequestPriority)Math.Max((int)priority, (int)existing.Priority);
+                    if (options is null)
+                        options = existing.Options;
+                    else if (existing.Options is not null)
+                        options = existing.Options.Merge(options);
+
+                    if (priority == existing.Priority && options == existing.Options)
+                        return existing.ToStatus();
                 }
             }
 
@@ -94,7 +104,8 @@ public sealed class OnDemandMailSyncQueue : BackgroundService, IOnDemandMailSync
                 accountId,
                 MailSyncQueueState.Queued,
                 priority,
-                kind);
+                kind,
+                options?.Normalize());
             _entries[accountId] = entry;
 
             var request = new QueueRequest(entry.Token, accountId);
@@ -258,7 +269,7 @@ public sealed class OnDemandMailSyncQueue : BackgroundService, IOnDemandMailSync
 
         try
         {
-            await provider.SyncMailAccountAsync(account, jobId);
+            await provider.SyncMailAccountAsync(account, jobId, entry.Options);
             if (providerModule is not null)
             {
                 var canSend = await providerModule.TestOutgoingConnectionAsync(account, stoppingToken);
@@ -345,7 +356,8 @@ public sealed class OnDemandMailSyncQueue : BackgroundService, IOnDemandMailSync
         int AccountId,
         MailSyncQueueState State,
         MailSyncRequestPriority Priority,
-        MailSyncRequestKind Kind)
+        MailSyncRequestKind Kind,
+        MailSyncRequestOptions? Options)
     {
         public MailSyncQueueStatus ToStatus() => new(AccountId, State, Kind, Priority);
     }

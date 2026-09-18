@@ -48,7 +48,8 @@ public sealed class MailCredentialIntakeService
         MailCredentialIntake input,
         bool enabled,
         CancellationToken cancellationToken = default,
-        bool verifyCredential = true)
+        bool verifyCredential = true,
+        bool allowCrossUserCredentialUpdate = false)
     {
         if (input is null)
             throw new ArgumentNullException(nameof(input));
@@ -60,7 +61,9 @@ public sealed class MailCredentialIntakeService
         var existing = await _context.MailAccounts
             .Include(a => a.UserMailAccounts)
             .FirstOrDefaultAsync(a => a.EmailAddress.ToLower() == email.ToLower(), cancellationToken);
-        if (existing is not null && !existing.UserMailAccounts.Any(link => link.UserId == userId))
+        if (existing is not null
+            && !allowCrossUserCredentialUpdate
+            && !existing.UserMailAccounts.Any(link => link.UserId == userId))
             throw new InvalidOperationException("该邮箱已属于其他用户，当前接口不能跨用户覆盖凭据。");
 
         var created = existing is null;
@@ -82,7 +85,10 @@ public sealed class MailCredentialIntakeService
             MailProviderKind = provider.Kind
         };
 
-        var domain = NormalizeDomain(input.Domain);
+        var domain = NormalizeDomain(input.Domain) ?? email[(email.LastIndexOf('@') + 1)..].ToLowerInvariant();
+        var actualDomain = email[(email.LastIndexOf('@') + 1)..].ToLowerInvariant();
+        if (!string.Equals(domain, actualDomain, StringComparison.OrdinalIgnoreCase))
+            domain = actualDomain;
         // The standard export repeats the IMAP code in its 2FA/ClientId column
         // for Yahoo and GMX. Only Outlook's OAuth flow consumes that field.
         var clientId = provider.Kind == MailProviderKind.Outlook && !string.IsNullOrWhiteSpace(input.ClientId)

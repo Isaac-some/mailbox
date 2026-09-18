@@ -10,10 +10,10 @@ public class LocalAppStoragePathPolicyTests
         var result = LocalAppStoragePathPolicy.ResolveWritableRoot(
             contentRootPath: "/read-only/app/server",
             isLocalApp: true,
-            localDataDirectory: "/Users/test/Library/Application Support/KouziMailAssistant");
+            localDataDirectory: "/Users/test/Library/Application Support/MailAssistant");
 
         Assert.Equal(
-            "/Users/test/Library/Application Support/KouziMailAssistant",
+            "/Users/test/Library/Application Support/MailAssistant",
             result);
     }
 
@@ -37,6 +37,6 @@ public class LocalAppStoragePathPolicyTests
                 isLocalApp: true,
                 localDataDirectory: " "));
 
-        Assert.Contains("KOUZI_DATA_DIRECTORY", exception.Message);
+        Assert.Contains("MAIL_ASSISTANT_DATA_DIRECTORY", exception.Message);
     }
 }

@@ -25,7 +25,7 @@ public sealed class UpstreamMailboxSyncCursorStore : IUpstreamMailboxSyncCursorS
             return;
         }
 
-        var dataDirectory = Environment.GetEnvironmentVariable("KOUZI_DATA_DIRECTORY");
+        var dataDirectory = Environment.GetEnvironmentVariable("MAIL_ASSISTANT_DATA_DIRECTORY");
         var root = string.IsNullOrWhiteSpace(dataDirectory) ? environment.ContentRootPath : dataDirectory;
         _path = Path.Combine(root, "upstream-mailbox-sync.cursor");
     }

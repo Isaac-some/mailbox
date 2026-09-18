@@ -1,6 +1,13 @@
 @inject Microsoft.Extensions.Localization.IStringLocalizer<MailArchiver.SharedResource> Localizer
 @inject Microsoft.Extensions.Options.IOptions<MailArchiver.Models.TimeZoneOptions> TimeZoneOptions
-@{ var currentCulture = System.Globalization.CultureInfo.CurrentUICulture.Name; }
+@{
+    var currentCulture = System.Globalization.CultureInfo.CurrentUICulture.Name;
+    var csvImportJobId = TempData["CsvImportJobId"] as string;
+    var csvStatusUrl = Url.Action("CsvImportStatusJson", "MailAccounts");
+    var csvResultUrl = Url.Action("CsvImportStatus", "MailAccounts");
+    var csvVerifyUrl = Url.Action("VerifyCsvImport", "MailAccounts");
+    var csvRetryUrl = Url.Action("RetryCsvImportVerification", "MailAccounts");
+}
 <!DOCTYPE html>
 <html lang="@currentCulture">
 
@@ -45,7 +52,7 @@
                 <div class="navbar-collapse collapse">
                     <ul class="navbar-nav me-auto"></ul>
                     <div class="app-toolbar-actions d-flex align-items-center">
-                        @if (string.Equals(Environment.GetEnvironmentVariable("KOUZI_LOCAL_APP"), "1", StringComparison.Ordinal))
+                        @if (string.Equals(Environment.GetEnvironmentVariable("MAIL_ASSISTANT_LOCAL_APP"), "1", StringComparison.Ordinal))
                         {
                             <a class="btn btn-toolbar-icon btn-sm me-2" asp-controller="LocalMaintenance" asp-action="Index" title="本机数据" aria-label="本机数据">
                                 <i class="bi bi-gear" aria-hidden="true"></i>
@@ -77,9 +84,108 @@
         </main>
     </div>
 
+    <aside id="csvImportTasks" class="csv-import-tasks d-none" aria-live="polite" aria-label="导入任务">
+        <div class="csv-import-tasks__header">
+            <strong><i class="bi bi-cloud-arrow-up me-1" aria-hidden="true"></i>导入任务</strong>
+            <button type="button" class="btn btn-sm btn-link" id="csvImportTasksToggle" aria-expanded="true" aria-label="折叠导入任务">
+                <i class="bi bi-chevron-down" aria-hidden="true"></i>
+            </button>
+        </div>
+        <div id="csvImportTasksList" class="csv-import-tasks__list"></div>
+    </aside>
+    @Html.AntiForgeryToken()
+
     <script src="~/lib/jquery/jquery.min.js"></script>
     <script src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
     <script src="~/js/site.js" asp-append-version="true"></script>
+    <script>
+        (() => {
+            const introducedJobId = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(csvImportJobId));
+            const statusUrl = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(csvStatusUrl));
+            const resultUrl = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(csvResultUrl));
+            const verifyUrl = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(csvVerifyUrl));
+            const retryUrl = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(csvRetryUrl));
+            const storageKey = 'mailAssistant.csvImportJobs';
+            const collapsedKey = 'mailAssistant.csvImportTasksCollapsed';
+            const panel = document.getElementById('csvImportTasks');
+            const list = document.getElementById('csvImportTasksList');
+            const toggle = document.getElementById('csvImportTasksToggle');
+            const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value;
+            const labels = {
+                Queued: '排队中', Running: '正在保存', AwaitingVerification: '等待验证',
+                Verifying: '正在验证', Completed: '已完成',
+                CompletedWithErrors: '已完成，部分失败', Failed: '任务失败'
+            };
+
+            let jobs;
+            let lastRecords = [];
+            try { jobs = JSON.parse(sessionStorage.getItem(storageKey) || '[]'); } catch (_) { jobs = []; }
+            if (!Array.isArray(jobs)) jobs = [];
+            if (introducedJobId && !jobs.includes(introducedJobId)) jobs.unshift(introducedJobId);
+            jobs = jobs.slice(0, 5);
+            sessionStorage.setItem(storageKey, JSON.stringify(jobs));
+
+            const render = (records, refreshError) => {
+                panel.classList.toggle('d-none', !jobs.length);
+                if (!jobs.length) return;
+                if (records.length) lastRecords = records;
+                const visibleRecords = records.length ? records : lastRecords;
+                const collapsed = sessionStorage.getItem(collapsedKey) === 'true';
+                panel.classList.toggle('csv-import-tasks--collapsed', collapsed);
+                toggle.setAttribute('aria-expanded', String(!collapsed));
+                list.innerHTML = visibleRecords.map(job => {
+                    const total = job.verificationStarted && job.verificationTotal ? job.verificationTotal : job.total;
+                    const processed = job.verificationStarted
+                        && (job.status === 'Verifying' || job.status === 'Completed' || job.status === 'CompletedWithErrors')
+                        ? job.verificationProcessed : job.processed;
+                    const phase = job.verificationStarted ? '验证' : '保存';
+                    const percent = total ? Math.min(100, Math.round(processed * 100 / total)) : 0;
+                    const verify = job.status === 'AwaitingVerification'
+                        ? `<button class="btn btn-primary btn-sm csv-import-verify" data-job-id="${job.jobId}" data-action-url="${verifyUrl}">验证本批账号</button>`
+                        : job.status === 'CompletedWithErrors' && job.verificationFailed > 0
+                            ? `<button class="btn btn-outline-primary btn-sm csv-import-verify" data-job-id="${job.jobId}" data-action-url="${retryUrl}">重试失败账号</button>` : '';
+                    return `<section class="csv-import-task">
+                        <div class="d-flex justify-content-between gap-2"><span>${labels[job.status] || job.status}</span><span>${processed}/${total}</span></div>
+                        <div class="progress mt-1" role="progressbar" aria-label="${phase}进度" aria-valuenow="${percent}" aria-valuemin="0" aria-valuemax="100"><div class="progress-bar" style="width:${percent}%"></div></div>
+                        <div class="csv-import-task__counts">保存 ${job.created + job.updated} · 待验证 ${job.pendingVerification} · 格式待确认 ${job.formatWarnings} · 字段警告 ${job.warnings} · 失败 ${job.failed + job.verificationFailed}</div>
+                        ${job.verificationFailed ? `<div class="csv-import-task__counts">格式 ${job.verificationFormatFailures} · 认证 ${job.verificationAuthFailures} · 网络/TLS ${job.verificationNetworkFailures} · 限流 ${job.verificationRateLimits}</div>` : ''}
+                        <div class="csv-import-task__actions">${verify}<a href="${resultUrl}?jobId=${encodeURIComponent(job.jobId)}" class="btn btn-outline-secondary btn-sm">查看结果</a></div>
+                    </section>`;
+                }).join('') + (refreshError ? '<div class="csv-import-tasks__error">暂时无法刷新进度。</div>' : '');
+                list.querySelectorAll('.csv-import-verify').forEach(button => button.addEventListener('click', async () => {
+                    button.disabled = true;
+                    try {
+                        await fetch(button.dataset.actionUrl, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' },
+                            body: `jobId=${encodeURIComponent(button.dataset.jobId)}&__RequestVerificationToken=${encodeURIComponent(token || '')}`
+                        });
+                    } finally { refresh(); }
+                }));
+            };
+
+            const refresh = async () => {
+                if (!jobs.length) return;
+                try {
+                    const records = await Promise.all(jobs.map(async jobId => {
+                        const response = await fetch(`${statusUrl}?jobId=${encodeURIComponent(jobId)}`, { cache: 'no-store' });
+                        if (!response.ok) throw new Error('status unavailable');
+                        return response.json();
+                    }));
+                    render(records, false);
+                    if (records.every(job => ['Completed', 'CompletedWithErrors', 'Failed'].includes(job.status))) return;
+                } catch (_) { render([], true); }
+                window.setTimeout(refresh, 1500);
+            };
+            toggle.addEventListener('click', () => {
+                const collapsed = sessionStorage.getItem(collapsedKey) === 'true';
+                sessionStorage.setItem(collapsedKey, String(!collapsed));
+                panel.classList.toggle('csv-import-tasks--collapsed', !collapsed);
+                toggle.setAttribute('aria-expanded', String(collapsed));
+            });
+            refresh();
+        })();
+    </script>
     <script>
         // Product policy: every user sees the same Beijing timestamps,
         // independent of the browser or operating-system timezone.

@@ -218,7 +218,7 @@ namespace MailArchiver.Controllers
                     var defaultUsername = configuration["Authentication:Username"];
                     var defaultPassword = configuration["Authentication:Password"];
                     var isLocalApp = configuration.GetValue<bool>("LocalApp:Enabled") ||
-                                     string.Equals(Environment.GetEnvironmentVariable("KOUZI_LOCAL_APP"), "1", StringComparison.Ordinal);
+                                     string.Equals(Environment.GetEnvironmentVariable("MAIL_ASSISTANT_LOCAL_APP"), "1", StringComparison.Ordinal);
                     var dbContext = HttpContext.RequestServices.GetRequiredService<MailArchiverDbContext>();
                     var mailAccountCount = await dbContext.MailAccounts.CountAsync();
                     
@@ -253,7 +253,7 @@ namespace MailArchiver.Controllers
 
         private bool IsLocalApp()
             => HttpContext.RequestServices.GetRequiredService<IConfiguration>().GetValue<bool>("LocalApp:Enabled") ||
-               string.Equals(Environment.GetEnvironmentVariable("KOUZI_LOCAL_APP"), "1", StringComparison.Ordinal);
+               string.Equals(Environment.GetEnvironmentVariable("MAIL_ASSISTANT_LOCAL_APP"), "1", StringComparison.Ordinal);
 
         private async Task<User> GetOrCreateLocalUserAsync(string username, bool isAdmin)
         {

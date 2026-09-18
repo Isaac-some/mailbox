@@ -29,6 +29,9 @@ local-app/build/
 local-app/.DS_Store
 local-app/AppIcon.png
 
+# Repository-local SDK and NuGet cache used by the macOS build bootstrap.
+.local-tools/
+
 # Build-Ergebnisse
 [Dd]ebug/
 [Dd]ebugPublic/

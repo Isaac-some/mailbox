@@ -5,7 +5,7 @@
     var imapSettingsDisplay = Model.Provider == ProviderType.IMAP ? "block" : "none";
     var microsoft365SettingsDisplay = Model.Provider == ProviderType.M365 ? "block" : "none";
     var emailDeletionSettingsDisplay = Model.Provider == ProviderType.IMPORT ? "none" : "block";
-    var isLocalApp = string.Equals(Environment.GetEnvironmentVariable("KOUZI_LOCAL_APP"), "1", StringComparison.Ordinal);
+    var isLocalApp = string.Equals(Environment.GetEnvironmentVariable("MAIL_ASSISTANT_LOCAL_APP"), "1", StringComparison.Ordinal);
     var editDomain = Model.EmailAddress?.Split('@').LastOrDefault()?.Trim().ToLowerInvariant();
     var isGmailAccount = Model.MailProviderKind == MailProviderKind.Gmail || editDomain is "gmail.com" or "googlemail.com";
 }

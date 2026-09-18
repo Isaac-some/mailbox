@@ -13,15 +13,15 @@ public sealed class CustomDomainMailProviderModule : PasswordAndOAuthMailProvide
 {
     private static readonly HashSet<string> BuiltInDomains = new(StringComparer.OrdinalIgnoreCase)
     {
-        "gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com", "msn.com",
+        "gmail.com", "googlemail.com",
         "gmx.com", "gmx.net", "gmx.de"
     };
 
     public CustomDomainMailProviderModule(
         IExternalOAuthTokenManager tokenManager,
         ICredentialEncryptionService credentialEncryption,
-        IOptions<MailProxyOptions>? mailProxyOptions = null)
-        : base(tokenManager, credentialEncryption, mailProxyOptions) { }
+        INetworkMailProxyFactory? networkMail = null)
+        : base(tokenManager, credentialEncryption, networkMail) { }
 
     public override MailProviderKind Kind => MailProviderKind.Custom;
     public override string DisplayName => "自定义域名";
@@ -31,6 +31,7 @@ public sealed class CustomDomainMailProviderModule : PasswordAndOAuthMailProvide
         var domain = DomainOf(emailAddress);
         return !string.IsNullOrWhiteSpace(domain) &&
             !BuiltInDomains.Contains(domain) &&
+            !OutlookDomainPolicy.IsOutlookDomain(domain) &&
             !domain.StartsWith("yahoo.", StringComparison.OrdinalIgnoreCase);
     }
 

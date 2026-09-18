@@ -56,7 +56,9 @@ namespace MailArchiver.Attributes
                 return;
             }
             
-            var hasAccess = userService.IsUserAuthorizedForAccountAsync(user.Id, accountId.Value).Result;
+            var hasAccess = user.IsAdmin
+                || authService.IsCurrentUserAdmin(context.HttpContext)
+                || userService.IsUserAuthorizedForAccountAsync(user.Id, accountId.Value).Result;
             
             if (!hasAccess)
             {

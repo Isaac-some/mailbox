@@ -26,7 +26,7 @@ namespace MailArchiver.Auth.Middlewares
             _logger = logger;
             _authenticationOptions = authenticationOptions.Value;
             _isLocalApp = configuration.GetValue<bool>("LocalApp:Enabled") ||
-                          string.Equals(Environment.GetEnvironmentVariable("KOUZI_LOCAL_APP"), "1", StringComparison.Ordinal);
+                          string.Equals(Environment.GetEnvironmentVariable("MAIL_ASSISTANT_LOCAL_APP"), "1", StringComparison.Ordinal);
         }
 
         public async Task InvokeAsync(HttpContext context, MailArchiver.Services.IAuthenticationService authService,

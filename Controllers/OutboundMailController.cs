@@ -50,8 +50,8 @@ public sealed class OutboundMailController : Controller
         if (model.SendingAccounts.Count == 0)
         {
             ViewBag.AccountSearchMessage = string.IsNullOrWhiteSpace(model.AccountQuery)
-                ? "没有可发件的账号。"
-                : "没有找到匹配且可发件的账号。";
+                ? "没有可发件的账号。请先在邮箱账号页点击“刷新收件箱”，完成 SMTP 发件检测；GMX 还需要应用专用密码。"
+                : "没有找到匹配且可发件的账号。请检查该账号的 SMTP 发件检测和应用专用密码。";
             return View(model);
         }
 
@@ -77,13 +77,15 @@ public sealed class OutboundMailController : Controller
         ValidateAttachments(model);
 
         var userId = _authentication.GetCurrentUserId(HttpContext);
+        var isAdmin = userId.HasValue && await IsAdministratorAsync(userId.Value, HttpContext.RequestAborted);
         var account = userId.HasValue
             ? await _context.MailAccounts
                 .FirstOrDefaultAsync(candidate =>
                     candidate.Id == model.AccountId
                     && candidate.IsEnabled
                     && candidate.Provider != ProviderType.IMPORT
-                    && candidate.UserMailAccounts.Any(ownership => ownership.UserId == userId.Value),
+                    && (isAdmin
+                        || candidate.UserMailAccounts.Any(ownership => ownership.UserId == userId.Value)),
                     cancellationToken)
             : null;
 
@@ -176,12 +178,14 @@ public sealed class OutboundMailController : Controller
             return;
         }
 
+        var isAdmin = await IsAdministratorAsync(userId.Value, HttpContext.RequestAborted);
         var query = _context.MailAccounts
             .AsNoTracking()
             .Where(account =>
                 account.IsEnabled
                 && account.Provider != ProviderType.IMPORT
-                && account.UserMailAccounts.Any(ownership => ownership.UserId == userId.Value)
+                && (isAdmin
+                    || account.UserMailAccounts.Any(ownership => ownership.UserId == userId.Value))
                 && ((account.Password != null && account.Password != string.Empty)
                     || (account.OAuthRefreshToken != null && account.OAuthRefreshToken != string.Empty)));
 
@@ -218,4 +222,11 @@ public sealed class OutboundMailController : Controller
         model.MaxAttachmentCount = _options.MaxAttachmentCount;
         model.MaxTotalAttachmentBytes = _options.MaxTotalAttachmentBytes;
     }
+
+    private async Task<bool> IsAdministratorAsync(int userId, CancellationToken cancellationToken)
+        => _authentication.IsCurrentUserAdmin(HttpContext)
+            || await _context.Users.AsNoTracking()
+                .Where(user => user.Id == userId && user.IsAdmin && user.IsActive)
+                .Select(user => true)
+                .FirstOrDefaultAsync(cancellationToken);
 }

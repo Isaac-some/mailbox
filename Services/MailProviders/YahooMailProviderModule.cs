@@ -14,8 +14,8 @@ public sealed class YahooMailProviderModule : PasswordAndOAuthMailProviderModule
     public YahooMailProviderModule(
         IExternalOAuthTokenManager tokenManager,
         ICredentialEncryptionService credentialEncryption,
-        IOptions<MailProxyOptions>? mailProxyOptions = null)
-        : base(tokenManager, credentialEncryption, mailProxyOptions) { }
+        INetworkMailProxyFactory? networkMail = null)
+        : base(tokenManager, credentialEncryption, networkMail) { }
 
     public override MailProviderKind Kind => MailProviderKind.Yahoo;
     public override string DisplayName => "Yahoo";

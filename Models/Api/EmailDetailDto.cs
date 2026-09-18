@@ -13,6 +13,7 @@ public class EmailDetailDto
     public bool IsOutgoing { get; set; }
     public bool HasAttachments { get; set; }
     public string FolderName { get; set; } = string.Empty;
+    public MailboxFolderCategory FolderCategory { get; set; }
     public string Cc { get; set; } = string.Empty;
     public string Bcc { get; set; } = string.Empty;
     public DateTime ReceivedDate { get; set; }
@@ -34,6 +35,7 @@ public class EmailDetailDto
             IsOutgoing = e.IsOutgoing,
             HasAttachments = e.HasAttachments,
             FolderName = e.FolderName,
+            FolderCategory = e.FolderCategory,
             Cc = e.Cc,
             Bcc = e.Bcc,
             ReceivedDate = e.ReceivedDate,

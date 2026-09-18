@@ -145,10 +145,10 @@ public class UpstreamMailboxSyncServiceTests
             RequestUri = request.RequestUri;
             AuthorizationScheme = request.Headers.Authorization?.Scheme;
             AuthorizationParameter = request.Headers.Authorization?.Parameter;
-            InstallationId = ReadHeader(request, "X-Kouzi-Installation-Id");
-            DeviceName = ReadHeader(request, "X-Kouzi-Device-Name");
-            OperatingSystem = ReadHeader(request, "X-Kouzi-OS");
-            AppVersion = ReadHeader(request, "X-Kouzi-App-Version");
+            InstallationId = ReadHeader(request, "X-MailAssistant-Installation-Id");
+            DeviceName = ReadHeader(request, "X-MailAssistant-Device-Name");
+            OperatingSystem = ReadHeader(request, "X-MailAssistant-OS");
+            AppVersion = ReadHeader(request, "X-MailAssistant-App-Version");
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(responseJson, Encoding.UTF8, "application/json")

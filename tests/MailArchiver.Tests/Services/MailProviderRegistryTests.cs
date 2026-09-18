@@ -99,6 +99,25 @@ public class MailProviderRegistryTests
     }
 
     [Fact]
+    public void Gmx_marks_imap_only_account_as_not_ready_for_sending()
+    {
+        var account = new MailAccount
+        {
+            EmailAddress = "one@gmx.com",
+            MailProviderKind = MailProviderKind.Gmx,
+            Password = "encrypted",
+            CredentialScope = MailCredentialScope.Imap,
+            CredentialDetectionStatus = "ImapVerified"
+        };
+
+        var capabilities = CreateRegistry().For(MailProviderKind.Gmx).Inspect(account);
+
+        Assert.True(capabilities.CanReceive);
+        Assert.False(capabilities.CanSend);
+        Assert.Contains("SMTP", capabilities.RequiredAction);
+    }
+
+    [Fact]
     public void Custom_module_uses_conventional_endpoints_until_discovery_overrides_them()
     {
         var account = new MailAccount { EmailAddress = "one@corp.example", UseSSL = true };

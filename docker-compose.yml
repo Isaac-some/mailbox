@@ -1,4 +1,4 @@
-name: kouzi-mail-archive
+name: mail-assistant-archive
 
 services:
   mailarchive-app:
@@ -11,8 +11,8 @@ services:
       Authentication__Enabled: "false"
       Authentication__LocalBypassUsername: "local-admin"
       TimeZone__DisplayTimeZoneId: "Asia/Shanghai"
-      MailSync__LookbackDays: "${MAILARCHIVE_SYNC_LOOKBACK_DAYS:-30}"
-      MailSync__SyncInboxOnly: "${MAILARCHIVE_SYNC_INBOX_ONLY:-true}"
+      MailSync__LookbackDays: "${MAILARCHIVE_SYNC_LOOKBACK_DAYS:-7}"
+      MailSync__SyncInboxOnly: "${MAILARCHIVE_SYNC_INBOX_ONLY:-false}"
       MailSync__MaxConcurrentSyncs: "${MAILARCHIVE_SYNC_MAX_CONCURRENT:-4}"
       CredentialEncryption__KeyFilePath: "/run/secrets/credential_encryption_key"
     volumes:

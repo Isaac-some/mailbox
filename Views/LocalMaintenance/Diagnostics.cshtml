@@ -1,0 +1,48 @@
+@model MailArchiver.ViewModels.NetworkDiagnosticsViewModel
+@{
+    ViewData["Title"] = "网络诊断";
+}
+
+<div class="row justify-content-center">
+    <div class="col-12 col-lg-8 col-xl-7">
+        <div class="d-flex align-items-center mb-4">
+            <i class="bi bi-activity fs-3 text-primary me-3"></i>
+            <div>
+                <h1 class="h3 mb-1">网络诊断</h1>
+                <p class="text-muted mb-0">仅在你主动点击检测时发起请求，不登录邮箱，不查询第三方公网 IP。</p>
+            </div>
+        </div>
+
+        <form asp-action="Diagnostics" method="post" class="row g-3 mb-4">
+            @Html.AntiForgeryToken()
+            <div class="col-12">
+                <label class="form-label" for="diagnostic-target">HTTPS 目标</label>
+                <input class="form-control" id="diagnostic-target" name="target" value="@Model.Target" placeholder="https://graph.microsoft.com" />
+            </div>
+            <div class="col-12"><button type="submit" class="btn btn-primary"><i class="bi bi-play me-1" aria-hidden="true"></i>开始检测</button></div>
+        </form>
+
+        @if (!string.IsNullOrWhiteSpace(Model.Error))
+        {
+            <div class="alert alert-danger">@Model.Error</div>
+        }
+        @if (Model.Result is not null)
+        {
+            <section class="border-top pt-4">
+                <h2 class="h5">检测结果</h2>
+                <dl class="row mb-0">
+                    <dt class="col-sm-4">诊断编号</dt><dd class="col-sm-8">@Model.Result.Id</dd>
+                    <dt class="col-sm-4">目标</dt><dd class="col-sm-8">@Model.Result.TargetHost:@Model.Result.TargetPort</dd>
+                    <dt class="col-sm-4">路由类型</dt><dd class="col-sm-8">@Model.Result.RouteType</dd>
+                    <dt class="col-sm-4">检测阶段</dt><dd class="col-sm-8">@Model.Result.Stage</dd>
+                    <dt class="col-sm-4">状态</dt><dd class="col-sm-8">@(Model.Result.Succeeded ? "成功" : "失败")</dd>
+                    <dt class="col-sm-4">HTTP 状态码</dt><dd class="col-sm-8">@(Model.Result.StatusCode?.ToString() ?? "-")</dd>
+                    <dt class="col-sm-4">是否直连回退</dt><dd class="col-sm-8">@(Model.Result.UsedDirectFallback ? "是" : "否")</dd>
+                    <dt class="col-sm-4">说明</dt><dd class="col-sm-8">@Model.Result.Message</dd>
+                </dl>
+            </section>
+        }
+
+        <p class="mt-4"><a asp-action="Index">返回本机数据</a></p>
+    </div>
+</div>

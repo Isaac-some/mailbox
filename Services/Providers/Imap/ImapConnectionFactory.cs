@@ -20,20 +20,20 @@ namespace MailArchiver.Services.Providers.Imap
         private readonly MailSyncOptions _mailSyncOptions;
         private readonly BatchOperationOptions _batchOptions;
         private readonly IMailProviderRegistry _mailProviderRegistry;
-        private readonly MailProxyOptions _mailProxyOptions;
+        private readonly INetworkMailProxyFactory _networkMail;
 
         public ImapConnectionFactory(
             ILogger<ImapConnectionFactory> logger,
             IOptions<MailSyncOptions> mailSyncOptions,
             IOptions<BatchOperationOptions> batchOptions,
             IMailProviderRegistry mailProviderRegistry,
-            IOptions<MailProxyOptions>? mailProxyOptions = null)
+            INetworkMailProxyFactory networkMail)
         {
             _logger = logger;
             _mailSyncOptions = mailSyncOptions.Value;
             _batchOptions = batchOptions.Value;
             _mailProviderRegistry = mailProviderRegistry;
-            _mailProxyOptions = mailProxyOptions?.Value ?? new MailProxyOptions();
+            _networkMail = networkMail;
         }
 
         /// <summary>
@@ -42,7 +42,6 @@ namespace MailArchiver.Services.Providers.Imap
         public ImapClient CreateImapClient(string accountName)
         {
             var client = new ImapClient();
-            MailProxyClientFactory.Apply(client, _mailProxyOptions);
             return client;
         }
 
@@ -60,40 +59,30 @@ namespace MailArchiver.Services.Providers.Imap
         /// </summary>
         public async Task ConnectWithFallbackAsync(ImapClient client, string server, int port, bool useSSL, string accountName)
         {
-            if (!useSSL)
+            await _networkMail.ConnectAsync(client, server, port, async cancellationToken =>
             {
-                _logger.LogDebug("Connecting to {Server}:{Port} with no security for account {AccountName}",
-                    server, port, accountName);
-                await client.ConnectAsync(server, port, SecureSocketOptions.None);
-                return;
-            }
+                if (!useSSL)
+                {
+                    await client.ConnectAsync(server, port, SecureSocketOptions.None, cancellationToken);
+                    return;
+                }
 
-            // First try: SSL/TLS directly
-            try
-            {
-                _logger.LogDebug("Connecting to {Server}:{Port} with SSL/TLS for account {AccountName}",
-                    server, port, accountName);
-                await client.ConnectAsync(server, port, SecureSocketOptions.SslOnConnect);
-                _logger.LogDebug("Successfully connected using SSL/TLS for account {AccountName}", accountName);
-            }
-            catch (SslHandshakeException sslEx)
-            {
-                _logger.LogDebug("SSL/TLS connection failed for account {AccountName}, trying STARTTLS: {Message}",
-                    accountName, sslEx.Message);
-
-                // Fallback: STARTTLS
                 try
                 {
-                    await client.ConnectAsync(server, port, SecureSocketOptions.StartTls);
-                    _logger.LogInformation("Successfully connected using STARTTLS for account {AccountName} on {Server}:{Port}",
-                        accountName, server, port);
+                    await client.ConnectAsync(server, port, SecureSocketOptions.SslOnConnect, cancellationToken);
                 }
-                catch (Exception fallbackEx)
+                catch (SslHandshakeException sslEx)
                 {
-                    _logger.LogError(fallbackEx, "STARTTLS fallback also failed for account {AccountName}", accountName);
-                    throw new AggregateException("Both SSL/TLS and STARTTLS connection attempts failed", sslEx, fallbackEx);
+                    try
+                    {
+                        await client.ConnectAsync(server, port, SecureSocketOptions.StartTls, cancellationToken);
+                    }
+                    catch (Exception fallbackEx)
+                    {
+                        throw new AggregateException("Both SSL/TLS and STARTTLS connection attempts failed", sslEx, fallbackEx);
+                    }
                 }
-            }
+            });
         }
 
         /// <summary>

@@ -142,7 +142,7 @@ public sealed class UpstreamMailboxConnectionStore : IUpstreamMailboxConnectionS
 
     private static string ResolveStorageRoot(IHostEnvironment environment)
     {
-        var dataDirectory = Environment.GetEnvironmentVariable("KOUZI_DATA_DIRECTORY");
+        var dataDirectory = Environment.GetEnvironmentVariable("MAIL_ASSISTANT_DATA_DIRECTORY");
         return string.IsNullOrWhiteSpace(dataDirectory) ? environment.ContentRootPath : dataDirectory;
     }
 

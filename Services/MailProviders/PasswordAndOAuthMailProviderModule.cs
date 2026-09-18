@@ -13,16 +13,16 @@ public abstract class PasswordAndOAuthMailProviderModule : IMailProviderModule
 {
     private readonly IExternalOAuthTokenManager _tokenManager;
     private readonly ICredentialEncryptionService _credentialEncryption;
-    private readonly MailProxyOptions _mailProxyOptions;
+    private readonly INetworkMailProxyFactory? _networkMail;
 
     protected PasswordAndOAuthMailProviderModule(
         IExternalOAuthTokenManager tokenManager,
         ICredentialEncryptionService credentialEncryption,
-        IOptions<MailProxyOptions>? mailProxyOptions = null)
+        INetworkMailProxyFactory? networkMail = null)
     {
         _tokenManager = tokenManager;
         _credentialEncryption = credentialEncryption;
-        _mailProxyOptions = mailProxyOptions?.Value ?? new MailProxyOptions();
+        _networkMail = networkMail;
     }
 
     public abstract MailProviderKind Kind { get; }
@@ -63,12 +63,24 @@ public abstract class PasswordAndOAuthMailProviderModule : IMailProviderModule
     public virtual MailAccountCapabilities Inspect(MailAccount account)
     {
         EnsureIdentity(account);
+        var importedStatus = GetImportedCredentialStatus(account);
+        if (importedStatus is not null)
+            return importedStatus;
         var hasCredential = HasPassword(account) || HasOAuth(account);
         return new MailAccountCapabilities(
             hasCredential,
             hasCredential,
             hasCredential ? null : $"请补充 {DisplayName} 应用专用密码或 OAuth 授权。");
     }
+
+    internal static MailAccountCapabilities? GetImportedCredentialStatus(MailAccount account)
+        => account.CredentialDetectionStatus?.ToLowerInvariant() switch
+        {
+            "pendingverification" => new MailAccountCapabilities(false, false, "已保存，等待验证"),
+            "formatneedsconfirmation" => new MailAccountCapabilities(false, false, "凭证格式待确认"),
+            "verificationfailed" => new MailAccountCapabilities(false, false, "凭证验证失败，请检查后重试"),
+            _ => null
+        };
 
     public async Task AuthenticateIncomingAsync(
         ImapClient client,
@@ -97,10 +109,13 @@ public abstract class PasswordAndOAuthMailProviderModule : IMailProviderModule
             throw new InvalidOperationException($"{DisplayName} 账号没有可用的发件凭据。");
 
         using var client = new SmtpClient();
-        MailProxyClientFactory.Apply(client, _mailProxyOptions);
+        var networkMail = _networkMail ?? throw new InvalidOperationException("网络策略服务未配置。");
         client.ServerCertificateValidationCallback = static (_, _, chain, errors) =>
             MailCertificatePolicy.IsAccepted(errors, chain);
-        await client.ConnectAsync(GetSmtpHost(account), GetSmtpPort(account), GetSmtpSocketOptions(account), cancellationToken);
+        var smtpHost = GetSmtpHost(account);
+        var smtpPort = GetSmtpPort(account);
+        await networkMail.ConnectAsync(client, smtpHost, smtpPort,
+            token => client.ConnectAsync(smtpHost, smtpPort, GetSmtpSocketOptions(account), token), cancellationToken);
         account.PreferredOutgoingAuth = await MailCredentialFallback.AuthenticateAsync(
             HasOAuth(account),
             HasPassword(account),
@@ -122,10 +137,13 @@ public abstract class PasswordAndOAuthMailProviderModule : IMailProviderModule
         using var client = new SmtpClient();
         try
         {
-            MailProxyClientFactory.Apply(client, _mailProxyOptions);
+            var networkMail = _networkMail ?? throw new InvalidOperationException("网络策略服务未配置。");
             client.ServerCertificateValidationCallback = static (_, _, chain, errors) =>
                 MailCertificatePolicy.IsAccepted(errors, chain);
-            await client.ConnectAsync(GetSmtpHost(account), GetSmtpPort(account), GetSmtpSocketOptions(account), cancellationToken);
+            var smtpHost = GetSmtpHost(account);
+            var smtpPort = GetSmtpPort(account);
+            await networkMail.ConnectAsync(client, smtpHost, smtpPort,
+                token => client.ConnectAsync(smtpHost, smtpPort, GetSmtpSocketOptions(account), token), cancellationToken);
             account.PreferredOutgoingAuth = await MailCredentialFallback.AuthenticateAsync(
                 HasOAuth(account),
                 HasPassword(account),

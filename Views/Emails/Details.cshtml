@@ -122,11 +122,11 @@
 
             <div class="row g-2 mb-3">
                 <div class="col-12 col-md-2">
-                    <strong class="text-muted small">@Localizer["Date"]:</strong>
+                    <strong class="text-muted small">@(Model.Email.IsOutgoing ? "发送时间" : "到达时间"):</strong>
                 </div>
                 <div class="col-12 col-md-10">
-                    <time data-utc-time="@Model.Email.SentDate.ToString("yyyy-MM-ddTHH:mm:ss")">
-                        @Model.Email.SentDate.ToString("yyyy-MM-dd HH:mm")
+                    <time data-utc-time="@(Model.Email.IsOutgoing ? Model.Email.SentDate : Model.Email.ReceivedDate).ToString("yyyy-MM-ddTHH:mm:ss")">
+                        @(Model.Email.IsOutgoing ? Model.Email.SentDate : Model.Email.ReceivedDate).ToString("yyyy-MM-dd HH:mm")
                     </time>
                 </div>
             </div>

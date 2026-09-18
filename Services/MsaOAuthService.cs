@@ -123,7 +123,7 @@ namespace MailArchiver.Services
         public async Task<DeviceCodeResult> StartDeviceCodeAsync(string? clientId)
         {
             var resolvedClientId = ResolveClientId(clientId);
-            var client = _httpClientFactory.CreateClient("MsaOAuth");
+            using var client = _httpClientFactory.CreateClient("MsaOAuth");
             var body = new Dictionary<string, string>
             {
                 ["client_id"] = resolvedClientId,
@@ -157,7 +157,7 @@ namespace MailArchiver.Services
         public async Task<MsaPollResult> PollDeviceCodeAsync(string? clientId, string deviceCode, int currentInterval)
         {
             var resolvedClientId = ResolveClientId(clientId);
-            var client = _httpClientFactory.CreateClient("MsaOAuth");
+            using var client = _httpClientFactory.CreateClient("MsaOAuth");
             var body = new Dictionary<string, string>
             {
                 ["grant_type"] = "urn:ietf:params:oauth:grant-type:device_code",
@@ -261,7 +261,7 @@ namespace MailArchiver.Services
 
         private async Task<MsaTokenResult> PostTokenAsync(Dictionary<string, string> body, CancellationToken cancellationToken = default)
         {
-            var client = _httpClientFactory.CreateClient("MsaOAuth");
+            using var client = _httpClientFactory.CreateClient("MsaOAuth");
             using var response = await client.PostAsync($"{Authority}/token", new FormUrlEncodedContent(body), cancellationToken);
             var json = await response.Content.ReadAsStringAsync(cancellationToken);
 

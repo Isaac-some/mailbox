@@ -27,6 +27,7 @@ namespace MailArchiver.Models
         public bool IsOutgoing { get; set; }
         public bool HasAttachments { get; set; }
         public string FolderName { get; set; }
+        public MailboxFolderCategory FolderCategory { get; set; } = MailboxFolderCategory.Other;
 
         // Raw email headers as stored in the original email
         // Contains all headers including Received, Return-Path, X-Headers, etc.

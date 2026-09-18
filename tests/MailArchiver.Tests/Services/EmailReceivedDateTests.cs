@@ -55,7 +55,7 @@ public class EmailReceivedDateTests
     }
 
     [Fact]
-    public async Task ArchiveEmailAsync_prefers_the_IMAP_server_received_date()
+    public async Task ArchiveEmailAsync_prefers_the_final_received_header_over_a_misleading_IMAP_date()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -78,6 +78,9 @@ public class EmailReceivedDateTests
         var sentDate = new DateTimeOffset(2024, 5, 1, 8, 30, 0, TimeSpan.Zero);
         var receivedDate = new DateTimeOffset(2024, 5, 3, 9, 45, 0, TimeSpan.Zero);
         var message = CreateMessage("server-date@example.com", "delayed message", sentDate, account.EmailAddress);
+        message.Headers.Add(
+            HeaderId.Received,
+            "from sender.example by mx.example; Wed, 1 May 2024 10:45:00 +0200 (CEST)");
 
         var service = ServiceFactory.CreateEmailCoreService(context);
         await service.ArchiveEmailAsync(
@@ -89,7 +92,7 @@ public class EmailReceivedDateTests
 
         var stored = await context.ArchivedEmails.SingleAsync();
         Assert.Equal(new DateTime(2024, 5, 1, 10, 30, 0), stored.SentDate);
-        Assert.Equal(new DateTime(2024, 5, 3, 11, 45, 0), stored.ReceivedDate);
+        Assert.Equal(new DateTime(2024, 5, 1, 10, 45, 0), stored.ReceivedDate);
     }
 
     [Fact]
@@ -250,7 +253,7 @@ public class EmailReceivedDateTests
 
         var repaired = await context.ArchivedEmails.OrderBy(email => email.Id).ToListAsync();
         Assert.Equal(new DateTime(2024, 5, 1, 14, 30, 0), repaired[0].ReceivedDate);
-        Assert.Equal(sentDate, repaired[1].ReceivedDate);
+        Assert.Equal(new DateTime(2026, 8, 27, 10, 0, 0), repaired[1].ReceivedDate);
         Assert.All(repaired, email => Assert.True(email.IsLocked));
 
         repaired[0].ReceivedDate = new DateTime(2030, 1, 1);

@@ -4,7 +4,9 @@ set -euo pipefail
 MODE="${1:-run}"
 APP_NAME="邮箱助手"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-RUN_ROOT="${KOUZI_RUN_ROOT:-/private/tmp/kouzi-mail-assistant-run}"
+LOCAL_TOOLS_DIR="${MAIL_ASSISTANT_TOOLS_DIR:-$ROOT_DIR/.local-tools}"
+LOCAL_DOTNET="$LOCAL_TOOLS_DIR/dotnet/dotnet"
+RUN_ROOT="${MAIL_ASSISTANT_RUN_ROOT:-/private/tmp/mail-assistant-run}"
 PUBLISH_DIR="$RUN_ROOT/server"
 APP_OUTPUT_DIR="$RUN_ROOT/app"
 APP_BUNDLE="$APP_OUTPUT_DIR/$APP_NAME.app"
@@ -12,10 +14,12 @@ APP_BUNDLE="$APP_OUTPUT_DIR/$APP_NAME.app"
 resolve_dotnet() {
   if [[ -n "${DOTNET_BIN:-}" ]]; then
     printf '%s\n' "$DOTNET_BIN"
+  elif [[ -x "$LOCAL_DOTNET" ]]; then
+    printf '%s\n' "$LOCAL_DOTNET"
   elif command -v dotnet >/dev/null 2>&1; then
     command -v dotnet
-  elif [[ -x /private/tmp/kouzi-dotnet-sdk/dotnet ]]; then
-    printf '%s\n' /private/tmp/kouzi-dotnet-sdk/dotnet
+  elif [[ -x /private/tmp/mail-assistant-dotnet-sdk/dotnet ]]; then
+    printf '%s\n' /private/tmp/mail-assistant-dotnet-sdk/dotnet
   else
     printf '%s\n' "未找到 .NET 10 SDK。请先安装 .NET 10，或设置 DOTNET_BIN。" >&2
     exit 3
@@ -23,6 +27,11 @@ resolve_dotnet() {
 }
 
 DOTNET_COMMAND="$(resolve_dotnet)"
+export DOTNET_ROOT="$(dirname "$DOTNET_COMMAND")"
+export DOTNET_CLI_HOME="${DOTNET_CLI_HOME:-$LOCAL_TOOLS_DIR/dotnet-home}"
+export NUGET_PACKAGES="${NUGET_PACKAGES:-$LOCAL_TOOLS_DIR/nuget-packages}"
+export DOTNET_CLI_TELEMETRY_OPTOUT=1
+export DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
 RUNTIME_PATH="$($DOTNET_COMMAND --list-runtimes | awk '/^Microsoft.NETCore.App/ {gsub(/[\[\]]/, "", $NF); print $NF; exit}')"
 if [[ -z "$RUNTIME_PATH" ]]; then
   printf '%s\n' "未找到 Microsoft.NETCore.App 运行时。" >&2
@@ -72,12 +81,13 @@ rm -rf "$PUBLISH_DIR" "$APP_OUTPUT_DIR"
   --nodeReuse:false \
   -p:BuildInParallel=false \
   -p:UseSharedCompilation=false \
+  -p:NuGetAudit=false \
   -p:PublishTrimmed=false
 
 DOTNET_BIN="$DOTNET_COMMAND" \
 DOTNET_RUNTIME_ROOT="$DOTNET_RUNTIME_ROOT" \
 SERVER_PUBLISH_DIR="$PUBLISH_DIR" \
-KOUZI_APP_OUTPUT_DIR="$APP_OUTPUT_DIR" \
+MAIL_ASSISTANT_APP_OUTPUT_DIR="$APP_OUTPUT_DIR" \
   "$ROOT_DIR/local-app/build-dmg.sh" --app-only >/dev/null
 
 open_app() {
@@ -97,7 +107,7 @@ case "$MODE" in
     ;;
   --telemetry|telemetry)
     open_app
-    /usr/bin/log stream --info --style compact --predicate 'subsystem == "com.kouzi.mailassistant"'
+    /usr/bin/log stream --info --style compact --predicate 'subsystem == "com.mailbox.assistant"'
     ;;
   --verify|verify)
     open_app

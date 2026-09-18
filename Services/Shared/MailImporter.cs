@@ -1,6 +1,7 @@
 using MailArchiver.Data;
 using MailArchiver.Models;
 using MailArchiver.Services.Providers.Eml;
+using MailArchiver.Services.Providers.Imap;
 using MailArchiver.Utilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -147,7 +148,9 @@ namespace MailArchiver.Services.Shared
                         ? Encoding.UTF8.GetBytes(hasNullBytesInText ? rawTextBody! : originalTextBody!) : null,
                     OriginalBodyHtml = (hasNullBytesInHtml || (!string.IsNullOrEmpty(originalHtmlBody) && originalHtmlBody != htmlBody))
                         ? Encoding.UTF8.GetBytes(hasNullBytesInHtml ? rawHtmlBody! : originalHtmlBody!) : null,
-                    FolderName = targetFolder, RawHeaders = rawHeaders,
+                    FolderName = targetFolder,
+                    FolderCategory = MailboxFolderClassifier.Classify(targetFolder),
+                    RawHeaders = rawHeaders,
                     Attachments = new List<EmailAttachment>()
                 };
 

@@ -65,8 +65,8 @@ public sealed class OutlookGraphMailSender : IOutlookGraphMailSender
             Encoding.UTF8,
             "application/json");
 
-        var response = await _httpClientFactory.CreateClient("MsaOAuth")
-            .SendAsync(request, cancellationToken);
+        using var client = _httpClientFactory.CreateClient("MsaOAuth");
+        using var response = await client.SendAsync(request, cancellationToken);
         if (response.StatusCode == HttpStatusCode.Accepted)
             return;
 

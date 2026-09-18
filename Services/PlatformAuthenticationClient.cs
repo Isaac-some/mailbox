@@ -54,9 +54,9 @@ public sealed class PlatformAuthenticationClient : IPlatformAuthenticationClient
                 Content = JsonContent.Create(new { username = username.Trim(), password })
             };
             request.Headers.Accept.ParseAdd("application/json");
-            request.Headers.TryAddWithoutValidation("X-Kouzi-Device-Name", SanitizeHeader(Environment.MachineName));
-            request.Headers.TryAddWithoutValidation("X-Kouzi-OS", SanitizeHeader(RuntimeInformation.OSDescription));
-            request.Headers.TryAddWithoutValidation("X-Kouzi-App-Version", SanitizeHeader(Assembly.GetEntryAssembly()?.GetName().Version?.ToString(3) ?? "unknown"));
+            request.Headers.TryAddWithoutValidation("X-MailAssistant-Device-Name", SanitizeHeader(Environment.MachineName));
+            request.Headers.TryAddWithoutValidation("X-MailAssistant-OS", SanitizeHeader(RuntimeInformation.OSDescription));
+            request.Headers.TryAddWithoutValidation("X-MailAssistant-App-Version", SanitizeHeader(Assembly.GetEntryAssembly()?.GetName().Version?.ToString(3) ?? "unknown"));
 
             var client = _httpClientFactory.CreateClient("PlatformAuthentication");
             using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);

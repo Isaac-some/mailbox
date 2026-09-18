@@ -12,7 +12,7 @@ namespace MailArchiver.Data;
 /// </summary>
 public static class ArchivedEmailReceivedDateRepair
 {
-    private const string RepairKey = "received-date-from-mail-headers-v1";
+    private const string RepairKey = "received-date-from-final-received-header-v2";
     private const int BatchSize = 200;
 
     private static readonly Regex FirstReceivedHeader = new(
@@ -60,12 +60,12 @@ public static class ArchivedEmailReceivedDateRepair
                 foreach (var email in batch)
                 {
                     var parsedReceivedDate = TryExtractReceivedDate(email.RawHeaders);
-                    var correctedDate = parsedReceivedDate.HasValue
-                        ? dateTimeHelper.ConvertToDisplayTimeZone(parsedReceivedDate.Value)
-                        : email.SentDate;
-
-                    if (email.ReceivedDate != correctedDate)
-                        corrections.Add((email, correctedDate));
+                    if (parsedReceivedDate.HasValue)
+                    {
+                        var correctedDate = dateTimeHelper.ConvertToDisplayTimeZone(parsedReceivedDate.Value);
+                        if (email.ReceivedDate != correctedDate)
+                            corrections.Add((email, correctedDate));
+                    }
                 }
 
                 if (corrections.Count > 0)

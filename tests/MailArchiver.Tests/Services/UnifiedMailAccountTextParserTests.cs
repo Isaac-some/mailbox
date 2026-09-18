@@ -59,6 +59,26 @@ public class UnifiedMailAccountTextParserTests
     }
 
     [Theory]
+    [InlineData("outlook.sg")]
+    [InlineData("outlook.fr")]
+    [InlineData("outlook.es")]
+    [InlineData("outlook.com.au")]
+    [InlineData("outlook.de")]
+    [InlineData("outlook.jp")]
+    public void Parse_routes_country_specific_Outlook_domains_to_refresh_token_flow(string domain)
+    {
+        const string clientId = "11111111-2222-3333-4444-555555555555";
+        using var reader = new StringReader($"person@{domain}\tpassword\t{clientId}\trefresh-token\n");
+
+        var result = UnifiedMailAccountTextParser.Parse(reader);
+
+        var account = Assert.Single(result.Accounts);
+        Assert.Empty(result.Errors);
+        Assert.Equal(MailProviderKind.Outlook, account.Provider);
+        Assert.Equal("refresh-token", account.RefreshToken);
+    }
+
+    [Theory]
     [InlineData("person@\tpassword")]
     [InlineData("person@gmx.com\tclient\trefresh")]
     [InlineData("person@outlook.com\tpassword\tnot-a-guid\trefresh")]

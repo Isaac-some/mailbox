@@ -119,7 +119,7 @@ written to the app bundle or local data. Restarting the app or disabling the
 platform account requires another login.
 
 Each request also includes the installation ID, device name, operating system,
-and app version in `X-Kouzi-*` headers. The platform can combine these values
+and app version in `X-MailAssistant-*` headers. The platform can combine these values
 with the source IP and the person bound to the token when investigating use.
 The client does not claim GPS or physical-location accuracy.
 

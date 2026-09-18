@@ -10,6 +10,7 @@ namespace MailArchiver.Models.ViewModels
         public int? SelectedAccountId { get; set; }
         public int? SelectedEmailId { get; set; }
         public string SelectedFolder { get; set; }
+        public MailboxFolderCategory? SelectedFolderCategory { get; set; }
         public bool? IsOutgoing { get; set; }
         public int PageNumber { get; set; } = 1;
         public int PageSize { get; set; } = 20;
@@ -36,6 +37,9 @@ namespace MailArchiver.Models.ViewModels
 
         // Folder tree for hierarchical display
         public List<FolderTreeNode> FolderTree { get; set; } = new List<FolderTreeNode>();
+        public Dictionary<MailboxFolderCategory, int> FolderCategoryCounts { get; set; } = new();
+        public int MailboxSyncLookbackDays { get; set; } = 7;
+        public bool IsSelectedCategoryExpanded { get; set; }
 
         public SearchViewModel() { }
 

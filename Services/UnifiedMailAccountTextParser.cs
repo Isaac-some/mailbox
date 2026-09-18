@@ -197,7 +197,7 @@ public static class UnifiedMailAccountTextParser
             if (domain is "gmail.com" or "googlemail.com") provider = MailProviderKind.Gmail;
             else if (domain.StartsWith("yahoo.", StringComparison.Ordinal)) provider = MailProviderKind.Yahoo;
             else if (domain is "gmx.com" or "gmx.net" or "gmx.de") provider = MailProviderKind.Gmx;
-            else if (domain is "outlook.com" or "hotmail.com" or "live.com" or "msn.com") provider = MailProviderKind.Outlook;
+            else if (OutlookDomainPolicy.IsOutlookDomain(domain)) provider = MailProviderKind.Outlook;
             else provider = MailProviderKind.Custom;
             return true;
         }

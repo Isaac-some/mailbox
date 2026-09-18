@@ -2,18 +2,47 @@ import Cocoa
 import Security
 import WebKit
 
-final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolbarDelegate, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate {
+    private enum WindowMode: String {
+        case desktop
+        case compact
+    }
+
+    private enum PreferenceKey {
+        static let windowMode = "windowMode"
+        static let alwaysOnTop = "alwaysOnTop"
+        static let desktopWidth = "desktopWindowWidth"
+        static let desktopHeight = "desktopWindowHeight"
+        static let compactWidth = "compactWindowWidth"
+        static let compactHeight = "compactWindowHeight"
+    }
+
+    private enum ToolbarIdentifier {
+        static let main = NSToolbar.Identifier("MailAssistant.MainToolbar")
+        static let windowMode = NSToolbarItem.Identifier("MailAssistant.WindowMode")
+        static let alwaysOnTop = NSToolbarItem.Identifier("MailAssistant.AlwaysOnTop")
+    }
+
     private let appName = "邮箱助手"
     private let localPort = 5180
+    private let defaults = UserDefaults.standard
     private var window: NSWindow!
     private var webView: WKWebView!
     private var server: Process?
     private var isQuitting = false
+    private var isApplyingWindowFrame = false
+    private var windowMode: WindowMode = .desktop
+    private var alwaysOnTop = false
+    private var desktopWindowMenuItem: NSMenuItem?
+    private var compactWindowMenuItem: NSMenuItem?
+    private var alwaysOnTopMenuItem: NSMenuItem?
+    private var windowModeToolbarItem: NSToolbarItem?
+    private var alwaysOnTopToolbarItem: NSToolbarItem?
     private var downloadDestinations: [ObjectIdentifier: URL] = [:]
 
     private var dataDirectory: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return base.appendingPathComponent("KouziMailAssistant", isDirectory: true)
+        return base.appendingPathComponent("MailAssistant", isDirectory: true)
     }
 
     private var resetMarker: URL {
@@ -23,18 +52,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     private var webKitDataDirectory: URL {
         let base = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
         return base.appendingPathComponent("WebKit", isDirectory: true)
-            .appendingPathComponent(Bundle.main.bundleIdentifier ?? "com.kouzi.mailassistant", isDirectory: true)
+            .appendingPathComponent(Bundle.main.bundleIdentifier ?? "com.mailbox.assistant", isDirectory: true)
     }
 
     private var httpStorageDirectory: URL {
         let base = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
         return base.appendingPathComponent("HTTPStorages", isDirectory: true)
-            .appendingPathComponent(Bundle.main.bundleIdentifier ?? "com.kouzi.mailassistant", isDirectory: true)
+            .appendingPathComponent(Bundle.main.bundleIdentifier ?? "com.mailbox.assistant", isDirectory: true)
     }
 
     private var cacheDirectory: URL {
         let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        return base.appendingPathComponent(Bundle.main.bundleIdentifier ?? "com.kouzi.mailassistant", isDirectory: true)
+        return base.appendingPathComponent(Bundle.main.bundleIdentifier ?? "com.mailbox.assistant", isDirectory: true)
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -88,6 +117,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         editMenuItem.submenu = editMenu
         mainMenu.addItem(editMenuItem)
 
+        let windowMenuItem = NSMenuItem(title: "窗口", action: nil, keyEquivalent: "")
+        let windowMenu = NSMenu(title: "窗口")
+
+        let desktopItem = NSMenuItem(
+            title: "桌面窗口",
+            action: #selector(useDesktopWindow(_:)),
+            keyEquivalent: "")
+        desktopItem.target = self
+        desktopWindowMenuItem = desktopItem
+        windowMenu.addItem(desktopItem)
+
+        let compactItem = NSMenuItem(
+            title: "手机窄窗",
+            action: #selector(useCompactWindow(_:)),
+            keyEquivalent: "m")
+        compactItem.keyEquivalentModifierMask = [.command, .option]
+        compactItem.target = self
+        compactWindowMenuItem = compactItem
+        windowMenu.addItem(compactItem)
+
+        windowMenu.addItem(.separator())
+
+        let pinItem = NSMenuItem(
+            title: "始终置顶",
+            action: #selector(toggleAlwaysOnTop(_:)),
+            keyEquivalent: "p")
+        pinItem.keyEquivalentModifierMask = [.command, .option]
+        pinItem.target = self
+        alwaysOnTopMenuItem = pinItem
+        windowMenu.addItem(pinItem)
+
+        windowMenuItem.submenu = windowMenu
+        mainMenu.addItem(windowMenuItem)
+        NSApp.windowsMenu = windowMenu
+
         NSApp.mainMenu = mainMenu
     }
 
@@ -105,17 +169,175 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             backing: .buffered,
             defer: false)
         window.title = appName
-        window.minSize = NSSize(width: 960, height: 650)
         window.isReleasedWhenClosed = false
         window.isRestorable = false
+        window.delegate = self
         window.contentView = webView
-        window.center()
+
+        let toolbar = NSToolbar(identifier: ToolbarIdentifier.main)
+        toolbar.delegate = self
+        toolbar.displayMode = .iconOnly
+        toolbar.allowsUserCustomization = false
+        window.toolbar = toolbar
+        window.toolbarStyle = .unifiedCompact
+
+        windowMode = WindowMode(rawValue: defaults.string(forKey: PreferenceKey.windowMode) ?? "") ?? .desktop
+        alwaysOnTop = defaults.bool(forKey: PreferenceKey.alwaysOnTop)
+        applyWindowMode(windowMode, animated: false, centered: true)
+        applyAlwaysOnTop()
         window.makeKeyAndOrderFront(nil)
         webView.loadHTMLString("<html><body style='font:16px -apple-system;display:flex;align-items:center;justify-content:center;height:100vh;color:#667085'>正在打开邮箱助手...</body></html>", baseURL: nil)
     }
 
+    @objc private func useDesktopWindow(_ sender: Any?) {
+        applyWindowMode(.desktop, animated: true, centered: false)
+    }
+
+    @objc private func useCompactWindow(_ sender: Any?) {
+        applyWindowMode(.compact, animated: true, centered: false)
+    }
+
+    @objc private func toggleWindowMode(_ sender: Any?) {
+        applyWindowMode(windowMode == .compact ? .desktop : .compact, animated: true, centered: false)
+    }
+
+    @objc private func toggleAlwaysOnTop(_ sender: Any?) {
+        alwaysOnTop.toggle()
+        defaults.set(alwaysOnTop, forKey: PreferenceKey.alwaysOnTop)
+        applyAlwaysOnTop()
+    }
+
+    private func applyWindowMode(_ mode: WindowMode, animated: Bool, centered: Bool) {
+        windowMode = mode
+        defaults.set(mode.rawValue, forKey: PreferenceKey.windowMode)
+
+        let minimumSize = minimumFrameSize(for: mode)
+        window.minSize = minimumSize
+        let targetSize = fittedFrameSize(savedFrameSize(for: mode), minimum: minimumSize)
+        let targetFrame = positionedFrame(size: targetSize, centered: centered)
+
+        isApplyingWindowFrame = true
+        window.setFrame(targetFrame, display: true, animate: animated)
+        isApplyingWindowFrame = false
+        updateWindowControls()
+    }
+
+    private func applyAlwaysOnTop() {
+        window.level = alwaysOnTop ? NSWindow.Level.floating : NSWindow.Level.normal
+        updateWindowControls()
+    }
+
+    private func minimumFrameSize(for mode: WindowMode) -> NSSize {
+        mode == .compact
+            ? NSSize(width: 360, height: 560)
+            : NSSize(width: 960, height: 650)
+    }
+
+    private func savedFrameSize(for mode: WindowMode) -> NSSize {
+        let widthKey = mode == .compact ? PreferenceKey.compactWidth : PreferenceKey.desktopWidth
+        let heightKey = mode == .compact ? PreferenceKey.compactHeight : PreferenceKey.desktopHeight
+        let defaultSize = mode == .compact
+            ? NSSize(width: 420, height: 860)
+            : NSSize(width: 1280, height: 820)
+        let savedWidth = defaults.double(forKey: widthKey)
+        let savedHeight = defaults.double(forKey: heightKey)
+        return NSSize(
+            width: savedWidth > 0 ? savedWidth : defaultSize.width,
+            height: savedHeight > 0 ? savedHeight : defaultSize.height)
+    }
+
+    private func fittedFrameSize(_ requested: NSSize, minimum: NSSize) -> NSSize {
+        let visibleFrame = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame
+            ?? NSRect(x: 0, y: 0, width: requested.width, height: requested.height)
+        return NSSize(
+            width: min(max(requested.width, minimum.width), visibleFrame.width),
+            height: min(max(requested.height, minimum.height), visibleFrame.height))
+    }
+
+    private func positionedFrame(size: NSSize, centered: Bool) -> NSRect {
+        let visibleFrame = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame
+            ?? NSRect(origin: .zero, size: size)
+        let origin: NSPoint
+        if centered {
+            origin = NSPoint(
+                x: visibleFrame.midX - size.width / 2,
+                y: visibleFrame.midY - size.height / 2)
+        } else {
+            let currentCenter = NSPoint(x: window.frame.midX, y: window.frame.midY)
+            origin = NSPoint(
+                x: min(max(currentCenter.x - size.width / 2, visibleFrame.minX), visibleFrame.maxX - size.width),
+                y: min(max(currentCenter.y - size.height / 2, visibleFrame.minY), visibleFrame.maxY - size.height))
+        }
+        return NSRect(origin: origin, size: size)
+    }
+
+    private func persistCurrentWindowSize() {
+        guard !isApplyingWindowFrame else { return }
+        let widthKey = windowMode == .compact ? PreferenceKey.compactWidth : PreferenceKey.desktopWidth
+        let heightKey = windowMode == .compact ? PreferenceKey.compactHeight : PreferenceKey.desktopHeight
+        defaults.set(window.frame.width, forKey: widthKey)
+        defaults.set(window.frame.height, forKey: heightKey)
+    }
+
+    private func updateWindowControls() {
+        desktopWindowMenuItem?.state = windowMode == .desktop ? .on : .off
+        compactWindowMenuItem?.state = windowMode == .compact ? .on : .off
+        alwaysOnTopMenuItem?.state = alwaysOnTop ? .on : .off
+
+        windowModeToolbarItem?.label = windowMode == .compact ? "桌面窗口" : "手机窄窗"
+        windowModeToolbarItem?.toolTip = windowMode == .compact ? "切换到桌面窗口" : "切换到手机窄窗"
+        windowModeToolbarItem?.image = NSImage(
+            systemSymbolName: windowMode == .compact ? "rectangle" : "rectangle.portrait",
+            accessibilityDescription: windowModeToolbarItem?.toolTip)
+
+        alwaysOnTopToolbarItem?.label = alwaysOnTop ? "取消置顶" : "始终置顶"
+        alwaysOnTopToolbarItem?.toolTip = alwaysOnTop ? "取消始终置顶" : "始终置顶"
+        alwaysOnTopToolbarItem?.image = NSImage(
+            systemSymbolName: alwaysOnTop ? "pin.fill" : "pin",
+            accessibilityDescription: alwaysOnTopToolbarItem?.toolTip)
+    }
+
+    func windowDidResize(_ notification: Notification) {
+        persistCurrentWindowSize()
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        persistCurrentWindowSize()
+    }
+
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        [.flexibleSpace, ToolbarIdentifier.windowMode, ToolbarIdentifier.alwaysOnTop]
+    }
+
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        [.flexibleSpace, ToolbarIdentifier.windowMode, ToolbarIdentifier.alwaysOnTop]
+    }
+
+    func toolbar(
+        _ toolbar: NSToolbar,
+        itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
+        willBeInsertedIntoToolbar flag: Bool
+    ) -> NSToolbarItem? {
+        let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+        item.target = self
+        item.isBordered = true
+        switch itemIdentifier {
+        case ToolbarIdentifier.windowMode:
+            item.action = #selector(toggleWindowMode(_:))
+            windowModeToolbarItem = item
+        case ToolbarIdentifier.alwaysOnTop:
+            item.action = #selector(toggleAlwaysOnTop(_:))
+            alwaysOnTopToolbarItem = item
+        default:
+            return nil
+        }
+        updateWindowControls()
+        return item
+    }
+
     private func startServer() {
         do {
+            try migrateExistingDataIfNeeded()
             if FileManager.default.fileExists(atPath: resetMarker.path) {
                 try resetLocalData()
             }
@@ -143,16 +365,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             environment["ASPNETCORE_ENVIRONMENT"] = "Local"
             environment["ASPNETCORE_CONTENTROOT"] = serverDirectory.path
             environment["ASPNETCORE_URLS"] = "http://127.0.0.1:\(localPort)"
-            environment["KOUZI_LOCAL_APP"] = "1"
-            environment["KOUZI_DATA_DIRECTORY"] = dataDirectory.path
-            environment["KOUZI_FACTORY_RESET_MARKER"] = resetMarker.path
+            environment["MAIL_ASSISTANT_LOCAL_APP"] = "1"
+            environment["MAIL_ASSISTANT_DATA_DIRECTORY"] = dataDirectory.path
+            environment["MAIL_ASSISTANT_FACTORY_RESET_MARKER"] = resetMarker.path
+            environment["ReleaseNotes__AppVersion"] = Bundle.main.object(
+                forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.3.3"
             environment["DOTNET_ROOT"] = runtime.deletingLastPathComponent().path
             environment["DOTNET_MULTILEVEL_LOOKUP"] = "0"
             environment["DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE"] = "false"
             environment["ConnectionStrings__DefaultConnection"] = "Data Source=\(dataDirectory.appendingPathComponent("mail-archive.sqlite").path)"
             environment["DataProtection__KeyPath"] = dataDirectory.appendingPathComponent("keys", isDirectory: true).path
             environment["CredentialEncryption__KeyFilePath"] = credentialKeyPath.path
-            applyDetectedMailProxy(to: &environment)
             process.environment = environment
             process.terminationHandler = { [weak self] _ in
                 DispatchQueue.main.async { self?.serverStopped() }
@@ -165,22 +388,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         }
     }
 
-    private func applyDetectedMailProxy(to environment: inout [String: String]) {
-        let configURL = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/gw/vortex.json")
-        guard let data = try? Data(contentsOf: configURL),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              object["connected"] as? Bool == true,
-              let portNumber = object["proxy_port"] as? NSNumber else {
-            return
-        }
+    private func migrateExistingDataIfNeeded() throws {
+        let fileManager = FileManager.default
+        guard !fileManager.fileExists(atPath: dataDirectory.path) else { return }
 
-        let port = portNumber.intValue
-        guard port > 0 && port <= 65535 else { return }
-        environment["MailProxy__Enabled"] = "true"
-        environment["MailProxy__Type"] = "Socks5"
-        environment["MailProxy__Host"] = "127.0.0.1"
-        environment["MailProxy__Port"] = String(port)
+        let base = dataDirectory.deletingLastPathComponent()
+        let candidates = try fileManager.contentsOfDirectory(
+            at: base,
+            includingPropertiesForKeys: [.isDirectoryKey, .contentModificationDateKey],
+            options: [.skipsHiddenFiles])
+            .filter { candidate in
+                guard candidate.lastPathComponent != dataDirectory.lastPathComponent else { return false }
+                var isDirectory: ObjCBool = false
+                guard fileManager.fileExists(atPath: candidate.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+                    return false
+                }
+                return fileManager.fileExists(atPath: candidate.appendingPathComponent("mail-archive.sqlite").path)
+                    && fileManager.fileExists(atPath: candidate.appendingPathComponent("credential-encryption.key").path)
+            }
+
+        guard candidates.count == 1, let existingDataDirectory = candidates.first else { return }
+        try fileManager.moveItem(at: existingDataDirectory, to: dataDirectory)
     }
 
     private func serverStopped() {
@@ -404,7 +632,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 }
 
 @main
-private enum KouziMailAssistantMain {
+private enum MailAssistantMain {
     static func main() {
         let application = NSApplication.shared
         let delegate = AppDelegate()

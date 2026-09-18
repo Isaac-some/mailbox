@@ -63,8 +63,9 @@ namespace MailArchiver.Services.Providers.Imap
         /// <summary>
         /// Syncs all emails from the IMAP mailbox for the specified account.
         /// </summary>
-        public async Task SyncMailAccountAsync(MailAccount account, string? jobId = null)
+        public async Task SyncMailAccountAsync(MailAccount account, string? jobId = null, MailSyncRequestOptions? options = null)
         {
+            var effectiveOptions = (options ?? new MailSyncRequestOptions(account.MailboxSyncLookbackDays)).Normalize();
             _logger.LogInformation("Starting IMAP sync for account: {AccountName}", account.Name);
 
             // Check bandwidth limit before starting sync
@@ -115,6 +116,13 @@ namespace MailArchiver.Services.Providers.Imap
                 _logger.LogInformation("Connected to IMAP server for {AccountName}", account.Name);
 
                 var allFolders = await GetFoldersToSyncAsync(client, account.Name);
+                if (effectiveOptions.TargetCategory.HasValue)
+                {
+                    allFolders = allFolders
+                        .Where(folder => MailboxFolderClassifier.Classify(
+                            folder.Name, folder.FullName, folder.Attributes) == effectiveOptions.TargetCategory.Value)
+                        .ToList();
+                }
 
                 if (jobId != null)
                 {
@@ -158,7 +166,7 @@ namespace MailArchiver.Services.Providers.Imap
                             });
                         }
 
-                        var folderResult = await SyncFolderAsync(folder, account, client, jobId);
+                        var folderResult = await SyncFolderAsync(folder, account, client, jobId, effectiveOptions);
                         processedEmails += folderResult.ProcessedEmails;
                         newEmails += folderResult.NewEmails;
                         failedEmails += folderResult.FailedEmails;
@@ -220,7 +228,9 @@ namespace MailArchiver.Services.Providers.Imap
                         await _context.SaveChangesAsync();
                     }
 
-                    deletedEmails = await _coreService.EnforceLocalEmailLimitAsync(account.Id);
+                    deletedEmails = await _coreService.EnforceMailboxCategoryLimitsAsync(
+                        trackedAccount ?? account,
+                        effectiveOptions.LookbackDays);
 
                     if (_bandwidthOptions.Enabled)
                     {
@@ -427,24 +437,7 @@ namespace MailArchiver.Services.Providers.Imap
         private async Task<List<IMailFolder>> GetFoldersToSyncAsync(ImapClient client, string accountName)
         {
             var discoveredFolders = await _folderService.GetAllFoldersAsync(client, accountName);
-            if (!_mailSyncOptions.SyncInboxOnly)
-                return discoveredFolders;
-
-            var incomingFolders = discoveredFolders
-                .Where(folder => IncomingMailFolderPolicy.ShouldSync(
-                    folder.Name,
-                    folder.FullName,
-                    folder.Attributes))
-                .ToList();
-
-            if (!incomingFolders.Any(folder =>
-                    folder.Attributes.HasFlag(FolderAttributes.Inbox) ||
-                    string.Equals(folder.FullName, "INBOX", StringComparison.OrdinalIgnoreCase)))
-            {
-                incomingFolders.Insert(0, client.Inbox);
-            }
-
-            return incomingFolders
+            return discoveredFolders
                 .GroupBy(folder => folder.FullName, StringComparer.OrdinalIgnoreCase)
                 .Select(group => group.First())
                 .OrderByDescending(folder =>
@@ -504,7 +497,12 @@ namespace MailArchiver.Services.Providers.Imap
             return false;
         }
 
-        private async Task<SyncFolderResult> SyncFolderAsync(IMailFolder folder, MailAccount account, ImapClient client, string? jobId = null)
+        private async Task<SyncFolderResult> SyncFolderAsync(
+            IMailFolder folder,
+            MailAccount account,
+            ImapClient client,
+            string? jobId,
+            MailSyncRequestOptions options)
         {
             var result = new SyncFolderResult();
             var totalBytesDownloaded = 0L;
@@ -541,19 +539,17 @@ namespace MailArchiver.Services.Providers.Imap
                     await folder.OpenAsync(FolderAccess.ReadOnly);
                 }
 
-                bool isOutgoing = _folderService.IsOutgoingFolder(folder);
-                var lastSync = account.LastSync;
-                var lookbackCutoff = _mailSyncOptions.LookbackDays > 0
-                    ? DateTime.UtcNow.AddDays(-_mailSyncOptions.LookbackDays)
-                    : DateTime.MinValue;
-                // A new account still performs an initial sync, but the
-                // configured lookback window prevents it from becoming a
-                // historical full-mailbox import.
-                bool isFullSync = account.LastSync == new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)
-                    && _mailSyncOptions.LookbackDays <= 0;
+                var folderCategory = MailboxFolderClassifier.Classify(folder.Name, folder.FullName, folder.Attributes);
+                bool isOutgoing = folderCategory == MailboxFolderCategory.Sent || _folderService.IsOutgoingFolder(folder);
+                // Some IMAP servers expose delayed or inaccurate INTERNALDATE values.
+                // Discover a wider UID window, then keep the selected 7/30-day view
+                // boundary in the local archive query.
+                var lookbackCutoff = DateTime.UtcNow.AddDays(-options.RemoteDiscoveryLookbackDays);
+                var lastSync = lookbackCutoff;
+                const bool isFullSync = false;
 
                 // Resume from checkpoint if available for this folder
-                if (_bandwidthOptions.Enabled)
+                if (_bandwidthOptions.Enabled && !options.TargetCategory.HasValue)
                 {
                     try
                     {
@@ -567,7 +563,6 @@ namespace MailArchiver.Services.Providers.Imap
                                 _logger.LogInformation("Resuming folder {FolderName} from checkpoint date {CheckpointDate} " +
                                     "(LastSync was {LastSync})", folder.FullName, checkpointDate, lastSync);
                                 lastSync = checkpointDate;
-                                isFullSync = false;
                             }
                         }
                     }
@@ -575,18 +570,6 @@ namespace MailArchiver.Services.Providers.Imap
                     {
                         _logger.LogWarning(cpEx, "Error reading checkpoints for folder {FolderName}, using LastSync", folder.FullName);
                     }
-                }
-
-                if (!isFullSync)
-                {
-                    lastSync = lastSync.AddHours(-12);
-                }
-
-                // The overlap prevents missed messages between runs, but it must
-                // never expand the configured retention window.
-                if (lastSync < lookbackCutoff)
-                {
-                    lastSync = lookbackCutoff;
                 }
 
                 var query = SearchQuery.DeliveredAfter(lastSync);
@@ -674,7 +657,7 @@ namespace MailArchiver.Services.Providers.Imap
                             _logger.LogInformation("All query found {Count} total messages in folder {FolderName}, will filter by date client-side",
                                 uids.Count, folder.FullName);
 
-                            if (_mailSyncOptions.LookbackDays > 0)
+                            if (options.LookbackDays > 0)
                             {
                                 uids = await FilterUidsByDateAsync(folder, uids, lookbackCutoff);
                                 _logger.LogInformation("Date filter kept {Count} messages newer than {Cutoff} in folder {FolderName}",
@@ -699,6 +682,12 @@ namespace MailArchiver.Services.Providers.Imap
                     }
 
                     uids = await IncludeRecentInboxCandidatesAsync(folder, account.Id, uids);
+                    var categoryLimit = options.TargetCategory == folderCategory && options.TargetLimit.HasValue
+                        ? options.TargetLimit.Value
+                        : account.IsMailboxCategoryExpanded(folderCategory)
+                            ? _mailSyncOptions.ExpandedMessagesPerCategory
+                            : _mailSyncOptions.InitialMessagesPerCategory;
+                    uids = await LimitUidsByReceivedDateAsync(folder, uids, Math.Max(1, categoryLimit));
 
                     _logger.LogInformation("Found {Count} messages to process in folder {FolderName} for account: {AccountName}",
                         uids.Count, folder.FullName, account.Name);
@@ -880,7 +869,8 @@ namespace MailArchiver.Services.Providers.Imap
                                     message,
                                     isOutgoing,
                                     folder.FullName,
-                                    receivedDate);
+                                    receivedDate,
+                                    folderCategory);
                                 if (isNew)
                                 {
                                     result.NewEmails++;
@@ -1009,6 +999,36 @@ namespace MailArchiver.Services.Providers.Imap
                     "Could not read IMAP INTERNALDATE values for folder {FolderName}; falling back to message headers",
                     folder.FullName);
                 return new Dictionary<UniqueId, DateTimeOffset?>();
+            }
+        }
+
+        private async Task<IList<UniqueId>> LimitUidsByReceivedDateAsync(
+            IMailFolder folder,
+            IList<UniqueId> uids,
+            int limit)
+        {
+            if (uids.Count <= limit)
+                return uids;
+
+            try
+            {
+                var summaries = await folder.FetchAsync(
+                    uids,
+                    MessageSummaryItems.UniqueId | MessageSummaryItems.InternalDate | MessageSummaryItems.Envelope);
+                return summaries
+                    .OrderByDescending(summary => summary.InternalDate ?? summary.Envelope?.Date ?? DateTimeOffset.MinValue)
+                    .ThenByDescending(summary => summary.UniqueId.Id)
+                    .Take(limit)
+                    .Select(summary => summary.UniqueId)
+                    .OrderBy(uid => uid.Id)
+                    .ToList();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Could not rank messages by INTERNALDATE for {FolderName}; using newest UIDs",
+                    folder.FullName);
+                return uids.OrderByDescending(uid => uid.Id).Take(limit).OrderBy(uid => uid.Id).ToList();
             }
         }
 

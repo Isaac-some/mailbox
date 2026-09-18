@@ -21,7 +21,9 @@ namespace MailArchiver.Attributes
                 return;
             }
             
-            // Every user, including administrators, may access only owned accounts.
+            // Administrators can access the same complete account set shown by the
+            // account management and outbound pages. Other users remain restricted
+            // to accounts explicitly assigned to them.
             var userService = context.HttpContext.RequestServices.GetService<IUserService>();
             var dbContext = context.HttpContext.RequestServices.GetService<MailArchiverDbContext>();
             
@@ -29,6 +31,20 @@ namespace MailArchiver.Attributes
             {
                 context.Result = new RedirectToActionResult("AccessDenied", "Auth", null);
                 return;
+            }
+
+            // Keep administrator access consistent with the account list and
+            // outbound pages. Resolve the role from the database as a fallback
+            // for local sessions whose cookie may predate a role change.
+            var currentUserId = authService.GetCurrentUserId(context.HttpContext);
+            if (currentUserId.HasValue)
+            {
+                var currentUser = await userService.GetUserByIdAsync(currentUserId.Value);
+                if (currentUser?.IsAdmin == true || authService.IsCurrentUserAdmin(context.HttpContext))
+                {
+                    await next();
+                    return;
+                }
             }
             
             // Get the email ID from the route parameters
@@ -89,7 +105,9 @@ namespace MailArchiver.Attributes
                 return;
             }
             
-            var hasAccess = await userService.IsUserAuthorizedForAccountAsync(user.Id, email.MailAccountId);
+            var hasAccess = user.IsAdmin
+                || authService.IsCurrentUserAdmin(context.HttpContext)
+                || await userService.IsUserAuthorizedForAccountAsync(user.Id, email.MailAccountId);
             
             if (!hasAccess)
             {

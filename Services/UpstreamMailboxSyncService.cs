@@ -79,7 +79,7 @@ public sealed class UpstreamMailboxSyncService : IUpstreamMailboxSyncService
         }
 
         var platformSession = _platformSessionStore.Current;
-        var isLocalApp = string.Equals(Environment.GetEnvironmentVariable("KOUZI_LOCAL_APP"), "1", StringComparison.Ordinal);
+        var isLocalApp = string.Equals(Environment.GetEnvironmentVariable("MAIL_ASSISTANT_LOCAL_APP"), "1", StringComparison.Ordinal);
         // Packaged builds use the platform login session exclusively. Ignore
         // any legacy encrypted Token file left by an older release.
         if (isLocalApp)
@@ -201,10 +201,10 @@ public sealed class UpstreamMailboxSyncService : IUpstreamMailboxSyncService
 
     private static void AddClientMetadataHeaders(HttpRequestMessage request, UpstreamMailboxConnection connection)
     {
-        request.Headers.TryAddWithoutValidation("X-Kouzi-Installation-Id", SanitizeHeader(connection.InstallationId));
-        request.Headers.TryAddWithoutValidation("X-Kouzi-Device-Name", SanitizeHeader(connection.DeviceName));
-        request.Headers.TryAddWithoutValidation("X-Kouzi-OS", SanitizeHeader(connection.OperatingSystem));
-        request.Headers.TryAddWithoutValidation("X-Kouzi-App-Version", SanitizeHeader(connection.AppVersion));
+        request.Headers.TryAddWithoutValidation("X-MailAssistant-Installation-Id", SanitizeHeader(connection.InstallationId));
+        request.Headers.TryAddWithoutValidation("X-MailAssistant-Device-Name", SanitizeHeader(connection.DeviceName));
+        request.Headers.TryAddWithoutValidation("X-MailAssistant-OS", SanitizeHeader(connection.OperatingSystem));
+        request.Headers.TryAddWithoutValidation("X-MailAssistant-App-Version", SanitizeHeader(connection.AppVersion));
     }
 
     private static string SanitizeHeader(string value)
