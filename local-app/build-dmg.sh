@@ -31,6 +31,11 @@ if (( $# > 0 )); then
   exit 2
 fi
 
+if (( ! APP_ONLY )) && [[ -z "${MAIL_ASSISTANT_UPSTREAM_TOKEN:-}" ]]; then
+  print -u2 "缺少租户 Token，不能生成交付包。请设置 MAIL_ASSISTANT_UPSTREAM_TOKEN。"
+  exit 2
+fi
+
 if [[ ! -f "$ICON_FILE" ]]; then
   print -u2 "缺少 App 图标文件：$ICON_FILE"
   exit 2
@@ -94,6 +99,29 @@ fi
 # the installed app never depends on the build machine's wwwroot path.
 if [[ -d "$PROJECT_DIR/wwwroot" && ! -d "$APP_BUILD_PATH/Contents/Resources/server/wwwroot" ]]; then
   ditto "$PROJECT_DIR/wwwroot" "$APP_BUILD_PATH/Contents/Resources/server/wwwroot"
+fi
+
+# Inject release-only platform settings. The live credential is supplied by the
+# build environment and is never written to the source checkout or git history.
+APP_SETTINGS_PATH="$APP_BUILD_PATH/Contents/Resources/server/appsettings.Local.json"
+cp "$PROJECT_DIR/appsettings.Local.template.json" "$APP_SETTINGS_PATH"
+if [[ -n "${MAIL_ASSISTANT_UPSTREAM_TOKEN:-}" || -n "${MAIL_ASSISTANT_UPSTREAM_ENDPOINT:-}" ]]; then
+  if ! command -v jq >/dev/null 2>&1; then
+    print -u2 "缺少 jq，无法把平台配置注入发布包。请先安装 jq。"
+    exit 5
+  fi
+  if [[ -n "${MAIL_ASSISTANT_UPSTREAM_TOKEN:-}" ]]; then
+    jq --arg token "$MAIL_ASSISTANT_UPSTREAM_TOKEN" \
+      '.UpstreamMailboxSync.BearerToken = $token' \
+      "$APP_SETTINGS_PATH" > "$APP_SETTINGS_PATH.tmp"
+    mv "$APP_SETTINGS_PATH.tmp" "$APP_SETTINGS_PATH"
+  fi
+  if [[ -n "${MAIL_ASSISTANT_UPSTREAM_ENDPOINT:-}" ]]; then
+    jq --arg endpoint "$MAIL_ASSISTANT_UPSTREAM_ENDPOINT" \
+      '.UpstreamMailboxSync.Endpoint = $endpoint' \
+      "$APP_SETTINGS_PATH" > "$APP_SETTINGS_PATH.tmp"
+    mv "$APP_SETTINGS_PATH.tmp" "$APP_SETTINGS_PATH"
+  fi
 fi
 
 for excluded_directory in local-app mailbox-service-v2 tests windows-app; do

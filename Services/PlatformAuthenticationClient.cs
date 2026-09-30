@@ -16,6 +16,7 @@ public sealed record PlatformLoginResult(bool Succeeded, string? Error = null)
 public interface IPlatformAuthenticationClient
 {
     Task<PlatformLoginResult> LoginAsync(string username, string password, CancellationToken cancellationToken = default);
+    Task<PlatformLoginResult> EnsureAuthenticatedAsync(bool forceRefresh = false, CancellationToken cancellationToken = default);
 }
 
 public sealed class PlatformAuthenticationClient : IPlatformAuthenticationClient
@@ -24,6 +25,7 @@ public sealed class PlatformAuthenticationClient : IPlatformAuthenticationClient
     private readonly PlatformAuthenticationOptions _options;
     private readonly IPlatformSessionStore _sessionStore;
     private readonly ILogger<PlatformAuthenticationClient> _logger;
+    private readonly SemaphoreSlim _loginGate = new(1, 1);
 
     public PlatformAuthenticationClient(
         IHttpClientFactory httpClientFactory,
@@ -68,7 +70,22 @@ public sealed class PlatformAuthenticationClient : IPlatformAuthenticationClient
             if (!response.IsSuccessStatusCode)
                 return FailAndClear(ReadError(body) ?? $"平台登录失败（HTTP {(int)response.StatusCode}）。", response.StatusCode);
 
-            using var document = ParseJson(body);
+            var cookies = response.Headers.TryGetValues("Set-Cookie", out var values)
+                ? string.Join("; ", values.Select(value => value.Split(';', 2)[0]).Where(value => !string.IsNullOrWhiteSpace(value)))
+                : null;
+            JsonDocument? document = null;
+            if (!string.IsNullOrWhiteSpace(body))
+            {
+                try
+                {
+                    document = ParseJson(body);
+                }
+                catch (JsonException) when (!string.IsNullOrWhiteSpace(cookies))
+                {
+                    // Cookie-only login responses may have an empty or non-JSON body.
+                }
+            }
+
             var bearerToken = ReadString(document, "accessToken")
                 ?? ReadString(document, "token")
                 ?? ReadString(document, "access_token")
@@ -78,14 +95,15 @@ public sealed class PlatformAuthenticationClient : IPlatformAuthenticationClient
             var isAdmin = ReadBoolean(document, "isAdmin")
                 ?? ReadNestedBoolean(document, "data", "isAdmin")
                 ?? string.Equals(ReadString(document, "role") ?? ReadNestedString(document, "data", "role"), "admin", StringComparison.OrdinalIgnoreCase);
-            var cookies = response.Headers.TryGetValues("Set-Cookie", out var values)
-                ? string.Join("; ", values.Select(value => value.Split(';', 2)[0]).Where(value => !string.IsNullOrWhiteSpace(value)))
-                : null;
 
             if (string.IsNullOrWhiteSpace(bearerToken) && string.IsNullOrWhiteSpace(cookies))
+            {
+                document?.Dispose();
                 return FailAndClear("平台登录成功但没有返回会话凭据，无法安全同步邮箱。", response.StatusCode);
+            }
 
             _sessionStore.Set(new PlatformSession(username.Trim(), isAdmin, bearerToken, cookies, DateTimeOffset.UtcNow));
+            document?.Dispose();
             _logger.LogInformation("Platform login succeeded for {Username}; role={Role}", username.Trim(), isAdmin ? "admin" : "user");
             return new PlatformLoginResult(true);
         }
@@ -102,6 +120,30 @@ public sealed class PlatformAuthenticationClient : IPlatformAuthenticationClient
         {
             _logger.LogWarning(ex, "Platform login returned malformed JSON");
             return FailAndClear("平台登录返回格式无效，无法建立安全会话。", null);
+        }
+    }
+
+    public async Task<PlatformLoginResult> EnsureAuthenticatedAsync(
+        bool forceRefresh = false,
+        CancellationToken cancellationToken = default)
+    {
+        if (!forceRefresh && _sessionStore.Current is not null)
+            return new PlatformLoginResult(true);
+
+        if (!_options.HasFixedCredentials)
+            return new PlatformLoginResult(false, "平台固定账号未配置，请设置 PlatformAuthentication:Username 和 Password。");
+
+        await _loginGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (!forceRefresh && _sessionStore.Current is not null)
+                return new PlatformLoginResult(true);
+
+            return await LoginAsync(_options.Username, _options.Password, cancellationToken);
+        }
+        finally
+        {
+            _loginGate.Release();
         }
     }
 

@@ -17,6 +17,11 @@ if (( $# > 0 )); then
   exit 2
 fi
 
+if (( ! APP_ONLY )) && [[ -z "${MAIL_ASSISTANT_UPSTREAM_TOKEN:-}" ]]; then
+  printf '%s\n' "缺少租户 Token。请在当前终端设置 MAIL_ASSISTANT_UPSTREAM_TOKEN 后再构建交付包。" >&2
+  exit 2
+fi
+
 "$ROOT_DIR/script/bootstrap-local-build-tools.sh"
 
 export DOTNET_ROOT="$DOTNET_DIR"

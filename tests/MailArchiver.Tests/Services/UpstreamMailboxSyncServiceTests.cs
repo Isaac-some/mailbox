@@ -14,7 +14,7 @@ namespace MailArchiver.Tests.Services;
 public class UpstreamMailboxSyncServiceTests
 {
     [Fact]
-    public async Task Rejected_upstream_rows_stop_mail_sync_but_keep_successful_intake_results()
+    public async Task Invalid_upstream_rows_are_skipped_while_valid_rows_and_cursor_are_committed()
     {
         await using var fixture = await Fixture.CreateAsync();
         var handler = new StubHandler("""
@@ -25,17 +25,16 @@ public class UpstreamMailboxSyncServiceTests
             """);
         var cursor = new FakeCursorStore();
         var service = new UpstreamMailboxSyncService(new StubHttpClientFactory(handler), fixture.Intake,
-            new FakeConnectionStore(),
             cursor,
             Options.Create(new UpstreamMailboxSyncOptions { Enabled = true, Endpoint = "https://platform.example/mailboxes", BearerToken = "test-token" }),
             NullLogger<UpstreamMailboxSyncService>.Instance);
         var result = await service.PullAsync(fixture.UserId);
-        Assert.False(result.Succeeded);
+        Assert.True(result.Succeeded);
         Assert.Equal(1, result.Created);
         Assert.Equal(1, result.Rejected);
-        Assert.Contains("同步已停止", result.Error);
+        Assert.Contains("跳过 1 个", result.Summary);
         Assert.Single(await fixture.Context.MailAccounts.ToListAsync());
-        Assert.Null(cursor.Cursor);
+        Assert.Equal("2026-09-03T08:30:00Z", cursor.Cursor);
     }
 
     [Fact]
@@ -63,7 +62,6 @@ public class UpstreamMailboxSyncServiceTests
         var service = new UpstreamMailboxSyncService(
             new StubHttpClientFactory(handler),
             fixture.Intake,
-            new FakeConnectionStore(),
             cursor,
             Options.Create(new UpstreamMailboxSyncOptions
             {
@@ -78,7 +76,9 @@ public class UpstreamMailboxSyncServiceTests
         Assert.True(result.Succeeded);
         Assert.Equal(0, result.Created);
         Assert.Equal(1, result.Updated);
-        Assert.Equal("https://platform.example/api/mailboxes", handler.RequestUri?.ToString());
+        Assert.Equal("https://platform.example/api/mailboxes", handler.RequestUri?.GetLeftPart(UriPartial.Path));
+        Assert.Contains("page=1", handler.RequestUri?.Query, StringComparison.Ordinal);
+        Assert.Contains("pageSize=1000", handler.RequestUri?.Query, StringComparison.Ordinal);
         Assert.Equal("Bearer", handler.AuthorizationScheme);
         Assert.Equal("platform-token", handler.AuthorizationParameter);
         Assert.Equal("server-config", handler.InstallationId);
@@ -97,7 +97,7 @@ public class UpstreamMailboxSyncServiceTests
         account.OAuthRefreshToken = "rotated-by-provider";
         await fixture.Context.SaveChangesAsync();
         await service.PullAsync(fixture.UserId);
-        Assert.Contains("updatedSince=2026-09-03T08%3a30%3a00Z", handler.RequestUri?.Query, StringComparison.Ordinal);
+        Assert.Contains("updatedSince=1788424200", handler.RequestUri?.Query, StringComparison.Ordinal);
         fixture.Context.ChangeTracker.Clear();
         account = await fixture.Context.MailAccounts.SingleAsync();
         Assert.Equal(MailAuthenticationMethod.OAuth2, account.PreferredIncomingAuth);
@@ -106,12 +106,40 @@ public class UpstreamMailboxSyncServiceTests
     }
 
     [Fact]
+    public async Task PullAsync_reads_pages_serially_and_persists_the_first_page_timestamp()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var handler = new PagingHandler();
+        var cursor = new FakeCursorStore();
+        var service = new UpstreamMailboxSyncService(
+            new StubHttpClientFactory(handler),
+            fixture.Intake,
+            cursor,
+            Options.Create(new UpstreamMailboxSyncOptions
+            {
+                Enabled = true,
+                Endpoint = "https://platform.example/api/external/account-credentials",
+                BearerToken = "platform-token",
+                PageSize = 1
+            }),
+            NullLogger<UpstreamMailboxSyncService>.Instance);
+
+        var result = await service.PullAsync(fixture.UserId);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(2, handler.Requests.Count);
+        Assert.Contains("page=1", handler.Requests[0].Query, StringComparison.Ordinal);
+        Assert.Contains("page=2", handler.Requests[1].Query, StringComparison.Ordinal);
+        Assert.Equal("123", cursor.Cursor);
+        Assert.Equal(2, await fixture.Context.MailAccounts.CountAsync());
+    }
+
+    [Fact]
     public async Task Missing_bearer_secret_fails_closed_before_request()
     {
         await using var fixture = await Fixture.CreateAsync();
         var handler = new StubHandler("{}");
         var service = new UpstreamMailboxSyncService(new StubHttpClientFactory(handler), fixture.Intake,
-            new FakeConnectionStore(),
             new FakeCursorStore(),
             Options.Create(new UpstreamMailboxSyncOptions
             {
@@ -124,8 +152,118 @@ public class UpstreamMailboxSyncServiceTests
         var result = await service.PullAsync(fixture.UserId);
 
         Assert.False(result.Succeeded);
-        Assert.Contains("密钥未配置", result.Error);
+        Assert.Contains("缺少平台租户 Token", result.Error);
         Assert.Null(handler.RequestUri);
+    }
+
+    [Fact]
+    public async Task PullAsync_does_not_try_platform_login_after_token_is_rejected()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var handler = new RetryHandler();
+        var service = new UpstreamMailboxSyncService(
+            new StubHttpClientFactory(handler),
+            fixture.Intake,
+            new FakeCursorStore(),
+            Options.Create(new UpstreamMailboxSyncOptions
+            {
+                Enabled = true,
+                Endpoint = "https://platform.example/api/external/account-credentials",
+                BearerToken = "bundled-token",
+                RequireBearerToken = true
+            }),
+            NullLogger<UpstreamMailboxSyncService>.Instance);
+
+        var result = await service.PullAsync(fixture.UserId);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("HTTP 401", result.Error);
+        Assert.Equal(1, handler.RequestCount);
+        Assert.Equal("bundled-token", handler.LastAuthorization);
+    }
+
+    [Fact]
+    public async Task Priority_email_pull_bypasses_running_full_pull_and_preserves_its_cursor()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var handler = new ConcurrentPullHandler();
+        var cursor = new FakeCursorStore();
+        var service = new UpstreamMailboxSyncService(
+            new StubHttpClientFactory(handler), fixture.Intake, cursor,
+            Options.Create(new UpstreamMailboxSyncOptions
+            {
+                Enabled = true,
+                Endpoint = "https://platform.example/api/external/account-credentials",
+                BearerToken = "platform-token"
+            }),
+            NullLogger<UpstreamMailboxSyncService>.Instance);
+
+        var fullPull = service.PullAsync(fixture.UserId);
+        await handler.FullPullStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var priority = await service.PullEmailAsync(fixture.UserId, "person@yahoo.com")
+            .WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.True(priority.Succeeded);
+        Assert.Equal(1, priority.Created);
+        Assert.Null(cursor.Cursor);
+        Assert.Equal("person@yahoo.com", System.Web.HttpUtility.ParseQueryString(handler.PriorityRequest!.Query)["email"]);
+        Assert.Null(System.Web.HttpUtility.ParseQueryString(handler.PriorityRequest.Query)["updatedSince"]);
+        Assert.Equal("1", System.Web.HttpUtility.ParseQueryString(handler.PriorityRequest.Query)["pageSize"]);
+
+        handler.CompleteFullPull();
+        Assert.True((await fullPull).Succeeded);
+        Assert.Equal("123", cursor.Cursor);
+        var account = Assert.Single(await fixture.Context.MailAccounts.ToListAsync());
+        Assert.Equal("enc:new-code", account.Password);
+    }
+
+    [Fact]
+    public async Task Priority_email_pull_rejects_a_different_email_in_platform_response()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var handler = new StubHandler("""
+            {"data":{"total":1,"items":[{"email":"other@yahoo.com","credential":"secret"}]}}
+            """);
+        var service = new UpstreamMailboxSyncService(
+            new StubHttpClientFactory(handler), fixture.Intake, new FakeCursorStore(),
+            Options.Create(new UpstreamMailboxSyncOptions
+            {
+                Enabled = true, Endpoint = "https://platform.example/mailboxes", BearerToken = "platform-token"
+            }),
+            NullLogger<UpstreamMailboxSyncService>.Instance);
+
+        var result = await service.PullEmailAsync(fixture.UserId, "person@yahoo.com");
+
+        Assert.False(result.Succeeded);
+        Assert.Empty(await fixture.Context.MailAccounts.ToListAsync());
+    }
+
+    private sealed class ConcurrentPullHandler : HttpMessageHandler
+    {
+        public TaskCompletionSource FullPullStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _completeFullPull = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Uri? PriorityRequest { get; private set; }
+
+        public void CompleteFullPull() => _completeFullPull.TrySetResult();
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var email = System.Web.HttpUtility.ParseQueryString(request.RequestUri!.Query)["email"];
+            if (email is null)
+            {
+                FullPullStarted.TrySetResult();
+                await _completeFullPull.Task.WaitAsync(cancellationToken);
+                return Json("{\"data\":{\"total\":1,\"serverTimestamp\":123,\"items\":[{\"email\":\"person@yahoo.com\",\"credential\":\"stale-code\"}]}}");
+            }
+
+            PriorityRequest = request.RequestUri;
+            return Json("{\"data\":{\"total\":1,\"items\":[{\"email\":\"person@yahoo.com\",\"credential\":\"new-code\"}]}}");
+        }
+
+        private static HttpResponseMessage Json(string body) => new(HttpStatusCode.OK)
+        {
+            Content = new StringContent(body, Encoding.UTF8, "application/json")
+        };
     }
 
     private sealed class StubHandler(string responseJson) : HttpMessageHandler
@@ -164,6 +302,53 @@ public class UpstreamMailboxSyncServiceTests
         public HttpClient CreateClient(string name) => new(handler, disposeHandler: false);
     }
 
+    private sealed class PagingHandler : HttpMessageHandler
+    {
+        public List<Uri> Requests { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            Requests.Add(request.RequestUri!);
+            var page = System.Web.HttpUtility.ParseQueryString(request.RequestUri!.Query)["page"];
+            var body = page == "1"
+                ? "{\"data\":{\"total\":2,\"page\":1,\"pageSize\":1,\"hasMore\":true,\"serverTimestamp\":123,\"items\":[{\"email\":\"one@yahoo.com\",\"credential\":\"one-code\"}]}}"
+                : "{\"data\":{\"total\":2,\"page\":2,\"pageSize\":1,\"hasMore\":false,\"serverTimestamp\":999,\"items\":[{\"email\":\"two@yahoo.com\",\"credential\":\"two-code\"}]}}";
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(body, Encoding.UTF8, "application/json")
+            });
+        }
+    }
+
+    private sealed class RetryHandler : HttpMessageHandler
+    {
+        public int RequestCount { get; private set; }
+        public string? LastAuthorization { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            RequestCount++;
+            LastAuthorization = request.Headers.Authorization?.Parameter;
+            if (RequestCount == 1)
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized)
+                {
+                    Content = new StringContent("{\"error\":\"expired\"}", Encoding.UTF8, "application/json")
+                });
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    "{\"data\":{\"total\":0,\"serverTime\":\"2026-09-03T08:30:00Z\",\"items\":[]}}",
+                    Encoding.UTF8,
+                    "application/json")
+            });
+        }
+    }
+
     private sealed class FakeCursorStore : IUpstreamMailboxSyncCursorStore
     {
         public string? Cursor { get; private set; }
@@ -179,21 +364,6 @@ public class UpstreamMailboxSyncServiceTests
             Cursor = null;
             return Task.CompletedTask;
         }
-    }
-
-    private sealed class FakeConnectionStore : IUpstreamMailboxConnectionStore
-    {
-        public Task<UpstreamMailboxConnection?> ReadAsync(CancellationToken cancellationToken = default)
-            => Task.FromResult<UpstreamMailboxConnection?>(null);
-
-        public Task<UpstreamMailboxConnectionStatus> GetStatusAsync(CancellationToken cancellationToken = default)
-            => throw new NotSupportedException();
-
-        public Task SaveAsync(string endpoint, string bearerToken, CancellationToken cancellationToken = default)
-            => throw new NotSupportedException();
-
-        public Task RemoveAsync(CancellationToken cancellationToken = default)
-            => throw new NotSupportedException();
     }
 
     private sealed class Fixture : IAsyncDisposable

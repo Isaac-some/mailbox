@@ -10,7 +10,7 @@ public interface IUpstreamMailboxSyncCursorStore
     Task ResetAsync(CancellationToken cancellationToken = default);
 }
 
-/// <summary>Stores only the upstream serverTime cursor; credentials never enter this file.</summary>
+/// <summary>Stores only the upstream serverTimestamp cursor; credentials never enter this file.</summary>
 public sealed class UpstreamMailboxSyncCursorStore : IUpstreamMailboxSyncCursorStore
 {
     private readonly string _path;
@@ -48,8 +48,8 @@ public sealed class UpstreamMailboxSyncCursorStore : IUpstreamMailboxSyncCursorS
 
     public async Task WriteAsync(string cursor, CancellationToken cancellationToken = default)
     {
-        if (!DateTimeOffset.TryParse(cursor, out _))
-            throw new ArgumentException("上游 serverTime 不是有效的时间。", nameof(cursor));
+        if (!TryValidateCursor(cursor))
+            throw new ArgumentException("上游 serverTimestamp 不是有效的 Unix 时间戳。", nameof(cursor));
 
         await _gate.WaitAsync(cancellationToken);
         try
@@ -65,6 +65,20 @@ public sealed class UpstreamMailboxSyncCursorStore : IUpstreamMailboxSyncCursorS
         {
             _gate.Release();
         }
+    }
+
+    private static bool TryValidateCursor(string value)
+    {
+        var trimmed = value?.Trim();
+        if (string.IsNullOrWhiteSpace(trimmed))
+            return false;
+        if (long.TryParse(trimmed, out var timestamp))
+            return timestamp > 0;
+
+        // Accept the ISO value written by releases before serverTimestamp was
+        // added. It will be sent back as-is and naturally expires after the
+        // server rejects it, while new successful syncs migrate to numeric form.
+        return DateTimeOffset.TryParse(trimmed, out _);
     }
 
     public async Task ResetAsync(CancellationToken cancellationToken = default)

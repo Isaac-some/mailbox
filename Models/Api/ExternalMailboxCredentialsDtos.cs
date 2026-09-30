@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace MailArchiver.Models.Api;
@@ -19,8 +20,22 @@ public sealed class ExternalMailboxCredentialsData
     [JsonPropertyName("items")]
     public List<ExternalMailboxCredentialItem> Items { get; set; } = new();
 
+    [JsonPropertyName("page")]
+    public int Page { get; set; }
+
+    [JsonPropertyName("pageSize")]
+    public int PageSize { get; set; }
+
+    [JsonPropertyName("hasMore")]
+    public bool? HasMore { get; set; }
+
     [JsonPropertyName("serverTime")]
     public string ServerTime { get; set; } = string.Empty;
+
+    // The contract currently returns a Unix number. Keep this as JsonElement so
+    // older deployments that serialize it as a string remain readable.
+    [JsonPropertyName("serverTimestamp")]
+    public JsonElement? ServerTimestamp { get; set; }
 }
 
 public sealed class ExternalMailboxCredentialItem

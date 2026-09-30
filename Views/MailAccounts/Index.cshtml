@@ -58,6 +58,7 @@
 
     <section class="account-toolbar" aria-label="账号搜索">
         <form asp-action="Index" method="get" class="account-search">
+            <input type="hidden" name="priorityLookup" value="true" />
             <i class="bi bi-search" aria-hidden="true"></i>
             <input type="search" name="q" value="@search" placeholder="搜索邮箱地址或名称" aria-label="搜索邮箱地址或名称" autocomplete="off" />
             <button type="submit" class="btn btn-primary btn-sm">搜索</button>
@@ -73,6 +74,10 @@
             <span class="account-toolbar__count">匹配 @total.ToString("N0") 个账号</span>
         }
     </section>
+    @if (ViewBag.PrioritySyncError is string prioritySyncError)
+    {
+        <div class="alert alert-warning mt-2" role="status">该邮箱授权识别未完成：@prioritySyncError</div>
+    }
 
     <section class="account-table-wrap">
         <div class="table-responsive">
@@ -297,6 +302,14 @@
     <script>
         document.addEventListener('DOMContentLoaded', function () {
             const syncNotice = document.getElementById('accountSyncNotice');
+            document.querySelector('.account-search')?.addEventListener('submit', event => {
+                const form = event.currentTarget;
+                const email = form.querySelector('input[name="q"]')?.value.trim() || '';
+                if (!email.includes(String.fromCharCode(64))) return;
+                const button = form.querySelector('button[type="submit"]');
+                button.disabled = true;
+                button.textContent = '正在优先识别该邮箱授权…';
+            });
 
             function showSyncMessage(resultElement, message, tone) {
                 resultElement.textContent = message;
@@ -331,7 +344,7 @@
                     }
                     if (job?.status === 'Failed' || job?.status === 'Cancelled' || job?.status === 'RateLimited') {
                         const prefix = job.status === 'RateLimited' ? '同步已暂停' : '同步失败';
-                        showSyncMessage(resultElement, `${prefix}：${job.errorMessage || '请检查邮箱授权后重试。'}`, 'error');
+                        showSyncMessage(resultElement, `${prefix}：${job.message || '请检查邮箱授权后重试。'}`, 'error');
                         return;
                     }
 
@@ -351,7 +364,7 @@
                     const resultElement = document.querySelector(`[data-sync-result="${form.dataset.accountId}"]`);
                     button.disabled = true;
                     button.classList.add('is-syncing');
-                    showSyncMessage(resultElement, '正在启动同步…', 'progress');
+                    showSyncMessage(resultElement, '正在优先识别该邮箱授权…', 'progress');
 
                     try {
                         const response = await fetch(form.action, {
@@ -361,6 +374,9 @@
                         });
                         const payload = await response.json();
                         if (!response.ok) throw new Error(payload.message || '无法启动同步。');
+                        if (payload.platformSync?.message) {
+                            showSyncMessage(resultElement, payload.platformSync.message, 'progress');
+                        }
                         await waitForSync(form, payload.requestedAt);
                     } catch (error) {
                         showSyncMessage(resultElement, error.message || '同步失败，请稍后重试。', 'error');

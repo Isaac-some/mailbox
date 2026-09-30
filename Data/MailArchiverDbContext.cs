@@ -20,6 +20,7 @@ namespace MailArchiver.Data
         public DbSet<ApiKey> ApiKeys { get; set; }
         public DbSet<OutboundMailTask> OutboundMailTasks { get; set; }
         public DbSet<OutboundMailTaskItem> OutboundMailTaskItems { get; set; }
+        public DbSet<SyncFailureRecord> SyncFailureRecords { get; set; }
 
         public MailArchiverDbContext(DbContextOptions<MailArchiverDbContext> options)
             : base(options)
@@ -29,6 +30,9 @@ namespace MailArchiver.Data
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
+
+            modelBuilder.Entity<SyncFailureRecord>()
+                .HasIndex(record => record.OccurredAtUtc);
 
             // The packaged macOS application runs on SQLite, which has no schemas.
             // Docker/PostgreSQL deployments keep their existing schema unchanged.

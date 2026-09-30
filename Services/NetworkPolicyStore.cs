@@ -119,7 +119,7 @@ public sealed class NetworkPolicyStore : INetworkPolicyStore
         var proxy = settings.ExplicitProxy
             ?? throw new InvalidOperationException("指定代理模式需要填写代理地址。");
         if (string.IsNullOrWhiteSpace(proxy.Host) || proxy.Host.Contains("//", StringComparison.Ordinal))
-            throw new InvalidOperationException("代理主机只能填写本机主机名或 IP。");
+            throw new InvalidOperationException("代理服务器地址只能填写主机名或 IP。");
         if (proxy.Port is < 1 or > 65535)
             throw new InvalidOperationException("代理端口必须在 1 到 65535 之间。");
     }

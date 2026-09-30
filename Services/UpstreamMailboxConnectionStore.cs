@@ -57,7 +57,8 @@ public sealed class UpstreamMailboxConnectionStore : IUpstreamMailboxConnectionS
             stored?.InstallationId ?? string.Empty,
             Environment.MachineName,
             RuntimeInformation.OSDescription,
-            GetAppVersion());
+            GetAppVersion(),
+            GetTokenSuffix(stored));
     }
 
     public async Task SaveAsync(string endpoint, string bearerToken, CancellationToken cancellationToken = default)
@@ -139,6 +140,21 @@ public sealed class UpstreamMailboxConnectionStore : IUpstreamMailboxConnectionS
 
     private static string GetAppVersion()
         => Assembly.GetEntryAssembly()?.GetName().Version?.ToString(3) ?? "unknown";
+
+    private string GetTokenSuffix(StoredConnection? stored)
+    {
+        if (stored is null || string.IsNullOrWhiteSpace(stored.EncryptedToken))
+            return string.Empty;
+        try
+        {
+            var token = _encryption.Decrypt(stored.EncryptedToken);
+            return token.Length <= 4 ? token : token[^4..];
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.Security.Cryptography.CryptographicException)
+        {
+            return string.Empty;
+        }
+    }
 
     private static string ResolveStorageRoot(IHostEnvironment environment)
     {

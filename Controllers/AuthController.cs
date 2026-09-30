@@ -26,9 +26,6 @@ namespace MailArchiver.Controllers
         private readonly IServiceScopeFactory _serviceScopeFactory;
         private readonly IOptions<OAuthOptions> _oAuthOptions;
         private readonly IRegistrationCodeService _registrationCodes;
-        private readonly IPlatformAuthenticationClient _platformAuthentication;
-        private readonly IPlatformSessionStore _platformSessionStore;
-        private readonly ILocalAccessService _localAccess;
 
         public AuthController(
             MailArchiver.Services.IAuthenticationService authService
@@ -40,9 +37,7 @@ namespace MailArchiver.Controllers
             , IServiceScopeFactory serviceScopeFactory
             , IOptions<OAuthOptions> oAuthOptions
             , IRegistrationCodeService registrationCodes
-            , IPlatformAuthenticationClient platformAuthentication
-            , IPlatformSessionStore platformSessionStore
-            , ILocalAccessService localAccess)
+            )
         {
             _authService = authService;
             _authenticationHandler = authenticationHandler;
@@ -53,9 +48,6 @@ namespace MailArchiver.Controllers
             _serviceScopeFactory = serviceScopeFactory;
             _oAuthOptions = oAuthOptions;
             _registrationCodes = registrationCodes;
-            _platformAuthentication = platformAuthentication;
-            _platformSessionStore = platformSessionStore;
-            _localAccess = localAccess;
         }
 
         [HttpGet]
@@ -166,32 +158,13 @@ namespace MailArchiver.Controllers
         [EnableRateLimiting("LoginAttempts")]
         public async Task<IActionResult> Login(LoginViewModel model, string returnUrl = null)
         {
+            if (IsLocalApp())
+                return RedirectToAction("Index", "MailAccounts");
+
             ViewData["ReturnUrl"] = returnUrl;
 
             if (ModelState.IsValid)
             {
-                if (IsLocalApp())
-                {
-                    var localResult = await _localAccess.ValidateAsync(
-                        model.Username,
-                        model.Password,
-                        HttpContext.RequestAborted);
-                    if (!localResult.Succeeded)
-                    {
-                        ModelState.AddModelError(string.Empty, localResult.Error ?? "账号或密码错误。");
-                        ConfigureOAuthViewData(returnUrl);
-                        ViewBag.IsLocalApp = true;
-                        return View(model);
-                    }
-
-                    var user = await GetOrCreateLocalUserAsync(localResult.Username, localResult.IsAdmin);
-                    await _authenticationHandler.HandleUserAuthenticated(
-                        CookieAuthenticationDefaults.AuthenticationScheme,
-                        user.Username,
-                        model.RememberMe);
-                    return RedirectToLocal(returnUrl);
-                }
-
                 if (_authService.ValidateCredentials(model.Username, model.Password))
                 {
                     // Check if 2FA is enabled for the user
@@ -255,31 +228,6 @@ namespace MailArchiver.Controllers
             => HttpContext.RequestServices.GetRequiredService<IConfiguration>().GetValue<bool>("LocalApp:Enabled") ||
                string.Equals(Environment.GetEnvironmentVariable("MAIL_ASSISTANT_LOCAL_APP"), "1", StringComparison.Ordinal);
 
-        private async Task<User> GetOrCreateLocalUserAsync(string username, bool isAdmin)
-        {
-            var normalizedUsername = username.Trim();
-            var user = await _userService.GetUserByUsernameAsync(normalizedUsername);
-            if (user is null)
-            {
-                user = await _userService.CreateUserAsync(
-                    normalizedUsername,
-                    $"{normalizedUsername}@local.mailbox",
-                    Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)),
-                    isAdmin);
-                user.IsSelfManager = !isAdmin;
-                await _userService.UpdateUserAsync(user);
-            }
-            else
-            {
-                user.IsActive = true;
-                user.IsAdmin = isAdmin;
-                user.IsSelfManager = !isAdmin;
-                await _userService.UpdateUserAsync(user);
-            }
-
-            return user;
-        }
-
         [HttpPost]
         [ValidateAntiForgeryToken] // SECURITY: CSRF protection for OIDC login
         public async Task LoginWithOAuth(OAuthLoginViewModel oAuthLoginViewModel) {
@@ -306,7 +254,6 @@ namespace MailArchiver.Controllers
         public async Task<IActionResult> Logout()
         {
             var username = _authService.GetCurrentUserDisplayName(HttpContext);
-            _platformSessionStore.Clear();
             
             // Check if user was authenticated via OIDC by looking for OAuthRemoteUserId
             User? user = null;

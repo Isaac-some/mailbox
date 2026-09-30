@@ -15,39 +15,49 @@
         </div>
 
         <section class="border-top pt-4 mb-5">
+            <h2 class="h5">平台邮箱接口</h2>
+            <p class="text-muted">应用使用交付包内的租户 Token 自动同步邮箱账号。</p>
+            <form asp-action="PullPlatformMailboxes" method="post" class="mt-3">
+                @Html.AntiForgeryToken()
+                <button type="submit" class="btn btn-outline-primary"><i class="bi bi-arrow-repeat me-1" aria-hidden="true"></i>立即同步邮箱账号</button>
+            </form>
+            <p class="mt-3 mb-0 text-muted">交付包凭据：@(Model.PlatformConfigured ? "已配置" : "未配置").</p>
+        </section>
+
+        <section class="border-top pt-4 mb-5">
             <h2 class="h5">网络策略</h2>
-            <p class="text-muted">自动模式跟随本机系统代理、PAC、环境代理和 VPN 路由。指定代理只使用你填写的本机代理，失败时不会改走直连。</p>
+            <p class="text-muted">默认跟随本机网络。也可以手动指定一个 HTTP 或 SOCKS5 代理服务器。</p>
             <form asp-action="SaveNetwork" method="post" class="row g-3">
                 @Html.AntiForgeryToken()
                 <div class="col-12 col-md-4">
                     <label class="form-label" for="network-mode">模式</label>
                     <select class="form-select" id="network-mode" name="mode">
                         <option value="System" selected="@(Model.NetworkMode == NetworkMode.System)">自动跟随本机网络</option>
-                        <option value="ExplicitProxy" selected="@(Model.NetworkMode == NetworkMode.ExplicitProxy)">指定本机代理</option>
+                        <option value="ExplicitProxy" selected="@(Model.NetworkMode == NetworkMode.ExplicitProxy)">手动填写代理</option>
                     </select>
                 </div>
-                <div class="col-12 col-md-3">
+                <div class="col-12 col-md-3 manual-proxy-field">
                     <label class="form-label" for="proxy-type">代理类型</label>
                     <select class="form-select" id="proxy-type" name="proxyType">
                         <option value="Http" selected="@(Model.NetworkProxyType == NetworkProxyType.Http)">HTTP</option>
                         <option value="Socks5" selected="@(Model.NetworkProxyType == NetworkProxyType.Socks5)">SOCKS5</option>
                     </select>
                 </div>
-                <div class="col-12 col-md-3">
-                    <label class="form-label" for="proxy-host">本机代理主机</label>
+                <div class="col-12 col-md-3 manual-proxy-field">
+                    <label class="form-label" for="proxy-host">代理服务器地址</label>
                     <input class="form-control" id="proxy-host" name="host" value="@Model.NetworkProxyHost" autocomplete="off" />
                 </div>
-                <div class="col-12 col-md-2">
+                <div class="col-12 col-md-2 manual-proxy-field">
                     <label class="form-label" for="proxy-port">端口</label>
                     <input class="form-control" id="proxy-port" name="port" type="number" min="1" max="65535" value="@Model.NetworkProxyPort" />
                 </div>
-                <div class="col-12 col-md-4">
+                <div class="col-12 col-md-4 manual-proxy-field">
                     <label class="form-label" for="proxy-user">代理用户名（可选）</label>
-                    <input class="form-control" id="proxy-user" name="username" autocomplete="username" />
+                    <input class="form-control" id="proxy-user" name="username" value="@Model.NetworkProxyUsername" autocomplete="username" />
                 </div>
-                <div class="col-12 col-md-4">
+                <div class="col-12 col-md-4 manual-proxy-field">
                     <label class="form-label" for="proxy-password">代理密码（可选）</label>
-                    <input class="form-control" id="proxy-password" name="password" type="password" autocomplete="new-password" />
+                    <input class="form-control" id="proxy-password" name="password" type="password" autocomplete="new-password" placeholder="留空保留已保存的密码" />
                 </div>
                 <div class="col-12"><button type="submit" class="btn btn-primary"><i class="bi bi-check2 me-1" aria-hidden="true"></i>保存网络策略</button></div>
             </form>
@@ -56,7 +66,7 @@
 
         <section class="border-top pt-4 mb-5">
             <h2 class="h5">本地账号</h2>
-            <p class="text-muted mb-0">本机版使用两个固定账号登录。账号启停状态由 GitHub 清单控制；修改清单后，下一次登录会立即生效。</p>
+            <p class="text-muted mb-0">本机版打开即可使用，无需登录。</p>
         </section>
 
         <section class="border-top pt-4 mb-5">
@@ -82,3 +92,22 @@
         </section>
     </div>
 </div>
+
+@section Scripts {
+    <script>
+        (() => {
+            const mode = document.getElementById('network-mode');
+            const fields = document.querySelectorAll('.manual-proxy-field');
+            const host = document.getElementById('proxy-host');
+            const port = document.getElementById('proxy-port');
+            const updateProxyFields = () => {
+                const manual = mode.value === 'ExplicitProxy';
+                fields.forEach(field => field.hidden = !manual);
+                host.required = manual;
+                port.required = manual;
+            };
+            mode.addEventListener('change', updateProxyFields);
+            updateProxyFields();
+        })();
+    </script>
+}

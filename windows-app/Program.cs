@@ -94,6 +94,13 @@ internal sealed class MainForm : Form
     }
 
     private readonly WebView2 _webView = new() { Dock = DockStyle.Fill, Visible = false };
+    private readonly LinkLabel _browserLink = new()
+    {
+        Dock = DockStyle.Fill,
+        Text = "在浏览器中打开邮箱助手",
+        TextAlign = ContentAlignment.MiddleCenter,
+        Visible = false
+    };
     private readonly Label _loadingLabel = new()
     {
         Dock = DockStyle.Fill,
@@ -118,6 +125,7 @@ internal sealed class MainForm : Form
     private bool _isApplyingWindowBounds;
     private bool _hasAppliedWindowMode;
     private bool _canSaveWindowPreferences;
+    private bool _browserFallback;
     private WindowMode _windowMode;
 
     private string ResetMarkerPath => Path.Combine(_dataDirectory, "factory-reset.request");
@@ -137,8 +145,10 @@ internal sealed class MainForm : Form
         ConfigureWindowMenu();
         Controls.Add(_webView);
         Controls.Add(_loadingLabel);
+        Controls.Add(_browserLink);
         Controls.Add(_menuStrip);
         _menuStrip.BringToFront();
+        _browserLink.LinkClicked += (_, _) => OpenLocalBrowser();
 
         ApplyWindowMode(_windowMode, centered: true);
         ApplyAlwaysOnTop(_windowPreferences.AlwaysOnTop);
@@ -300,7 +310,14 @@ internal sealed class MainForm : Form
             _canSaveWindowPreferences = true;
             SaveWindowPreferences();
 
-            await InitializeWebViewAsync();
+            try
+            {
+                await InitializeWebViewAsync();
+            }
+            catch (WebView2RuntimeNotFoundException)
+            {
+                _browserFallback = true;
+            }
             StartServer();
             await WaitForServerAsync();
         }
@@ -368,7 +385,7 @@ internal sealed class MainForm : Form
         startInfo.Environment["MAIL_ASSISTANT_DATA_DIRECTORY"] = _dataDirectory;
         startInfo.Environment["MAIL_ASSISTANT_FACTORY_RESET_MARKER"] = ResetMarkerPath;
         startInfo.Environment["ReleaseNotes__AppVersion"] =
-            typeof(Program).Assembly.GetName().Version?.ToString(3) ?? "2.3.3";
+            typeof(Program).Assembly.GetName().Version?.ToString(3) ?? "2.3.5";
         startInfo.Environment["ConnectionStrings__DefaultConnection"] = $"Data Source={Path.Combine(_dataDirectory, "mail-archive.sqlite")}";
         startInfo.Environment["DataProtection__KeyPath"] = Path.Combine(_dataDirectory, "keys");
         startInfo.Environment["CredentialEncryption__KeyFilePath"] = credentialKeyPath;
@@ -381,7 +398,7 @@ internal sealed class MainForm : Form
     private async Task WaitForServerAsync()
     {
         using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(1) };
-        for (var attempt = 0; attempt < 60; attempt++)
+        for (var attempt = 0; attempt < 180; attempt++)
         {
             try
             {
@@ -389,8 +406,16 @@ internal sealed class MainForm : Form
                 if (response.IsSuccessStatusCode)
                 {
                     _loadingLabel.Visible = false;
-                    _webView.Visible = true;
-                    _webView.CoreWebView2.Navigate(LoginUrl);
+                    if (_browserFallback)
+                    {
+                        _browserLink.Visible = true;
+                        OpenLocalBrowser();
+                    }
+                    else
+                    {
+                        _webView.Visible = true;
+                        _webView.CoreWebView2.Navigate(LoginUrl);
+                    }
                     return;
                 }
             }
@@ -407,6 +432,11 @@ internal sealed class MainForm : Form
         }
 
         throw new TimeoutException("本机服务启动超时。");
+    }
+
+    private void OpenLocalBrowser()
+    {
+        Process.Start(new ProcessStartInfo { FileName = LoginUrl, UseShellExecute = true });
     }
 
     private void OnNavigationStarting(object? sender, CoreWebView2NavigationStartingEventArgs eventArgs)

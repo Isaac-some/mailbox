@@ -2,6 +2,7 @@ using MailArchiver.Auth.Options;
 using MailArchiver.Data;
 using MailArchiver.Models;
 using MailArchiver.Services.Core;
+using MailArchiver.Services;
 using MailArchiver.Utilities;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -12,6 +13,35 @@ namespace MailArchiver.Tests.LocalApp;
 
 public class LocalAppSqliteRegressionTests
 {
+    [Fact]
+    public async Task Existing_sqlite_archive_adds_only_redacted_failure_records_and_expires_old_rows()
+    {
+        await using var database = await CreateDatabaseAsync();
+        var account = await SeedAccountAsync(database.Context);
+        await database.Context.Database.ExecuteSqlRawAsync("DROP TABLE \"SyncFailureRecords\"");
+        await LocalDatabaseSchemaUpgrade.ApplyAsync(database.Context);
+
+        var recorder = new SyncFailureRecorder(database.Context);
+        var failure = MailConnectionFailurePolicy.Classify(
+            new MailCredentialFormatException("secret password and proxy.example.com"));
+        await recorder.RecordAsync("test-job", account.Id, "VerifyCredential", failure);
+        var record = await database.Context.SyncFailureRecords.AsNoTracking().SingleAsync();
+        Assert.Equal(MailFailureCode.GmailCredentialFormatInvalid.ToString(), record.ErrorCode);
+        Assert.Equal(MailFailureStage.CredentialValidation.ToString(), record.FailureStage);
+        Assert.DoesNotContain("secret", string.Join(" ", record.JobId, record.Operation,
+            record.ErrorCode, record.FailureStage, record.ExceptionCategory));
+        Assert.DoesNotContain("proxy.example.com", string.Join(" ", record.JobId, record.Operation,
+            record.ErrorCode, record.FailureStage, record.ExceptionCategory));
+
+        await database.Context.SyncFailureRecords.ExecuteUpdateAsync(setters =>
+            setters.SetProperty(item => item.OccurredAtUtc, DateTime.UtcNow.AddDays(-8)));
+        var removed = await database.Context.SyncFailureRecords
+            .Where(item => item.OccurredAtUtc < DateTime.UtcNow.AddDays(-7))
+            .ExecuteDeleteAsync();
+        Assert.Equal(1, removed);
+        Assert.Empty(await database.Context.SyncFailureRecords.ToListAsync());
+    }
+
     [Fact]
     public async Task Search_finds_subject_on_sqlite_without_postgresql_functions()
     {

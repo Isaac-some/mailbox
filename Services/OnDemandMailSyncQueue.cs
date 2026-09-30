@@ -15,7 +15,8 @@ public enum MailSyncRequestPriority
 public enum MailSyncRequestKind
 {
     ValidateConnection,
-    Synchronize
+    Synchronize,
+    FullResync
 }
 
 public enum MailSyncQueueState
@@ -52,20 +53,24 @@ public sealed class OnDemandMailSyncQueue : BackgroundService, IOnDemandMailSync
     private readonly ILogger<OnDemandMailSyncQueue> _logger;
     private readonly int _maxConcurrentSyncs;
     private readonly TimeSpan _timeout;
+    private readonly IMailConcurrencyCoordinator _concurrency;
     private readonly ConcurrentQueue<QueueRequest> _interactive = new();
     private readonly ConcurrentQueue<QueueRequest> _bulk = new();
     private readonly ConcurrentDictionary<int, QueueEntry> _entries = new();
-    private readonly SemaphoreSlim _available = new(0);
+    private readonly SemaphoreSlim _interactiveAvailable = new(0);
+    private readonly SemaphoreSlim _bulkAvailable = new(0);
     private readonly object _queueLock = new();
 
     public OnDemandMailSyncQueue(
         IServiceProvider serviceProvider,
         IConfiguration configuration,
+        IMailConcurrencyCoordinator concurrency,
         ILogger<OnDemandMailSyncQueue> logger)
     {
         _serviceProvider = serviceProvider;
         _logger = logger;
-        _maxConcurrentSyncs = Math.Max(1, configuration.GetValue("MailSync:MaxConcurrentSyncs", 4));
+        _concurrency = concurrency;
+        _maxConcurrentSyncs = Math.Max(4, configuration.GetValue("MailSync:MaxConcurrentSyncs", 4));
         _timeout = TimeSpan.FromMinutes(Math.Max(1, configuration.GetValue("MailSync:TimeoutMinutes", 120)));
     }
 
@@ -83,6 +88,10 @@ public sealed class OnDemandMailSyncQueue : BackgroundService, IOnDemandMailSync
                 {
                     return existing.ToStatus();
                 }
+
+                if (existing.Kind == MailSyncRequestKind.FullResync
+                    && kind != MailSyncRequestKind.FullResync)
+                    return existing.ToStatus();
 
                 if (kind == existing.Kind)
                 {
@@ -114,7 +123,10 @@ public sealed class OnDemandMailSyncQueue : BackgroundService, IOnDemandMailSync
             else
                 _bulk.Enqueue(request);
 
-            _available.Release();
+            if (priority == MailSyncRequestPriority.Interactive)
+                _interactiveAvailable.Release();
+            else
+                _bulkAvailable.Release();
             return entry.ToStatus();
         }
     }
@@ -132,25 +144,26 @@ public sealed class OnDemandMailSyncQueue : BackgroundService, IOnDemandMailSync
             "On-demand mail sync queue started with a maximum of {Concurrency} concurrent task(s)",
             _maxConcurrentSyncs);
 
+        var interactiveWorkers = Math.Min(2, _maxConcurrentSyncs);
         var workers = Enumerable.Range(0, _maxConcurrentSyncs)
-            .Select(_ => RunWorkerAsync(stoppingToken));
+            .Select(index => RunWorkerAsync(index < interactiveWorkers, stoppingToken));
         await Task.WhenAll(workers);
     }
 
-    private async Task RunWorkerAsync(CancellationToken stoppingToken)
+    private async Task RunWorkerAsync(bool interactive, CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                await _available.WaitAsync(stoppingToken);
+                await (interactive ? _interactiveAvailable : _bulkAvailable).WaitAsync(stoppingToken);
             }
             catch (OperationCanceledException)
             {
                 break;
             }
 
-            if (!TryDequeueCurrent(out var entry))
+            if (!TryDequeueCurrent(interactive, out var entry))
                 continue;
 
             try
@@ -163,10 +176,11 @@ public sealed class OnDemandMailSyncQueue : BackgroundService, IOnDemandMailSync
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex,
-                    "On-demand {Kind} failed for account {AccountId}",
+                var failure = MailConnectionFailurePolicy.Classify(ex);
+                _logger.LogError(
+                    "On-demand {Kind} failed for account {AccountId}: {ErrorCode} at {FailureStage} ({ExceptionCategory})",
                     entry.Kind,
-                    entry.AccountId);
+                    entry.AccountId, failure.Code, failure.Stage, failure.ExceptionCategory);
             }
             finally
             {
@@ -175,13 +189,14 @@ public sealed class OnDemandMailSyncQueue : BackgroundService, IOnDemandMailSync
         }
     }
 
-    private bool TryDequeueCurrent(out QueueEntry entry)
+    private bool TryDequeueCurrent(bool interactive, out QueueEntry entry)
     {
         entry = default!;
-        while (_interactive.TryDequeue(out var interactiveRequest) || _bulk.TryDequeue(out interactiveRequest))
+        var queue = interactive ? _interactive : _bulk;
+        while (queue.TryDequeue(out var request))
         {
-            if (!_entries.TryGetValue(interactiveRequest.AccountId, out var candidate)
-                || candidate.Token != interactiveRequest.Token
+            if (!_entries.TryGetValue(request.AccountId, out var candidate)
+                || candidate.Token != request.Token
                 || candidate.State != MailSyncQueueState.Queued)
             {
                 continue;
@@ -207,6 +222,11 @@ public sealed class OnDemandMailSyncQueue : BackgroundService, IOnDemandMailSync
             return;
         }
 
+        var domain = DomainOf(account.EmailAddress);
+        await using var concurrencyLease = entry.Priority == MailSyncRequestPriority.Interactive
+            ? await _concurrency.AcquireInteractiveAsync(domain, stoppingToken)
+            : await _concurrency.AcquireAutomaticAsync(domain, stoppingToken, account.MailProviderKind);
+
         if (account.MailProviderKind == MailProviderKind.Custom)
         {
             var endpointDiscovery = services.GetRequiredService<IMailEndpointDiscoveryService>();
@@ -229,7 +249,8 @@ public sealed class OnDemandMailSyncQueue : BackgroundService, IOnDemandMailSync
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "IMAP capability check failed for account {AccountId}", account.Id);
+                _logger.LogDebug("IMAP capability check failed for account {AccountId}: {ErrorCode}",
+                    account.Id, MailConnectionFailurePolicy.Classify(ex).Code);
             }
 
             var canSend = false;
@@ -241,7 +262,8 @@ public sealed class OnDemandMailSyncQueue : BackgroundService, IOnDemandMailSync
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogDebug(ex, "SMTP capability check failed for account {AccountId}", account.Id);
+                    _logger.LogDebug("SMTP capability check failed for account {AccountId}: {ErrorCode}",
+                        account.Id, MailConnectionFailurePolicy.Classify(ex).Code);
                 }
             }
             UpdateCredentialCapabilities(account, canReceive, canSend);
@@ -255,6 +277,12 @@ public sealed class OnDemandMailSyncQueue : BackgroundService, IOnDemandMailSync
                 _logger.LogWarning("Imported account {AccountId} connection validation failed", account.Id);
             }
             return;
+        }
+
+        if (entry.Kind == MailSyncRequestKind.FullResync)
+        {
+            account.LastSync = DateTime.UnixEpoch;
+            await dbContext.SaveChangesAsync(stoppingToken);
         }
 
         var syncJobs = services.GetRequiredService<ISyncJobService>();
@@ -293,14 +321,34 @@ public sealed class OnDemandMailSyncQueue : BackgroundService, IOnDemandMailSync
                 }
                 catch (Exception probeException)
                 {
-                    _logger.LogDebug(probeException, "SMTP capability check failed after IMAP sync failure for account {AccountId}", account.Id);
+                    _logger.LogDebug("SMTP capability check failed after IMAP sync failure for account {AccountId}: {ErrorCode}",
+                        account.Id, MailConnectionFailurePolicy.Classify(probeException).Code);
                 }
                 UpdateCredentialCapabilities(account, canReceive: false, canSend: canSend);
                 await dbContext.SaveChangesAsync(stoppingToken);
             }
-            syncJobs.CompleteJob(jobId, false, MailConnectionFailurePolicy.ToUserMessage(ex));
+            var failure = MailConnectionFailurePolicy.Classify(ex);
+            syncJobs.CompleteJob(jobId, false, failure.Message, failure.Code.ToString());
+            try
+            {
+                var recorder = services.GetRequiredService<ISyncFailureRecorder>();
+                await recorder.RecordAsync(jobId, account.Id, entry.Kind.ToString(), failure);
+            }
+            catch (Exception recordException)
+            {
+                _logger.LogWarning("Failed to persist failure for sync job {JobId}: {ExceptionCategory}",
+                    jobId, MailConnectionFailurePolicy.Classify(recordException).ExceptionCategory);
+            }
             throw;
         }
+    }
+
+    private static string DomainOf(string emailAddress)
+    {
+        var separator = emailAddress.LastIndexOf('@');
+        return separator >= 0 && separator < emailAddress.Length - 1
+            ? emailAddress[(separator + 1)..]
+            : "unknown";
     }
 
     private static void UpdateCredentialCapabilities(MailAccount account, bool canReceive, bool canSend)
@@ -345,7 +393,8 @@ public sealed class OnDemandMailSyncQueue : BackgroundService, IOnDemandMailSync
 
     public override void Dispose()
     {
-        _available.Dispose();
+        _interactiveAvailable.Dispose();
+        _bulkAvailable.Dispose();
         base.Dispose();
     }
 

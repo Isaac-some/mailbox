@@ -10,8 +10,8 @@ namespace MailArchiver.Services
         List<SyncJob> GetActiveJobs();
         List<SyncJob> GetAllJobs();
         void UpdateJobProgress(string jobId, Action<SyncJob> updateAction);
-        void CompleteJob(string jobId, bool success, string? errorMessage = null);
-        void CompleteJobRateLimited(string jobId, string? errorMessage = null);
+        void CompleteJob(string jobId, bool success, string? errorMessage = null, string? errorCode = null);
+        void CompleteJobRateLimited(string jobId, string? errorMessage = null, string? errorCode = null);
         bool CancelJob(string jobId);
         bool CancelJobsForAccount(int accountId);
         bool AcknowledgeJobFailures(string jobId);

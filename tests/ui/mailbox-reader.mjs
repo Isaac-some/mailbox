@@ -14,8 +14,13 @@ async function scenario(startResponse, finalJob) {
     const status = { hidden: true };
     const button = { disabled: false };
     let submit, poll, reloads = 0, calls = 0;
-    const form = { action: '/sync', addEventListener: (_, callback) => { submit = callback; } };
+    const form = {
+        action: '/sync',
+        addEventListener: (_, callback) => { submit = callback; },
+        querySelector: () => button
+    };
     const document = {
+        querySelectorAll: selector => selector === '[data-mailbox-sync-form]' ? [form] : [],
         querySelector: selector => selector.includes('sync-account') ? {dataset:{mailboxSyncAccount:'1'}}
             : selector.includes('RequestVerificationToken') ? {value:'test-token'} : button,
         getElementById: id => ({
@@ -25,9 +30,11 @@ async function scenario(startResponse, finalJob) {
     };
     vm.runInNewContext(script, {
         document, URLSearchParams, URL,
+        matchMedia: () => ({matches:false}),
         FormData: class { *[Symbol.iterator]() { yield ['__RequestVerificationToken','test-token']; } },
         window: {
-            location: {search:'',reload:() => reloads++},
+            location: {search:'',href:'http://localhost/',reload:() => reloads++},
+            matchMedia: () => ({matches:false}),
             setInterval: callback => { poll=callback; },setTimeout:()=>{}
         },
         fetch: async url => {
@@ -36,17 +43,17 @@ async function scenario(startResponse, finalJob) {
         }
     });
     assert.equal(calls,0,'reading cached email must not start a sync');
-    await submit({preventDefault(){}});
+    await submit({preventDefault(){},currentTarget:form});
     await poll();
     await poll();
     return {error,reloads};
 }
 
 const accepted = {ok:true,json:async()=>({state:'Queued',requestedAt:'2026-09-03T00:00:00Z'})};
-const failed = await scenario(accepted,{status:'Failed',errorMessage:'all authentication routes rejected'});
+const failed = await scenario(accepted,{status:'Failed',errorCode:'AuthenticationRejected',message:'授权码无效，请检查邮箱与授权码是否匹配。'});
 assert.equal(failed.reloads,0,'failed sync must not silently reload away the error');
 assert.equal(failed.error.hidden,false);
-assert.match(failed.error.textContent,/连接失败/);
+assert.match(failed.error.textContent,/授权码无效/);
 
 const upstream = await scenario({ok:false,json:async()=>({message:'线上账号接口不可用'})},null);
 assert.equal(upstream.error.hidden,false);

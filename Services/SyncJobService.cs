@@ -107,13 +107,14 @@ namespace MailArchiver.Services
             }
         }
 
-        public void CompleteJob(string jobId, bool success, string? errorMessage = null)
+        public void CompleteJob(string jobId, bool success, string? errorMessage = null, string? errorCode = null)
         {
             if (_jobs.TryGetValue(jobId, out var job))
             {
                 job.Status = success ? SyncJobStatus.Completed : SyncJobStatus.Failed;
                 job.Completed = DateTime.UtcNow;
                 job.ErrorMessage = errorMessage;
+                job.ErrorCode = errorCode ?? (success ? null : MailFailureCode.Unexpected.ToString());
                 
                 // Remove from active account jobs
                 _activeAccountJobs.TryRemove(job.MailAccountId, out _);
@@ -123,13 +124,14 @@ namespace MailArchiver.Services
             }
         }
 
-        public void CompleteJobRateLimited(string jobId, string? errorMessage = null)
+        public void CompleteJobRateLimited(string jobId, string? errorMessage = null, string? errorCode = null)
         {
             if (_jobs.TryGetValue(jobId, out var job))
             {
                 job.Status = SyncJobStatus.RateLimited;
                 job.Completed = DateTime.UtcNow;
                 job.ErrorMessage = errorMessage;
+                job.ErrorCode = errorCode ?? MailFailureCode.RateLimited.ToString();
                 
                 // Remove from active account jobs
                 _activeAccountJobs.TryRemove(job.MailAccountId, out _);
@@ -146,6 +148,8 @@ namespace MailArchiver.Services
                 {
                     // Set status to cancelled first
                     job.Status = SyncJobStatus.Cancelled;
+                    job.ErrorCode = MailFailureCode.Cancelled.ToString();
+                    job.ErrorMessage = "同步任务已取消。";
                     
                     // Cancel the token source if it exists
                     if (job.CancellationTokenSource != null)

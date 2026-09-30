@@ -47,7 +47,11 @@ public sealed class MailCredentialVerifier(
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            throw new InvalidOperationException("邮箱登录校验超时（20 秒），本行未导入；请检查网络后重试，超时不代表授权码错误。");
+            throw new TimeoutException("邮箱登录校验超时（20 秒），本行未导入；请检查网络后重试，超时不代表授权码错误。");
+        }
+        catch (MailCredentialFormatException)
+        {
+            throw;
         }
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested
             && ex is not OperationCanceledException)
@@ -60,7 +64,7 @@ public sealed class MailCredentialVerifier(
                 or ProxyProtocolException);
             throw new InvalidOperationException(networkFailure
                 ? "无法连接邮箱完成校验，本行未导入；请检查网络、代理或邮箱服务设置后重试。"
-                : "邮箱登录校验未通过，本行未导入；请检查授权码是否完整有效、邮箱是否匹配，以及所需的 Client ID 和收件权限。");
+                : "邮箱登录校验未通过，本行未导入；请检查授权码是否完整有效、邮箱是否匹配，以及所需的 Client ID 和收件权限。", ex);
         }
     }
 }

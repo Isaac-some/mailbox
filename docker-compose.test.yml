@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: MailArchiverTest
+      POSTGRES_USER: mailtest
+      POSTGRES_PASSWORD: mailbox-local-test-only
+    ports:
+      - "127.0.0.1::5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mailtest -d MailArchiverTest"]
+      interval: 2s
+      timeout: 2s
+      retries: 30

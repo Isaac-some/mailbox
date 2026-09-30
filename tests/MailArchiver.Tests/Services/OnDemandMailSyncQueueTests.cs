@@ -2,6 +2,8 @@ using MailArchiver.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using MailArchiver.Models;
+using Microsoft.Extensions.Options;
 
 namespace MailArchiver.Tests.Services;
 
@@ -20,6 +22,7 @@ public class OnDemandMailSyncQueueTests
         return new OnDemandMailSyncQueue(
             new ServiceCollection().BuildServiceProvider(),
             configuration,
+            new MailConcurrencyCoordinator(Options.Create(new MailConcurrencyOptions())),
             NullLogger<OnDemandMailSyncQueue>.Instance);
     }
 
@@ -46,5 +49,16 @@ public class OnDemandMailSyncQueueTests
 
         Assert.Equal(MailSyncRequestPriority.Interactive, status.Priority);
         Assert.Equal(MailSyncRequestPriority.Interactive, queue.GetStatus(42).Priority);
+    }
+
+    [Fact]
+    public void FullResync_IsNotReplacedByASubsequentRefresh()
+    {
+        using var queue = CreateQueue();
+        queue.Enqueue(42, MailSyncRequestPriority.Interactive, MailSyncRequestKind.FullResync);
+
+        var status = queue.Enqueue(42, MailSyncRequestPriority.Interactive);
+
+        Assert.Equal(MailSyncRequestKind.FullResync, status.Kind);
     }
 }

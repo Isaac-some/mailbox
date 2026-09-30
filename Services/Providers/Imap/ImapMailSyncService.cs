@@ -142,7 +142,7 @@ namespace MailArchiver.Services.Providers.Imap
                         if (job?.Status == SyncJobStatus.Cancelled)
                         {
                             _logger.LogInformation("Sync job {JobId} for account {AccountName} has been cancelled", jobId, account.Name);
-                            _syncJobService.CompleteJob(jobId, false, "Job was cancelled");
+                            _syncJobService.CompleteJob(jobId, false, "同步任务已取消。", "Cancelled");
                             return;
                         }
                     }
@@ -255,14 +255,17 @@ namespace MailArchiver.Services.Providers.Imap
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error during sync for account {AccountName}: {Message}", account.Name, ex.Message);
+                var failure = MailConnectionFailurePolicy.Classify(ex);
+                _logger.LogError("Sync failed for account {AccountId}: {ErrorCode} at {FailureStage} ({ExceptionCategory})",
+                    account.Id, failure.Code, failure.Stage, failure.ExceptionCategory);
 
                 if (jobId != null)
                 {
                     _syncJobService.CompleteJob(
                         jobId,
                         false,
-                        MailConnectionFailurePolicy.ToUserMessage(ex));
+                        failure.Message,
+                        failure.Code.ToString());
                 }
                 throw;
             }

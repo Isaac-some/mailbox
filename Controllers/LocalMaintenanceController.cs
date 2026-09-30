@@ -17,10 +17,7 @@ public sealed class LocalMaintenanceController : Controller
     private readonly MailArchiverDbContext _context;
     private readonly IHostApplicationLifetime _lifetime;
     private readonly IConfiguration _configuration;
-    private readonly IUpstreamMailboxConnectionStore _connectionStore;
-    private readonly IUpstreamMailboxSyncCursorStore _cursorStore;
     private readonly IUpstreamMailboxSyncService _upstreamSync;
-    private readonly IPlatformSessionStore _platformSessionStore;
     private readonly ICsvImportService _csvImportService;
     private readonly ILogger<LocalMaintenanceController> _logger;
     private readonly INetworkPolicyStore _networkPolicy;
@@ -30,10 +27,7 @@ public sealed class LocalMaintenanceController : Controller
         MailArchiverDbContext context,
         IHostApplicationLifetime lifetime,
         IConfiguration configuration,
-        IUpstreamMailboxConnectionStore connectionStore,
-        IUpstreamMailboxSyncCursorStore cursorStore,
         IUpstreamMailboxSyncService upstreamSync,
-        IPlatformSessionStore platformSessionStore,
         ICsvImportService csvImportService,
         ILogger<LocalMaintenanceController> logger,
         INetworkPolicyStore networkPolicy,
@@ -42,10 +36,7 @@ public sealed class LocalMaintenanceController : Controller
         _context = context;
         _lifetime = lifetime;
         _configuration = configuration;
-        _connectionStore = connectionStore;
-        _cursorStore = cursorStore;
         _upstreamSync = upstreamSync;
-        _platformSessionStore = platformSessionStore;
         _csvImportService = csvImportService;
         _logger = logger;
         _networkPolicy = networkPolicy;
@@ -53,30 +44,22 @@ public sealed class LocalMaintenanceController : Controller
     }
 
     [HttpGet]
-    public async Task<IActionResult> Index(CancellationToken cancellationToken)
+    public IActionResult Index()
     {
         if (!IsLocalApp())
         {
             return NotFound();
         }
 
-        var connection = await _connectionStore.GetStatusAsync(cancellationToken);
-        var session = _platformSessionStore.Current;
         var network = _networkPolicy.GetSnapshot();
         return View(new LocalMaintenanceViewModel
         {
-            PlatformConfigured = session is not null,
-            PlatformUsername = session?.Username ?? string.Empty,
-            PlatformIsAdmin = session?.IsAdmin ?? false,
-            PlatformEndpoint = connection.Endpoint ?? string.Empty,
-            InstallationId = connection.InstallationId,
-            DeviceName = connection.DeviceName,
-            OperatingSystem = connection.OperatingSystem,
-            AppVersion = connection.AppVersion,
+            PlatformConfigured = !string.IsNullOrWhiteSpace(_configuration["UpstreamMailboxSync:BearerToken"]),
             NetworkMode = network.Mode,
             NetworkProxyType = network.ExplicitProxy?.Type,
             NetworkProxyHost = network.ExplicitProxy?.Host ?? string.Empty,
-            NetworkProxyPort = network.ExplicitProxy?.Port
+            NetworkProxyPort = network.ExplicitProxy?.Port,
+            NetworkProxyUsername = network.ExplicitProxy?.Username ?? string.Empty
         });
     }
 
@@ -94,8 +77,11 @@ public sealed class LocalMaintenanceController : Controller
             var savedPassword = string.IsNullOrWhiteSpace(password)
                 ? existing?.Password
                 : password;
+            var savedUsername = string.IsNullOrWhiteSpace(username)
+                ? existing?.Username
+                : username.Trim();
             proxy = new NetworkProxySettings(proxyType ?? NetworkProxyType.Http,
-                host?.Trim() ?? string.Empty, port ?? 0, username?.Trim(), savedPassword);
+                host?.Trim() ?? string.Empty, port ?? 0, savedUsername, savedPassword);
         }
         try
         {
@@ -151,35 +137,17 @@ public sealed class LocalMaintenanceController : Controller
         var result = await _upstreamSync.PullAsync(userId.Value, cancellationToken);
         if (!result.Enabled)
         {
-            TempData["ErrorMessage"] = "请先配置平台连接。";
+            TempData["ErrorMessage"] = "交付包未启用平台邮箱同步，请联系交付方。";
             return RedirectToAction(nameof(Index));
         }
         if (!result.Succeeded)
         {
-            if (result.RequiresLogin)
-            {
-                return RedirectToAction("Login", "Auth", new { returnUrl = Url.Action(nameof(Index)) });
-            }
             TempData["ErrorMessage"] = result.Error;
             return RedirectToAction(nameof(Index));
         }
 
         TempData["SuccessMessage"] = $"平台邮箱已更新：新增 {result.Created} 个，更新 {result.Updated} 个。";
         return RedirectToAction("Index", "MailAccounts");
-    }
-
-    [HttpPost]
-    [ValidateAntiForgeryToken]
-    public async Task<IActionResult> RemovePlatformConnection(CancellationToken cancellationToken)
-    {
-        if (!IsLocalApp())
-            return NotFound();
-
-        await _connectionStore.RemoveAsync(cancellationToken);
-        _platformSessionStore.Clear();
-        await _cursorStore.ResetAsync(cancellationToken);
-        TempData["SuccessMessage"] = "平台连接已移除。";
-        return RedirectToAction(nameof(Index));
     }
 
     [HttpPost]

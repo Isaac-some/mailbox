@@ -33,6 +33,46 @@ cd "/Users/zhaoxiaohandexinwanju/Documents/邮箱助手/mail-archiver-main"
 
 发件成功后，程序会把副本保存到 Outlook“已发送”，并立即归档到本地。日志不会记录 OAuth Token、正文或附件内容。
 
+## 平台邮箱凭据同步
+
+发布版本机 App 不显示登录页。启动时使用打包时注入的租户 token 自动增量拉取账号凭据，用户不需要填写账号、token、服务地址或导入 CSV。
+
+构建发布包时在终端隐式输入 Token，脚本会把它注入安装包。接口地址已有默认值。Token 会进入最终安装包，因此拿到安装包的人可以提取并使用它；不要把安装包公开发布：
+
+```zsh
+cd "/Users/isaac/Downloads/邮箱/mailbox"
+read -rs "MAIL_ASSISTANT_UPSTREAM_TOKEN?请输入租户 Token: "
+echo
+export MAIL_ASSISTANT_UPSTREAM_TOKEN
+./script/build-local-macos-release.sh
+unset MAIL_ASSISTANT_UPSTREAM_TOKEN
+```
+
+Windows 发布包在 PowerShell 中使用同名环境变量，先进入工作区：
+
+```powershell
+cd "C:\path\to\mailbox"
+$secureToken = Read-Host "请输入租户 Token" -AsSecureString
+$env:MAIL_ASSISTANT_UPSTREAM_TOKEN = [System.Net.NetworkCredential]::new("", $secureToken).Password
+.\windows-app\build-windows.ps1
+Remove-Item Env:MAIL_ASSISTANT_UPSTREAM_TOKEN
+```
+
+已有本机生成的 Mac App 时，也可以直接在 Mac 上交叉构建 Windows ZIP，复用 Mac 包中的同一租户 Token：
+
+```zsh
+cd "/Users/isaac/Downloads/邮箱/mailbox"
+MAIL_ASSISTANT_UPSTREAM_TOKEN="$(jq -r '.UpstreamMailboxSync.BearerToken' 'local-app/build/邮箱助手.app/Contents/Resources/server/appsettings.Local.json')" bash ./script/build-windows-on-macos.sh
+```
+
+Windows 交付文件为 `windows-app/build/MailAssistant-Windows-x64-v2.3.5.zip`。解压整个文件夹后双击 `邮箱助手.exe`；不能只复制 exe。
+
+服务地址变化时，再设置 `MAIL_ASSISTANT_UPSTREAM_ENDPOINT` 为完整的 HTTPS 接口地址。缺少 Token 时，发布构建会直接失败。
+
+平台接口返回的 Outlook `credential` 会作为 Refresh Token 保存，`client_id` 会作为 Client ID 保存；单条坏数据只会被跳过，不会阻塞其他账号同步。
+
+分页请求固定串行执行，每页最多 1000 条；只有全部页面成功后才保存第一页返回的 `serverTimestamp`。token 错误会提示 HTTP 401，服务端 HTTP 500 会按 5 秒间隔最多重试 3 次。
+
 ## 后续打包
 
 本次源码交付不包含 DMG/EXE。需要发布时再执行：

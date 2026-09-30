@@ -17,6 +17,20 @@ public static class LocalDatabaseSchemaUpgrade
 
         try
         {
+            await ExecuteAsync(connection, @"
+                CREATE TABLE IF NOT EXISTS ""SyncFailureRecords"" (
+                    ""Id"" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                    ""JobId"" TEXT NOT NULL,
+                    ""MailAccountId"" INTEGER NOT NULL,
+                    ""Operation"" TEXT NOT NULL,
+                    ""ErrorCode"" TEXT NOT NULL,
+                    ""FailureStage"" TEXT NOT NULL,
+                    ""ExceptionCategory"" TEXT NOT NULL,
+                    ""OccurredAtUtc"" TEXT NOT NULL
+                );", cancellationToken);
+            await ExecuteAsync(connection,
+                "CREATE INDEX IF NOT EXISTS \"IX_SyncFailureRecords_OccurredAtUtc\" ON \"SyncFailureRecords\" (\"OccurredAtUtc\");",
+                cancellationToken);
             await EnsureNullableTextColumnAsync(connection, "MailAccounts", "OAuthGrantedScopes", cancellationToken);
             await EnsureNullableTextColumnAsync(connection, "MailAccounts", "OAuthRedirectUri", cancellationToken);
             await EnsureNullableTextColumnAsync(connection, "MailAccounts", "MailProviderKind", cancellationToken);

@@ -14,4 +14,5 @@ public sealed record UpstreamMailboxConnectionStatus(
     string InstallationId,
     string DeviceName,
     string OperatingSystem,
-    string AppVersion);
+    string AppVersion,
+    string TokenSuffix = "");

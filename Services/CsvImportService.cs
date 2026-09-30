@@ -5,6 +5,7 @@ using MailArchiver.Data;
 using MailArchiver.Models;
 using MailArchiver.Models.ViewModels;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace MailArchiver.Services;
 
@@ -28,15 +29,23 @@ public sealed class CsvImportService : BackgroundService, ICsvImportService
     private const int MaxSamples = 100;
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<CsvImportService> _logger;
+    private readonly IMailConcurrencyCoordinator _concurrency;
+    private readonly int _automaticLimit;
     private readonly ConcurrentQueue<CsvImportJob> _queue = new();
     private readonly ConcurrentQueue<CsvImportJob> _verificationQueue = new();
     private readonly ConcurrentDictionary<string, CsvImportJob> _jobs = new();
     private readonly Timer _cleanupTimer;
 
-    public CsvImportService(IServiceProvider serviceProvider, ILogger<CsvImportService> logger)
+    public CsvImportService(
+        IServiceProvider serviceProvider,
+        ILogger<CsvImportService> logger,
+        IMailConcurrencyCoordinator concurrency,
+        IOptions<MailConcurrencyOptions> options)
     {
         _serviceProvider = serviceProvider;
         _logger = logger;
+        _concurrency = concurrency;
+        _automaticLimit = options.Value.AutomaticLimit;
         _cleanupTimer = new Timer(_ => CleanupOldJobs(), null, TimeSpan.FromHours(24), TimeSpan.FromHours(24));
     }
 
@@ -124,7 +133,9 @@ public sealed class CsvImportService : BackgroundService, ICsvImportService
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error in CSV credential import worker");
+                var failure = MailConnectionFailurePolicy.Classify(ex);
+                _logger.LogError("CSV credential import worker failed: {ErrorCode} ({ExceptionCategory})",
+                    failure.Code, failure.ExceptionCategory);
                 await Task.Delay(1000, stoppingToken);
             }
         }
@@ -252,7 +263,9 @@ public sealed class CsvImportService : BackgroundService, ICsvImportService
             job.ErrorMessage = "导入任务失败，请稍后重试。";
             job.Completed = DateTime.UtcNow;
             job.LastUpdated = DateTime.UtcNow;
-            _logger.LogError(ex, "CSV import {JobId} failed", job.JobId);
+            var failure = MailConnectionFailurePolicy.Classify(ex);
+            _logger.LogError("CSV import {JobId} failed: {ErrorCode} ({ExceptionCategory})",
+                job.JobId, failure.Code, failure.ExceptionCategory);
         }
     }
 
@@ -260,20 +273,18 @@ public sealed class CsvImportService : BackgroundService, ICsvImportService
     {
         try
         {
-            using var gate = new SemaphoreSlim(4, 4);
-            var providerGates = new ConcurrentDictionary<MailProviderKind, SemaphoreSlim>();
-            var tasks = job.AccountIds.Select(async accountId =>
+            await Parallel.ForEachAsync(job.AccountIds,
+                new ParallelOptions { MaxDegreeOfParallelism = _automaticLimit, CancellationToken = cancellationToken },
+                async (accountId, token) =>
             {
-                var gateAcquired = false;
-                await gate.WaitAsync(cancellationToken);
-                gateAcquired = true;
-                SemaphoreSlim? providerGate = null;
-                var providerGateAcquired = false;
+                MailAccount? account = null;
+                ISyncFailureRecorder? recorder = null;
                 try
                 {
                     using var scope = _serviceProvider.CreateScope();
                     var context = scope.ServiceProvider.GetRequiredService<MailArchiverDbContext>();
-                    var account = await context.MailAccounts.FindAsync(new object[] { accountId }, cancellationToken);
+                    recorder = scope.ServiceProvider.GetRequiredService<ISyncFailureRecorder>();
+                    account = await context.MailAccounts.FindAsync(new object[] { accountId }, token);
                     if (account is null)
                     {
                         lock (job)
@@ -283,6 +294,8 @@ public sealed class CsvImportService : BackgroundService, ICsvImportService
                         }
                         return;
                     }
+                    var domain = account.EmailAddress.Split('@').LastOrDefault() ?? "unknown";
+                    await using var lease = await _concurrency.AcquireAutomaticAsync(domain, token, account.MailProviderKind);
                     if (account.MailProviderKind == MailProviderKind.Gmail)
                     {
                         var encryption = scope.ServiceProvider.GetRequiredService<ICredentialEncryptionService>();
@@ -299,7 +312,9 @@ public sealed class CsvImportService : BackgroundService, ICsvImportService
                         if (!formatOk)
                         {
                             account.CredentialDetectionStatus = "FormatNeedsConfirmation";
-                            await context.SaveChangesAsync(cancellationToken);
+                            await context.SaveChangesAsync(token);
+                            await TryRecordFailureAsync(recorder, job.JobId, account.Id,
+                                MailConnectionFailurePolicy.Classify(new MailCredentialFormatException("Invalid Gmail credential format")));
                             lock (job)
                             {
                                 job.VerificationFailedCount++;
@@ -308,61 +323,70 @@ public sealed class CsvImportService : BackgroundService, ICsvImportService
                                 AddSample(job.FailedSamples, new CsvImportFailedRow
                                 {
                                     Email = account.EmailAddress,
-                                    Reason = "Gmail 应用专用密码格式待确认。"
+                                    Reason = "Gmail 应用专用密码去除空白和不可见字符后必须恰好是 16 位。"
                                 });
                             }
                             return;
                         }
                     }
-                    if (account.MailProviderKind.HasValue)
-                    {
-                        providerGate = providerGates.GetOrAdd(account.MailProviderKind.Value, _ => new SemaphoreSlim(1, 1));
-                        await providerGate.WaitAsync(cancellationToken);
-                        providerGateAcquired = true;
-                    }
                     try
                     {
                         var verifier = scope.ServiceProvider.GetRequiredService<IMailCredentialVerifier>();
-                        await verifier.VerifyAsync(account, cancellationToken);
-                        await context.SaveChangesAsync(cancellationToken);
+                        await verifier.VerifyAsync(account, token);
+                        await context.SaveChangesAsync(token);
                         lock (job) job.VerificationSuccessCount++;
                     }
                     catch (Exception ex)
                     {
                         account.CredentialDetectionStatus = "VerificationFailed";
-                        await context.SaveChangesAsync(cancellationToken);
+                        await context.SaveChangesAsync(token);
+                        var failure = MailConnectionFailurePolicy.Classify(ex);
+                        await TryRecordFailureAsync(recorder, job.JobId, account.Id, failure);
                         lock (job)
                         {
                             job.VerificationFailedCount++;
                             job.VerificationFailedAccountIds.Add(accountId);
-                            var reason = ToSafeFailureReason(ex);
-                            switch (reason)
+                            switch (failure.Code)
                             {
-                                case "凭证格式待确认。": job.VerificationFormatFailureCount++; break;
-                                case "认证失败，请检查邮箱与授权码是否匹配。": job.VerificationAuthFailureCount++; break;
-                                case "服务商暂时限制登录，请稍后重试。": job.VerificationRateLimitCount++; break;
-                                case "网络或 TLS 连接失败，可稍后重试。": job.VerificationNetworkFailureCount++; break;
+                                case MailFailureCode.GmailCredentialFormatInvalid: job.VerificationFormatFailureCount++; break;
+                                case MailFailureCode.AuthenticationRejected: job.VerificationAuthFailureCount++; break;
+                                case MailFailureCode.RateLimited: job.VerificationRateLimitCount++; break;
+                                case MailFailureCode.TargetUnavailable or MailFailureCode.ProxyUnavailable or MailFailureCode.TlsFailed:
+                                    job.VerificationNetworkFailureCount++; break;
                             }
-                            AddSample(job.FailedSamples, new CsvImportFailedRow { Email = account.EmailAddress, Reason = reason });
+                            AddSample(job.FailedSamples, new CsvImportFailedRow { Email = account.EmailAddress, Reason = failure.Message });
                         }
+                    }
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    var failure = MailConnectionFailurePolicy.Classify(ex);
+                    if (account is not null && recorder is not null)
+                        await TryRecordFailureAsync(recorder, job.JobId, accountId, failure);
+                    lock (job)
+                    {
+                        job.VerificationFailedCount++;
+                        job.VerificationFailedAccountIds.Add(accountId);
+                        AddSample(job.FailedSamples, new CsvImportFailedRow
+                        {
+                            Email = account?.EmailAddress ?? string.Empty,
+                            Reason = failure.Message
+                        });
                     }
                 }
                 finally
                 {
-                    if (providerGateAcquired)
-                        providerGate?.Release();
                     lock (job)
                     {
                         job.VerificationProcessedCount++;
                         job.LastUpdated = DateTime.UtcNow;
                     }
-                    if (gateAcquired)
-                        gate.Release();
                 }
             });
-            await Task.WhenAll(tasks);
-            foreach (var providerGate in providerGates.Values)
-                providerGate.Dispose();
             job.PendingVerificationCount = Math.Max(0, job.AccountIds.Count - job.VerificationProcessedCount);
             job.Status = job.VerificationFailedCount > 0 || job.FailedCount > 0 || job.SkippedCount > 0
                 ? CsvImportJobStatus.CompletedWithErrors
@@ -383,7 +407,9 @@ public sealed class CsvImportService : BackgroundService, ICsvImportService
             job.ErrorMessage = "验证任务失败，请稍后重试。";
             job.Completed = DateTime.UtcNow;
             job.LastUpdated = DateTime.UtcNow;
-            _logger.LogError(ex, "CSV verification {JobId} failed", job.JobId);
+            var failure = MailConnectionFailurePolicy.Classify(ex);
+            _logger.LogError("CSV verification {JobId} failed: {ErrorCode} ({ExceptionCategory})",
+                job.JobId, failure.Code, failure.ExceptionCategory);
         }
     }
 
@@ -391,6 +417,20 @@ public sealed class CsvImportService : BackgroundService, ICsvImportService
     {
         if (samples.Count < MaxSamples)
             samples.Add(value);
+    }
+
+    private async Task TryRecordFailureAsync(
+        ISyncFailureRecorder recorder, string jobId, int accountId, MailFailure failure)
+    {
+        try
+        {
+            await recorder.RecordAsync(jobId, accountId, "VerifyCredential", failure);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning("Failed to persist credential verification failure for job {JobId}: {ExceptionCategory}",
+                jobId, MailConnectionFailurePolicy.Classify(exception).ExceptionCategory);
+        }
     }
 
     private static byte[] CredentialFingerprint(string credential)

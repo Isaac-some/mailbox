@@ -36,7 +36,7 @@ public class GmailMailProviderModule : PasswordAndOAuthMailProviderModule
             char.GetUnicodeCategory(character) != UnicodeCategory.Format));
         if (normalized.Length != 16)
         {
-            throw new InvalidOperationException(
+            throw new MailCredentialFormatException(
                 "Gmail 应用专用密码去除空白和不可见格式字符后必须恰好是 16 位；请使用 Google 生成的应用专用密码，不是 Google 登录密码。");
         }
 

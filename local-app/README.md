@@ -3,12 +3,18 @@
 仅支持 Apple Silicon。仓库可以把 .NET 10 SDK 和 NuGet 依赖保存在
 `.local-tools/`，不需要修改系统环境。该目录不会提交到 Git。
 
-首次或日常完整构建：
+首次或日常完整构建需要租户 Token：
 
-```sh
+```zsh
 cd "/path/to/mailbox"
+read -rs "MAIL_ASSISTANT_UPSTREAM_TOKEN?请输入租户 Token: "
+echo
+export MAIL_ASSISTANT_UPSTREAM_TOKEN
 ./script/build-local-macos-release.sh
+unset MAIL_ASSISTANT_UPSTREAM_TOKEN
 ```
+
+服务地址已有默认值。如需更改，在构建前设置 `MAIL_ASSISTANT_UPSTREAM_ENDPOINT` 为完整的 HTTPS 接口地址。Token 会进入最终 DMG，拿到 DMG 的人可以提取它。
 
 第一次运行会从 Microsoft 官方地址下载固定版本的 Apple Silicon .NET 10
 SDK，并把 SDK 与 NuGet 包缓存到工作区。如果本机已有 NuGet 缓存，会优先

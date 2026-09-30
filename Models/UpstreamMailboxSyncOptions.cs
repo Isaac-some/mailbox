@@ -12,5 +12,8 @@ public sealed class UpstreamMailboxSyncOptions
     /// <summary>Optional durable cursor file. Empty uses the local app data directory.</summary>
     public string CursorFilePath { get; set; } = string.Empty;
     public int TimeoutSeconds { get; set; } = 30;
-    public int MaxItems { get; set; } = 5000;
+    public int PageSize { get; set; } = 1000;
+    public int MaxItems { get; set; } = 100_000;
+    public int ServerErrorRetries { get; set; } = 3;
+    public int ServerErrorRetryDelaySeconds { get; set; } = 5;
 }

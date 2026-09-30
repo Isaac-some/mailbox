@@ -91,12 +91,12 @@ public class LocalAppPackagingPolicyTests
     }
 
     [Fact]
-    public void LocalAppRelease_version_identifies_the_multiple_account_file_import()
+    public void LocalAppRelease_version_identifies_the_background_startup_sync()
     {
         var source = ReadBundledFile("Info.plist");
 
-        Assert.Contains("<string>2.3.3</string>", source, StringComparison.Ordinal);
-        Assert.Contains("<string>233</string>", source, StringComparison.Ordinal);
+        Assert.Contains("<string>2.3.5</string>", source, StringComparison.Ordinal);
+        Assert.Contains("<string>234</string>", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -104,8 +104,8 @@ public class LocalAppPackagingPolicyTests
     {
         var source = ReadBundledFile("MailAssistant.Windows.csproj");
 
-        Assert.Contains("<Version>2.3.3</Version>", source, StringComparison.Ordinal);
-        Assert.Contains("<FileVersion>2.3.3.0</FileVersion>", source, StringComparison.Ordinal);
+        Assert.Contains("<Version>2.3.5</Version>", source, StringComparison.Ordinal);
+        Assert.Contains("<FileVersion>2.3.5.0</FileVersion>", source, StringComparison.Ordinal);
         Assert.Contains("<ApplicationIcon>AppIcon.ico</ApplicationIcon>", source, StringComparison.Ordinal);
     }
 

@@ -28,7 +28,7 @@ public class GmailAppPasswordPolicyTests
     [InlineData("abcdefghijklmnopq")]
     public void Gmail_rejects_app_passwords_that_are_not_exactly_16_characters(string password)
     {
-        var exception = Assert.Throws<InvalidOperationException>(
+        var exception = Assert.Throws<MailCredentialFormatException>(
             () => CreateGmailModule().NormalizeAppPassword(password));
 
         Assert.Equal(
@@ -108,7 +108,9 @@ public class GmailAppPasswordPolicyTests
         listener.Start();
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
         var receivedPassword = CaptureSmtpPasswordAsync(listener);
-        var module = new LocalSmtpGmailModule(port, new PassthroughCredentialEncryptionService());
+        var policy = new NetworkPolicyResolver(new SystemNetworkPolicyStore());
+        var module = new LocalSmtpGmailModule(port, new PassthroughCredentialEncryptionService(),
+            new NetworkMailProxyFactory(policy));
         var account = new MailAccount
         {
             EmailAddress = "legacy@gmail.com",
@@ -248,8 +250,9 @@ public class GmailAppPasswordPolicyTests
     {
         private readonly int _port;
 
-        public LocalSmtpGmailModule(int port, ICredentialEncryptionService credentialEncryption)
-            : base(null!, credentialEncryption)
+        public LocalSmtpGmailModule(int port, ICredentialEncryptionService credentialEncryption,
+            INetworkMailProxyFactory networkMail)
+            : base(null!, credentialEncryption, networkMail)
         {
             _port = port;
         }
@@ -258,6 +261,13 @@ public class GmailAppPasswordPolicyTests
         protected override string GetSmtpHost(MailAccount account) => IPAddress.Loopback.ToString();
         protected override int SmtpPort => _port;
         protected override SecureSocketOptions SmtpSocketOptions => SecureSocketOptions.None;
+    }
+
+    private sealed class SystemNetworkPolicyStore : INetworkPolicyStore
+    {
+        public NetworkPolicySettings GetSnapshot() => new();
+        public Task SaveAsync(NetworkPolicySettings settings, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
     }
 
 }

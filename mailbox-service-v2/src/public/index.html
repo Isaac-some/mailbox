@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>邮箱助手</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到主要内容</a>
+  <section id="login-view" class="login-shell" hidden>
+    <form id="login-form" class="login-panel">
+      <div class="brand-mark" aria-hidden="true">M</div>
+      <h1>邮箱助手</h1>
+      <p class="muted">内部共享管理</p>
+      <label>用户名<input name="username" autocomplete="username" required></label>
+      <label>密码<input name="password" type="password" autocomplete="current-password" required></label>
+      <p id="login-error" class="form-error" role="alert"></p>
+      <button class="primary" type="submit">登录</button>
+    </form>
+  </section>
+
+  <div id="app-view" class="app-shell" hidden>
+    <header class="topbar">
+      <a class="brand" href="#dashboard"><span class="brand-mark small" aria-hidden="true">M</span><span>邮箱助手</span></a>
+      <div class="topbar-actions"><span id="actor-name"></span><button id="logout-button" class="quiet">退出</button></div>
+    </header>
+    <nav class="sidebar" aria-label="主导航">
+      <a href="#dashboard" data-page="dashboard">概览</a>
+      <a href="#accounts" data-page="accounts">邮箱</a>
+      <a href="#messages" data-page="messages">邮件</a>
+      <a href="#tasks" data-page="tasks">任务</a>
+      <a href="#audit" data-page="audit">审计</a>
+      <a href="#users" data-page="users" data-admin>成员</a>
+    </nav>
+    <main id="main" tabindex="-1"><div id="page"></div></main>
+  </div>
+
+  <dialog id="account-dialog">
+    <form id="account-form" method="dialog" class="dialog-form">
+      <header><div><h2>登记邮箱</h2><p>保存后自动进入连接验证队列</p></div><button class="icon-button" value="cancel" aria-label="关闭" title="关闭">×</button></header>
+      <div class="form-grid">
+        <label>邮箱地址<input name="address" type="email" required></label>
+        <label>显示名称<input name="displayName" maxlength="120"></label>
+        <label>邮箱厂商<select name="provider"><option value="gmail">Gmail</option><option value="outlook">Outlook</option><option value="qq">QQ 邮箱</option><option value="163">163 邮箱</option><option value="custom">自定义</option></select></label>
+        <label>登录用户名<input name="username" required></label>
+        <label class="span-2">密码或应用专用密码<input name="secret" type="password" required autocomplete="new-password"><span class="field-help">只在提交时传输，数据库中保存密文。</span></label>
+        <fieldset id="custom-endpoints" class="span-2" hidden><legend>自定义服务器</legend><div class="form-grid"><label>IMAP 地址<input name="imapHost"></label><label>IMAP 端口<input name="imapPort" type="number" value="993"></label><label>SMTP 地址<input name="smtpHost"></label><label>SMTP 端口<input name="smtpPort" type="number" value="465"></label></div></fieldset>
+      </div>
+      <p class="form-error" role="alert"></p>
+      <footer><button value="cancel" class="quiet">取消</button><button type="submit" value="default" class="primary">保存并验证</button></footer>
+    </form>
+  </dialog>
+
+  <dialog id="send-dialog">
+    <form id="send-form" method="dialog" class="dialog-form">
+      <header><div><h2>发送邮件</h2><p id="send-from"></p></div><button class="icon-button" value="cancel" aria-label="关闭" title="关闭">×</button></header>
+      <input name="accountId" type="hidden">
+      <label>收件人<input name="to" type="email" required><span class="field-help">多个地址用英文逗号分隔。</span></label>
+      <label>主题<input name="subject" maxlength="998" required></label>
+      <label>正文<textarea name="text" rows="10" maxlength="1000000" required></textarea></label>
+      <p class="form-error" role="alert"></p>
+      <footer><button value="cancel" class="quiet">取消</button><button type="submit" value="default" class="primary">进入发送队列</button></footer>
+    </form>
+  </dialog>
+
+  <dialog id="message-dialog" class="message-dialog"><article id="message-detail"></article></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

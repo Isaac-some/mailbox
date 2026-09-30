@@ -116,6 +116,17 @@ builder.Services.Configure<TenantManagementOptions>(
 // Add Mail Sync Options
 builder.Services.Configure<MailSyncOptions>(
     builder.Configuration.GetSection(MailSyncOptions.MailSync));
+builder.Services.AddOptions<MailConcurrencyOptions>()
+    .Bind(builder.Configuration.GetSection(MailConcurrencyOptions.SectionName))
+    .ValidateDataAnnotations()
+    .Validate(options => options.AutomaticLimit <= 2,
+        "后台自动验证最多只能并发 2 个，请降低 MailConcurrency:AutomaticLimit。")
+    .Validate(options => options.PerDomainLimit >= options.AutomaticLimit + 2,
+        "每个域名至少需要为手动同步预留两个连接名额。")
+    .ValidateOnStart();
+builder.Services.AddSingleton<IMailConcurrencyCoordinator, MailConcurrencyCoordinator>();
+builder.Services.AddScoped<ISyncFailureRecorder, SyncFailureRecorder>();
+builder.Services.AddHostedService<SyncFailureRetentionService>();
 builder.Services.AddSingleton<INetworkPolicyStore, NetworkPolicyStore>();
 builder.Services.AddSingleton<INetworkPolicyResolver, NetworkPolicyResolver>();
 builder.Services.AddSingleton<INetworkHttpClientFactory, NetworkHttpClientFactory>();
@@ -184,8 +195,6 @@ builder.Services.AddSingleton<IHttpClientFactory>(provider =>
 builder.Services.Configure<CsvImportOptions>(builder.Configuration.GetSection(CsvImportOptions.CsvImport));
 builder.Services.Configure<UpstreamMailboxSyncOptions>(
     builder.Configuration.GetSection(UpstreamMailboxSyncOptions.SectionName));
-builder.Services.Configure<PlatformAuthenticationOptions>(
-    builder.Configuration.GetSection(PlatformAuthenticationOptions.SectionName));
 builder.Services.Configure<LocalAccessOptions>(
     builder.Configuration.GetSection(LocalAccessOptions.SectionName));
 
@@ -209,8 +218,6 @@ builder.Services.AddScoped<MailArchiver.Services.IMailCredentialVerifier, MailAr
 builder.Services.AddScoped<MailArchiver.Services.IUpstreamMailboxSyncService, MailArchiver.Services.UpstreamMailboxSyncService>();
 builder.Services.AddSingleton<MailArchiver.Services.IUpstreamMailboxConnectionStore, MailArchiver.Services.UpstreamMailboxConnectionStore>();
 builder.Services.AddSingleton<MailArchiver.Services.IUpstreamMailboxSyncCursorStore, MailArchiver.Services.UpstreamMailboxSyncCursorStore>();
-builder.Services.AddSingleton<MailArchiver.Services.IPlatformSessionStore, MailArchiver.Services.PlatformSessionStore>();
-builder.Services.AddScoped<MailArchiver.Services.IPlatformAuthenticationClient, MailArchiver.Services.PlatformAuthenticationClient>();
 builder.Services.AddSingleton<MailArchiver.Services.ILocalAccessService, MailArchiver.Services.LocalAccessService>();
 builder.Services.AddScoped<MailArchiver.Services.IMailEndpointDiscoveryService, MailArchiver.Services.MailEndpointDiscoveryService>();
 builder.Services.AddScoped<MailArchiver.Services.MailProviders.IMailProviderModule, MailArchiver.Services.MailProviders.GmailMailProviderModule>();
@@ -956,5 +963,50 @@ app.MapControllers();
 app.MapControllerRoute(
     name: "default",
     pattern: "{controller=Home}/{action=Index}/{id?}");
+
+if (isLocalApp)
+{
+    var syncLogger = app.Services.GetRequiredService<ILogger<Program>>();
+    var stopping = app.Lifetime.ApplicationStopping;
+    app.Lifetime.ApplicationStarted.Register(() =>
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                // Let the desktop shell load before the first full account import.
+                await Task.Delay(TimeSpan.FromSeconds(2), stopping);
+                using var syncScope = app.Services.CreateScope();
+                var syncOptions = syncScope.ServiceProvider
+                    .GetRequiredService<IOptions<UpstreamMailboxSyncOptions>>().Value;
+                if (!syncOptions.Enabled || string.IsNullOrWhiteSpace(syncOptions.Endpoint)
+                    || string.IsNullOrWhiteSpace(syncOptions.BearerToken))
+                    return;
+
+                var authOptions = syncScope.ServiceProvider
+                    .GetRequiredService<IOptions<AuthenticationOptions>>().Value;
+                var userService = syncScope.ServiceProvider.GetRequiredService<IUserService>();
+                var localUser = await userService.GetUserByUsernameAsync(authOptions.LocalBypassUsername);
+                if (localUser is null)
+                    return;
+
+                var sync = syncScope.ServiceProvider.GetRequiredService<IUpstreamMailboxSyncService>();
+                var result = await sync.PullAsync(localUser.Id, stopping);
+                if (result.Succeeded)
+                    syncLogger.LogInformation("Bundled platform mailbox sync completed: {Summary}", result.Summary);
+                else
+                    syncLogger.LogWarning("Bundled platform mailbox sync failed: {Error}", result.Error);
+            }
+            catch (OperationCanceledException) when (stopping.IsCancellationRequested)
+            {
+                // Closing the app cancels the background import.
+            }
+            catch (Exception exception)
+            {
+                syncLogger.LogWarning(exception, "Bundled platform mailbox sync failed after startup");
+            }
+        });
+    });
+}
 
 app.Run();

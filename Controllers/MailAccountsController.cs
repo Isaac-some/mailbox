@@ -12,6 +12,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Localization;
 using System.Security.Cryptography;
+using System.Net.Mail;
 using System.Text;
 
 using MailArchiver.Attributes;
@@ -128,12 +129,25 @@ namespace MailArchiver.Controllers
         }
 
         // GET: MailAccounts
-        public async Task<IActionResult> Index(string? q, int page = 1, int pageSize = 50)
+        public async Task<IActionResult> Index(string? q, int page = 1, int pageSize = 50, bool priorityLookup = false)
         {
             // Use the authentication service to get user info properly
             var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
             var currentUsername = authService.GetCurrentUserDisplayName(HttpContext);
             q = q?.Trim();
+
+            if (priorityLookup && !string.IsNullOrWhiteSpace(q)
+                && MailAddress.TryCreate(q, out var address)
+                && string.Equals(address.Address, q, StringComparison.OrdinalIgnoreCase))
+            {
+                var userId = authService.GetCurrentUserId(HttpContext);
+                if (userId.HasValue)
+                {
+                    var result = await _upstreamMailboxSync.PullEmailAsync(userId.Value, q, HttpContext.RequestAborted);
+                    if (result.Enabled && !result.Succeeded)
+                        ViewBag.PrioritySyncError = result.Error;
+                }
+            }
 
             IQueryable<MailAccount> mailAccountsQuery = ManageableMailAccounts();
 
@@ -1486,23 +1500,6 @@ namespace MailArchiver.Controllers
                 return NotFound();
             }
 
-            var authService = HttpContext.RequestServices.GetRequiredService<IAuthenticationService>();
-            var currentUserId = authService.GetCurrentUserId(HttpContext);
-            if (currentUserId.HasValue && !IsLocalApp())
-            {
-                var upstream = await _upstreamMailboxSync.PullAsync(currentUserId.Value, HttpContext.RequestAborted);
-                if (upstream.Enabled && !upstream.Succeeded)
-                {
-                    if (upstream.RequiresLogin)
-                        return RedirectToAction("Login", "Auth", new { returnUrl = Url.Action(nameof(Sync), new { id }) });
-                    var message = $"同步未开始：{upstream.Error}";
-                    if (isMailboxRefresh)
-                        return StatusCode(StatusCodes.Status502BadGateway, new { message });
-                    TempData["ErrorMessage"] = message;
-                    return RedirectToAction(nameof(Index));
-                }
-            }
-
             var account = await _context.MailAccounts.FindAsync(id);
             if (account == null)
             {
@@ -1545,6 +1542,22 @@ namespace MailArchiver.Controllers
                 return RedirectToAction("Index", "Emails", new { SelectedAccountId = id });
             }
 
+            var authService = HttpContext.RequestServices.GetRequiredService<IAuthenticationService>();
+            var currentUserId = authService.GetCurrentUserId(HttpContext);
+            UpstreamMailboxSyncResult? upstreamSync = null;
+            if (currentUserId.HasValue)
+            {
+                upstreamSync = await _upstreamMailboxSync.PullEmailAsync(currentUserId.Value, account.EmailAddress, HttpContext.RequestAborted);
+                if (upstreamSync.Enabled && !upstreamSync.Succeeded)
+                {
+                    var message = $"该邮箱授权识别失败：{upstreamSync.Error ?? "请稍后重试。"}";
+                    if (isMailboxRefresh)
+                        return StatusCode(StatusCodes.Status502BadGateway, new { message });
+                    TempData["ErrorMessage"] = message;
+                    return RedirectToAction(nameof(Index));
+                }
+            }
+
             if (lookbackDays.HasValue)
                 account.MailboxSyncLookbackDays = lookbackDays.Value;
             if (loadMore && folderCategory.HasValue)
@@ -1579,13 +1592,25 @@ namespace MailArchiver.Controllers
                     state = queueStatus.State.ToString(),
                     requestedAt = queueStatus.State == MailSyncQueueState.Running
                         ? null
-                        : requestedAt.ToString("O")
+                        : requestedAt.ToString("O"),
+                    platformSync = upstreamSync is null || !upstreamSync.Enabled
+                        ? null
+                        : new
+                        {
+                            upstreamSync.Created,
+                            upstreamSync.Updated,
+                            skipped = upstreamSync.Rejected,
+                            message = upstreamSync.Summary
+                        }
                 });
             }
 
-            TempData["SuccessMessage"] = queueStatus.State == MailSyncQueueState.Running
+            var queueMessage = queueStatus.State == MailSyncQueueState.Running
                 ? "该邮箱正在同步，页面会自动更新。"
                 : "已优先加入同步队列，页面会自动更新。";
+            TempData["SuccessMessage"] = string.IsNullOrWhiteSpace(upstreamSync?.Summary)
+                ? queueMessage
+                : $"{upstreamSync.Summary} {queueMessage}";
 
             return RedirectToAction(nameof(Index));
         }
@@ -1615,8 +1640,12 @@ namespace MailArchiver.Controllers
                 kind = status.Kind?.ToString(),
                 job = latestJob is null ? null : new
                 {
+                    jobId = latestJob.JobId,
                     status = latestJob.Status.ToString(),
-                    latestJob.ErrorMessage
+                    errorCode = latestJob.ErrorCode,
+                    message = latestJob.Status is SyncJobStatus.Failed or SyncJobStatus.Cancelled or SyncJobStatus.RateLimited
+                        ? MailConnectionFailurePolicy.SafeMessage(latestJob.ErrorCode)
+                        : null
                 }
             });
         }
@@ -1640,11 +1669,15 @@ namespace MailArchiver.Controllers
                 kind = status.Kind?.ToString(),
                 job = latestJob is null ? null : new
                 {
+                    jobId = latestJob.JobId,
                     status = latestJob.Status.ToString(),
                     latestJob.NewEmails,
                     latestJob.ProcessedEmails,
                     latestJob.FailedEmails,
-                    latestJob.ErrorMessage,
+                    errorCode = latestJob.ErrorCode,
+                    message = latestJob.Status is SyncJobStatus.Failed or SyncJobStatus.Cancelled or SyncJobStatus.RateLimited
+                        ? MailConnectionFailurePolicy.SafeMessage(latestJob.ErrorCode)
+                        : null,
                     completed = latestJob.Completed?.ToString("O")
                 }
             });
@@ -1661,20 +1694,6 @@ namespace MailArchiver.Controllers
                 return NotFound();
             }
 
-            var authService = HttpContext.RequestServices.GetRequiredService<IAuthenticationService>();
-            var currentUserId = authService.GetCurrentUserId(HttpContext);
-            if (currentUserId.HasValue && !IsLocalApp())
-            {
-                var upstream = await _upstreamMailboxSync.PullAsync(currentUserId.Value, HttpContext.RequestAborted);
-                if (upstream.Enabled && !upstream.Succeeded)
-                {
-                    if (upstream.RequiresLogin)
-                        return RedirectToAction("Login", "Auth", new { returnUrl = Url.Action(nameof(Resync), new { id }) });
-                    TempData["ErrorMessage"] = $"全量同步未开始：{upstream.Error}";
-                    return RedirectToAction(nameof(Details), new { id });
-                }
-            }
-
             var account = await _context.MailAccounts.FindAsync(id);
             if (account == null)
             {
@@ -1688,33 +1707,42 @@ namespace MailArchiver.Controllers
                 return RedirectToAction(nameof(Details), new { id });
             }
 
+            var authService = HttpContext.RequestServices.GetRequiredService<IAuthenticationService>();
+            var currentUserId = authService.GetCurrentUserId(HttpContext);
+            UpstreamMailboxSyncResult? upstreamSync = null;
+            if (currentUserId.HasValue)
+            {
+                upstreamSync = await _upstreamMailboxSync.PullEmailAsync(currentUserId.Value, account.EmailAddress, HttpContext.RequestAborted);
+                if (upstreamSync.Enabled && !upstreamSync.Succeeded)
+                {
+                    TempData["ErrorMessage"] = $"该邮箱授权识别失败：{upstreamSync.Error ?? "请稍后重试。"}";
+                    return RedirectToAction(nameof(Details), new { id });
+                }
+            }
+
             try
             {
-                var provider = await _providerFactory.GetServiceForAccountAsync(id);
-                var success = await provider.ResyncAccountAsync(id);
-                if (success)
+                if (!account.IsEnabled)
                 {
-                    // Log the resync action
-                    var resyncAuthService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
-                    var currentUsername = resyncAuthService?.GetCurrentUserDisplayName(HttpContext);
-                    if (!string.IsNullOrEmpty(currentUsername))
-                    {
-                        await _accessLogService.LogAccessAsync(currentUsername, AccessLogType.Account, 
-                            searchParameters: $"Started resync for mail account: {account.Name}",
-                            mailAccountId: account.Id);
-                    }
-                    
-                    TempData["SuccessMessage"] = _localizer["FullSyncStarted", account.Name].Value;
+                    TempData["ErrorMessage"] = "请先启用该邮箱，再执行全量同步。";
+                    return RedirectToAction(nameof(Details), new { id });
                 }
-                else
-                {
-                    TempData["ErrorMessage"] = _localizer["FullSyncFailed", account.Name].Value;
-                }
+
+                _onDemandSyncQueue.Enqueue(id, MailSyncRequestPriority.Interactive,
+                    MailSyncRequestKind.FullResync);
+                var currentUsername = authService.GetCurrentUserDisplayName(HttpContext);
+                if (!string.IsNullOrEmpty(currentUsername))
+                    await _accessLogService.LogAccessAsync(currentUsername, AccessLogType.Account,
+                        searchParameters: $"Queued resync for mail account: {account.Name}",
+                        mailAccountId: account.Id);
+                TempData["SuccessMessage"] = string.IsNullOrWhiteSpace(upstreamSync?.Summary)
+                    ? "全量同步已加入手动队列，稍后可查看同步状态。"
+                    : $"{upstreamSync.Summary} 全量同步已加入手动队列，稍后可查看同步状态。";
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error starting resync for account {AccountName}: {Message}", account.Name, ex.Message);
-                TempData["ErrorMessage"] = $"{_localizer["FullSyncError"]}: {ex.Message}";
+                TempData["ErrorMessage"] = "全量同步未能加入队列，请稍后重试。";
             }
 
             return RedirectToAction(nameof(Details), new { id });

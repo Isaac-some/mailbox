@@ -241,6 +241,7 @@
         }
         let sawActiveSync = '@syncState' === 'Queued' || '@syncState' === 'Running';
         let startedAfter = null;
+        let preparingAuthorization = false;
 
         const showSyncError = (message) => {
             if (!syncError) return;
@@ -250,9 +251,7 @@
 
         const friendlySyncError = (message) => {
             const text = typeof message === 'string' ? message.trim() : '';
-            return text && /[\u3400-\u9fff]/.test(text)
-                ? text
-                : '连接失败，请检查网络、VPN、代理或邮箱服务是否可访问。';
+            return text || '邮箱同步失败，请检查邮箱设置后重试。';
         };
 
         const setStatus = (active, message = '正在扫描新邮件，当前页面可继续查看。') => {
@@ -268,7 +267,8 @@
 
             submitButton.disabled = true;
             if (syncError) syncError.hidden = true;
-            setStatus(true);
+            preparingAuthorization = true;
+            setStatus(true, '正在优先识别该邮箱授权，完成后将刷新邮件…');
             try {
                 const response = await fetch(form.action, {
                     method: 'POST',
@@ -282,8 +282,13 @@
                 const result = await response.json().catch(() => ({}));
                 if (!response.ok) throw new Error(result.message || '暂时无法启动同步，请稍后再试。');
                 startedAfter = result.requestedAt || null;
+                preparingAuthorization = false;
                 sawActiveSync = true;
+                if (result.platformSync?.message) {
+                    setStatus(true, `${result.platformSync.message} 正在扫描新邮件，当前页面可继续查看。`);
+                }
             } catch (error) {
+                preparingAuthorization = false;
                 sawActiveSync = false;
                 setStatus(false);
                 showSyncError(error.message || '暂时无法启动同步，请稍后再试。');
@@ -311,6 +316,7 @@
         }
 
         const watch = async () => {
+            if (preparingAuthorization) return;
             try {
                 const body = new URLSearchParams({
                     id: accountId,
@@ -331,9 +337,9 @@
                 if (!active && sawActiveSync && payload.job) {
                     sawActiveSync = false;
                     if (payload.job.status === 'Failed') {
-                        showSyncError(friendlySyncError(payload.job.errorMessage));
+                        showSyncError(friendlySyncError(payload.job.message));
                     } else if (payload.job.status === 'Cancelled' || payload.job.status === 'RateLimited') {
-                        showSyncError(payload.job.errorMessage || '同步已取消、超时或受到服务商限流，请稍后重试。');
+                        showSyncError(payload.job.message || '同步已取消、超时或受到服务商限流，请稍后重试。');
                     } else {
                         window.location.reload();
                     }
