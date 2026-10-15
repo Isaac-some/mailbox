@@ -95,8 +95,8 @@ public class LocalAppPackagingPolicyTests
     {
         var source = ReadBundledFile("Info.plist");
 
-        Assert.Contains("<string>2.3.5</string>", source, StringComparison.Ordinal);
-        Assert.Contains("<string>234</string>", source, StringComparison.Ordinal);
+        Assert.Contains("<string>2.3.6</string>", source, StringComparison.Ordinal);
+        Assert.Contains("<string>236</string>", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -104,8 +104,8 @@ public class LocalAppPackagingPolicyTests
     {
         var source = ReadBundledFile("MailAssistant.Windows.csproj");
 
-        Assert.Contains("<Version>2.3.5</Version>", source, StringComparison.Ordinal);
-        Assert.Contains("<FileVersion>2.3.5.0</FileVersion>", source, StringComparison.Ordinal);
+        Assert.Contains("<Version>2.3.6</Version>", source, StringComparison.Ordinal);
+        Assert.Contains("<FileVersion>2.3.6.0</FileVersion>", source, StringComparison.Ordinal);
         Assert.Contains("<ApplicationIcon>AppIcon.ico</ApplicationIcon>", source, StringComparison.Ordinal);
     }
 
@@ -236,7 +236,7 @@ public class LocalAppPackagingPolicyTests
         Assert.DoesNotContain("return View(Array.Empty<MailAccountViewModel>())", indexAction, StringComparison.Ordinal);
         Assert.Contains(".Skip((page - 1) * pageSize)", indexAction, StringComparison.Ordinal);
         Assert.Contains(".Take(pageSize)", indexAction, StringComparison.Ordinal);
-        Assert.Contains("邮箱账号默认分页显示", page, StringComparison.Ordinal);
+        Assert.Contains("data-initialization-status", page, StringComparison.Ordinal);
     }
 
     [Fact]

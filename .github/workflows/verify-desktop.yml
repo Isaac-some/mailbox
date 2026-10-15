@@ -1,0 +1,54 @@
+name: Verify Desktop Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-package-startup:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Verify desktop regression tests on Windows
+        run: dotnet test tests/MailArchiver.Tests/MailArchiver.Tests.csproj -c Release --filter "FullyQualifiedName~LocalApp|FullyQualifiedName~UpstreamMailboxSyncServiceTests|FullyQualifiedName~MailTransportPolicyTests" --logger "trx;LogFileName=windows.trx" --results-directory TestResults
+      - name: Build the complete Windows package
+        shell: pwsh
+        env:
+          MAIL_ASSISTANT_UPSTREAM_TOKEN: ci-inert-validation-token
+        run: ./windows-app/build-windows.ps1 -OutputDirectory "$env:RUNNER_TEMP/mailbox-package"
+      - name: Launch the native app with isolated storage
+        shell: pwsh
+        run: |
+          $env:MAIL_ASSISTANT_DATA_DIRECTORY = "$env:RUNNER_TEMP/mailbox-validation"
+          $env:MAIL_ASSISTANT_PORT = '5139'
+          $env:UpstreamMailboxSync__Enabled = 'false'
+          $app = Start-Process "$env:RUNNER_TEMP/mailbox-package/邮箱助手.exe" -PassThru
+          try {
+            $ready = $false
+            for ($attempt = 0; $attempt -lt 60; $attempt++) {
+              if ($app.HasExited) { throw 'Native app exited before its local server was ready.' }
+              try {
+                $page = Invoke-WebRequest 'http://127.0.0.1:5139/MailAccounts' -TimeoutSec 2
+                if ($page.StatusCode -eq 200 -and $page.Content.Contains('data-initialization-status')) { $ready = $true; break }
+              } catch { }
+              Start-Sleep -Seconds 1
+            }
+            if (-not $ready) { throw 'Packaged Windows app did not become ready.' }
+            $status = Invoke-RestMethod 'http://127.0.0.1:5139/MailAccounts/InitializationStatus'
+            if ($status.enabled) { throw 'The isolated CI test must not call the live platform.' }
+            if (-not (Test-Path "$env:MAIL_ASSISTANT_DATA_DIRECTORY/mail-archive.sqlite")) { throw 'Isolated SQLite database was not created.' }
+            'PASS: Windows native launcher, packaged runtime, local HTTP, SQLite, initialization status.' | Out-File TestResults/windows-startup.txt
+          } finally {
+            if (-not $app.HasExited) { & taskkill /PID $app.Id /T /F }
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-desktop-validation
+          path: TestResults/

@@ -36,7 +36,7 @@ public sealed class OutboundMailController : Controller
     }
 
     [HttpGet]
-    public async Task<IActionResult> Index(int? accountId, string? accountQuery)
+    public async Task<IActionResult> Index(int? accountId, string? accountQuery, int? replyToEmailId = null)
     {
         if (!_options.Enabled)
             return NotFound();
@@ -46,6 +46,25 @@ public sealed class OutboundMailController : Controller
             AccountId = accountId ?? 0,
             AccountQuery = accountQuery?.Trim()
         };
+        if (replyToEmailId.HasValue)
+        {
+            var userId = _authentication.GetCurrentUserId(HttpContext);
+            if (!userId.HasValue) return NotFound();
+            var isAdmin = await IsAdministratorAsync(userId.Value, HttpContext.RequestAborted);
+            var original = await _context.ArchivedEmails.AsNoTracking()
+                .Where(email => email.Id == replyToEmailId.Value
+                    && (isAdmin || email.MailAccount.UserMailAccounts.Any(link => link.UserId == userId.Value)))
+                .Select(email => new { email.MailAccountId, email.From, email.To, email.Subject, email.Body, email.IsOutgoing })
+                .FirstOrDefaultAsync(HttpContext.RequestAborted);
+            if (original is null) return NotFound();
+            model.AccountId = original.MailAccountId;
+            var recipient = original.IsOutgoing ? original.To : original.From;
+            if (InternetAddressList.TryParse(recipient, out var addresses))
+                model.To = string.Join(", ", addresses.Mailboxes.Select(mailbox => mailbox.Address));
+            model.Subject = original.Subject.StartsWith("Re:", StringComparison.OrdinalIgnoreCase)
+                ? original.Subject : "Re: " + original.Subject;
+            model.Body = "\n\n----- 原邮件 -----\n" + original.Body;
+        }
         await PopulateOptionsAsync(model, model.AccountQuery);
         if (model.SendingAccounts.Count == 0)
         {
@@ -72,7 +91,7 @@ public sealed class OutboundMailController : Controller
 
         var to = ParseRecipients(model.To, nameof(model.To));
         var cc = ParseRecipients(model.Cc, nameof(model.Cc));
-        if (model.Subject.Contains('\r') || model.Subject.Contains('\n'))
+        if (model.Subject?.Contains('\r') == true || model.Subject?.Contains('\n') == true)
             ModelState.AddModelError(nameof(model.Subject), "主题不能包含换行符。");
         ValidateAttachments(model);
 
@@ -141,7 +160,9 @@ public sealed class OutboundMailController : Controller
         {
             var parsed = InternetAddressList.Parse(value.Replace(';', ','));
             var addresses = parsed.Mailboxes.Select(mailbox => mailbox.Address).ToList();
-            if (addresses.Count == 0 || parsed.Count != addresses.Count)
+            if (addresses.Count == 0 || parsed.Count != addresses.Count
+                || addresses.Any(address => !address.Contains('@')
+                    || !System.Net.Mail.MailAddress.TryCreate(address, out _)))
                 throw new FormatException();
             return addresses;
         }

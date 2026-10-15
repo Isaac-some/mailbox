@@ -8,11 +8,64 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using MimeKit;
+using MailArchiver.ViewModels;
 
 namespace MailArchiver.Tests.LocalApp;
 
 public class LocalAppSqliteRegressionTests
 {
+    [Fact]
+    public async Task Local_attachment_bytes_survive_reopen_and_eml_export()
+    {
+        await using var database = await CreateDatabaseAsync();
+        var account = await SeedAccountAsync(database.Context);
+        var payload = System.Text.Encoding.UTF8.GetBytes("中文附件\nexact bytes\0\u0001");
+        var message = new MimeMessage { Subject = "attachment round trip", MessageId = "round-trip@test", Date = DateTimeOffset.UtcNow };
+        message.From.Add(MailboxAddress.Parse("sender@example.com"));
+        message.To.Add(MailboxAddress.Parse(account.EmailAddress));
+        var body = new BodyBuilder { TextBody = "attachment verification" };
+        body.Attachments.Add("原文件.bin", payload);
+        message.Body = body.ToMessageBody();
+        var service = CreateService(database.Context);
+        Assert.True(await service.ArchiveEmailAsync(account, message, false, "INBOX"));
+        database.Context.ChangeTracker.Clear();
+        var archived = await database.Context.ArchivedEmails.Include(e => e.Attachments).SingleAsync();
+        Assert.Equal(payload, Assert.Single(archived.Attachments).Content);
+        var exported = await service.ExportEmailsAsync(new ExportViewModel { EmailId = archived.Id });
+        using var stream = new MemoryStream(exported);
+        var mime = await MimeMessage.LoadAsync(stream);
+        var file = Assert.IsType<MimePart>(Assert.Single(mime.Attachments));
+        using var decoded = new MemoryStream();
+        await file.Content.DecodeToAsync(decoded);
+        Assert.Equal(payload, decoded.ToArray());
+    }
+
+    [Fact]
+    public async Task Refresh_repairs_legacy_empty_attachment_without_duplicating_the_email()
+    {
+        await using var database = await CreateDatabaseAsync();
+        var account = await SeedAccountAsync(database.Context);
+        var email = BuildEmail(account, "old cache", DateTime.UtcNow);
+        var payload = new byte[] { 0, 1, 2, 254, 255 };
+        email.HasAttachments = true;
+        email.Attachments.Add(new EmailAttachment { FileName = "restore.bin", ContentType = "application/octet-stream", Size = payload.Length });
+        database.Context.ArchivedEmails.Add(email);
+        await database.Context.SaveChangesAsync();
+        var message = new MimeMessage { Subject = email.Subject, MessageId = email.MessageId, Date = DateTimeOffset.UtcNow };
+        message.From.Add(MailboxAddress.Parse(email.From));
+        message.To.Add(MailboxAddress.Parse(email.To));
+        var body = new BodyBuilder { TextBody = email.Body };
+        body.Attachments.Add("restore.bin", payload);
+        message.Body = body.ToMessageBody();
+        var service = CreateService(database.Context);
+        Assert.False(await service.ArchiveEmailAsync(account, message, false, "INBOX"));
+        database.Context.ChangeTracker.Clear();
+        var saved = await database.Context.ArchivedEmails.Include(e => e.Attachments).SingleAsync();
+        Assert.Equal(email.Id, saved.Id);
+        Assert.Equal(payload, Assert.Single(saved.Attachments).Content);
+    }
+
     [Fact]
     public async Task Existing_sqlite_archive_adds_only_redacted_failure_records_and_expires_old_rows()
     {

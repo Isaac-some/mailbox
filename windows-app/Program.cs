@@ -74,7 +74,8 @@ internal static class Program
 
 internal sealed class MainForm : Form
 {
-    private const int LocalPort = 5180;
+    private static readonly int LocalPort = int.TryParse(Environment.GetEnvironmentVariable("MAIL_ASSISTANT_PORT"), out var port)
+        && port is >= 1024 and <= 65535 ? port : 5180;
     private const string AppName = "邮箱助手";
 
     private enum WindowMode
@@ -114,7 +115,7 @@ internal sealed class MainForm : Form
     private readonly ToolStripMenuItem _compactWindowMenuItem = new("手机窄窗");
     private readonly ToolStripMenuItem _alwaysOnTopMenuItem = new("始终置顶");
 
-    private readonly string _dataDirectory = Path.Combine(
+    private readonly string _dataDirectory = Environment.GetEnvironmentVariable("MAIL_ASSISTANT_DATA_DIRECTORY") ?? Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "MailAssistant");
     private readonly string _serverDirectory = Path.Combine(AppContext.BaseDirectory, "server");
@@ -329,6 +330,7 @@ internal sealed class MainForm : Form
 
     private void MigrateExistingDataIfNeeded()
     {
+        if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("MAIL_ASSISTANT_DATA_DIRECTORY"))) return;
         if (Directory.Exists(_dataDirectory))
         {
             return;
@@ -385,7 +387,7 @@ internal sealed class MainForm : Form
         startInfo.Environment["MAIL_ASSISTANT_DATA_DIRECTORY"] = _dataDirectory;
         startInfo.Environment["MAIL_ASSISTANT_FACTORY_RESET_MARKER"] = ResetMarkerPath;
         startInfo.Environment["ReleaseNotes__AppVersion"] =
-            typeof(Program).Assembly.GetName().Version?.ToString(3) ?? "2.3.5";
+            typeof(Program).Assembly.GetName().Version?.ToString(3) ?? "2.3.6";
         startInfo.Environment["ConnectionStrings__DefaultConnection"] = $"Data Source={Path.Combine(_dataDirectory, "mail-archive.sqlite")}";
         startInfo.Environment["DataProtection__KeyPath"] = Path.Combine(_dataDirectory, "keys");
         startInfo.Environment["CredentialEncryption__KeyFilePath"] = credentialKeyPath;

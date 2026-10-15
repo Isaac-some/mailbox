@@ -9,7 +9,7 @@
     var canManage = isAdmin || isSelfManager;
     var search = ViewBag.AccountSearch as string ?? string.Empty;
     var currentPage = (int?)ViewBag.AccountPage ?? 1;
-    var pageSize = (int?)ViewBag.AccountPageSize ?? 50;
+    var pageSize = (int?)ViewBag.AccountPageSize ?? 20;
     var total = (int?)ViewBag.AccountTotalCount ?? Model.Count();
     var totalPages = (int?)ViewBag.AccountTotalPages ?? 1;
     var rowNumber = (currentPage - 1) * pageSize;
@@ -18,12 +18,15 @@
 }
 
 <div class="account-page">
+    <div class="alert alert-info" role="status" aria-live="polite" data-initialization-status
+         data-status-url="@Url.Action("InitializationStatus", "MailAccounts")"
+         data-loaded="@total" data-search="@search">正在初始化，正在检索与拉取邮箱信息…</div>
     <div class="account-sync-notice d-none" id="accountSyncNotice" role="status" aria-live="polite"></div>
     <header class="account-page__header">
         <div>
             <p class="account-page__eyebrow">邮箱助手</p>
             <h1>邮箱账号</h1>
-            <p class="account-page__summary">邮箱账号默认分页显示，也可以搜索邮箱地址或名称。</p>
+            <p class="account-page__summary">邮箱账号自动加载；搜索完整邮箱地址可优先拉取并查看邮件。</p>
         </div>
         <div class="account-page__actions">
             @if (canManage)
@@ -78,6 +81,10 @@
     {
         <div class="alert alert-warning mt-2" role="status">该邮箱授权识别未完成：@prioritySyncError</div>
     }
+    @if (ViewBag.PriorityAccountId is int priorityAccountId)
+    {
+        <div class="alert alert-info" role="status" data-priority-account="@priorityAccountId" data-requested-at="@ViewBag.PriorityRequestedAt">已找到邮箱，正在优先拉取邮件，可点击“查看”先行阅读。</div>
+    }
 
     <section class="account-table-wrap">
         <div class="table-responsive">
@@ -104,7 +111,7 @@
                             <td data-label="状态">
                                 @if (item.IsEnabled)
                                 {
-                                    <span class="status-badge status-badge--ok"><span aria-hidden="true"></span>正常</span>
+                                    <span class="status-badge @(item.CanReceive || item.CanSend ? "status-badge--ok" : "status-badge--off")"><span aria-hidden="true"></span>@(item.CanReceive || item.CanSend ? "可使用" : "待验证")</span>
                                 }
                                 else
                                 {
@@ -195,8 +202,8 @@
                 <i class="bi bi-inbox" aria-hidden="true"></i>
                 @if (string.IsNullOrWhiteSpace(search))
                 {
-                    <strong>暂无邮箱账号</strong>
-                    <span>导入文件或连接平台接口后，账号会显示在这里。</span>
+                    <strong>邮箱列表尚未加载</strong>
+                    <span>应用会自动拉取邮箱；也可以直接搜索完整邮箱地址优先查看。</span>
                 }
                 else
                 {
@@ -299,6 +306,7 @@
 </div>
 
 @section Scripts {
+    <script src="~/js/mailbox-initialization.js" asp-append-version="true"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function () {
             const syncNotice = document.getElementById('accountSyncNotice');
@@ -309,6 +317,8 @@
                 const button = form.querySelector('button[type="submit"]');
                 button.disabled = true;
                 button.textContent = '正在优先识别该邮箱授权…';
+                syncNotice.textContent = '正在检索与拉取信息：优先识别该邮箱授权并拉取邮件…';
+                syncNotice.className = 'account-sync-notice account-sync-notice--progress';
             });
 
             function showSyncMessage(resultElement, message, tone) {
@@ -357,7 +367,10 @@
                 throw new Error('同步仍在后台进行，可稍后回来查看邮件。');
             }
 
-            document.querySelectorAll('.account-sync-form').forEach(form => {
+            function bindSyncForms() {
+              document.querySelectorAll('.account-sync-form').forEach(form => {
+                if (form.dataset.syncBound) return;
+                form.dataset.syncBound = 'true';
                 form.addEventListener('submit', async event => {
                     event.preventDefault();
                     const button = form.querySelector('.account-sync-button');
@@ -386,6 +399,25 @@
                     }
                 });
             });
+
+            }
+            bindSyncForms();
+            document.addEventListener('mailbox:accounts-updated', bindSyncForms);
+
+            const priorityAccount = document.querySelector('[data-priority-account]');
+            if (priorityAccount) {
+                const form = document.querySelector(`.account-sync-form[data-account-id="${priorityAccount.dataset.priorityAccount}"]`);
+                const result = document.querySelector(`[data-sync-result="${priorityAccount.dataset.priorityAccount}"]`);
+                if (form && result) {
+                    showSyncMessage(result, '正在优先拉取邮件…', 'progress');
+                    waitForSync(form, priorityAccount.dataset.requestedAt).then(() => {
+                        priorityAccount.textContent = result.textContent;
+                    }).catch(error => {
+                        showSyncMessage(result, error.message || '邮件拉取暂未完成，请重试。', 'error');
+                        priorityAccount.textContent = result.textContent;
+                    });
+                }
+            }
 
             const deleteModal = document.getElementById('deleteAccountModal');
             const deleteForm = document.getElementById('deleteAccountForm');

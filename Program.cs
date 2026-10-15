@@ -216,6 +216,7 @@ builder.Services.AddSingleton<ICsvImportService>(provider => provider.GetRequire
 builder.Services.AddHostedService<CsvImportService>(provider => provider.GetRequiredService<CsvImportService>());
 builder.Services.AddScoped<MailArchiver.Services.IMailCredentialVerifier, MailArchiver.Services.MailCredentialVerifier>();
 builder.Services.AddScoped<MailArchiver.Services.IUpstreamMailboxSyncService, MailArchiver.Services.UpstreamMailboxSyncService>();
+builder.Services.AddSingleton<UpstreamMailboxSyncProgress>();
 builder.Services.AddSingleton<MailArchiver.Services.IUpstreamMailboxConnectionStore, MailArchiver.Services.UpstreamMailboxConnectionStore>();
 builder.Services.AddSingleton<MailArchiver.Services.IUpstreamMailboxSyncCursorStore, MailArchiver.Services.UpstreamMailboxSyncCursorStore>();
 builder.Services.AddSingleton<MailArchiver.Services.ILocalAccessService, MailArchiver.Services.LocalAccessService>();

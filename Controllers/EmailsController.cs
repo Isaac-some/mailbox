@@ -461,6 +461,8 @@ namespace MailArchiver.Controllers
                 return View("Details404");
             }
 
+            if (attachment.Size > 0 && attachment.Content.Length == 0)
+                return StatusCode(409, "附件尚未完整缓存，请刷新该邮箱后重新下载。");
             return File(attachment.Content, attachment.ContentType, attachment.FileName);
         }
 
@@ -478,6 +480,9 @@ namespace MailArchiver.Controllers
                 _logger.LogWarning("Attachment with ID {AttachmentId} for email {EmailId} not found", attachmentId, emailId);
                 return View("Details404");
             }
+
+            if (attachment.Size > 0 && attachment.Content.Length == 0)
+                return StatusCode(409, "附件尚未完整缓存，请刷新该邮箱后重新预览。");
 
             // For PDF files, we need to ensure they can be displayed inline
             if (attachment.ContentType == "application/pdf")
@@ -511,6 +516,12 @@ namespace MailArchiver.Controllers
             if (!email.Attachments.Any())
             {
                 TempData["ErrorMessage"] = "This email has no attachments.";
+                return RedirectToAction(nameof(Details), new { id });
+            }
+
+            if (email.Attachments.Any(a => a.Size > 0 && a.Content.Length == 0))
+            {
+                TempData["ErrorMessage"] = "附件尚未完整缓存，请刷新该邮箱后重新下载。";
                 return RedirectToAction(nameof(Details), new { id });
             }
 
@@ -605,7 +616,7 @@ namespace MailArchiver.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error exporting email {EmailId} as {Format}", id, format);
-                TempData["ErrorMessage"] = $"Export failed: {ex.Message}";
+                TempData["ErrorMessage"] = "导出未完成，请先刷新该邮箱，确认邮件与附件已完整拉取后重试。";
                 return RedirectToAction("Details", new { id });
             }
             finally

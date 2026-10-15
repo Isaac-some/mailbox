@@ -24,7 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTo
     }
 
     private let appName = "邮箱助手"
-    private let localPort = 5180
+    private let localPort = Int(ProcessInfo.processInfo.environment["MAIL_ASSISTANT_PORT"] ?? "5180") ?? 5180
     private let defaults = UserDefaults.standard
     private var window: NSWindow!
     private var webView: WKWebView!
@@ -41,6 +41,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTo
     private var downloadDestinations: [ObjectIdentifier: URL] = [:]
 
     private var dataDirectory: URL {
+        if let isolated = ProcessInfo.processInfo.environment["MAIL_ASSISTANT_DATA_DIRECTORY"], !isolated.isEmpty {
+            return URL(fileURLWithPath: isolated, isDirectory: true).standardizedFileURL
+        }
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return base.appendingPathComponent("MailAssistant", isDirectory: true)
     }
@@ -50,18 +53,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTo
     }
 
     private var webKitDataDirectory: URL {
+        if ProcessInfo.processInfo.environment["MAIL_ASSISTANT_DATA_DIRECTORY"] != nil {
+            return dataDirectory.appendingPathComponent("webkit", isDirectory: true)
+        }
         let base = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
         return base.appendingPathComponent("WebKit", isDirectory: true)
             .appendingPathComponent(Bundle.main.bundleIdentifier ?? "com.mailbox.assistant", isDirectory: true)
     }
 
     private var httpStorageDirectory: URL {
+        if ProcessInfo.processInfo.environment["MAIL_ASSISTANT_DATA_DIRECTORY"] != nil {
+            return dataDirectory.appendingPathComponent("http-storage", isDirectory: true)
+        }
         let base = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
         return base.appendingPathComponent("HTTPStorages", isDirectory: true)
             .appendingPathComponent(Bundle.main.bundleIdentifier ?? "com.mailbox.assistant", isDirectory: true)
     }
 
     private var cacheDirectory: URL {
+        if ProcessInfo.processInfo.environment["MAIL_ASSISTANT_DATA_DIRECTORY"] != nil {
+            return dataDirectory.appendingPathComponent("cache", isDirectory: true)
+        }
         let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         return base.appendingPathComponent(Bundle.main.bundleIdentifier ?? "com.mailbox.assistant", isDirectory: true)
     }
@@ -157,7 +169,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTo
 
     private func configureWindow() {
         let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .default()
+        configuration.websiteDataStore = ProcessInfo.processInfo.environment["MAIL_ASSISTANT_DATA_DIRECTORY"] == nil ? .default() : .nonPersistent()
         webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = self
         webView.uiDelegate = self
@@ -369,7 +381,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTo
             environment["MAIL_ASSISTANT_DATA_DIRECTORY"] = dataDirectory.path
             environment["MAIL_ASSISTANT_FACTORY_RESET_MARKER"] = resetMarker.path
             environment["ReleaseNotes__AppVersion"] = Bundle.main.object(
-                forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.3.5"
+                forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.3.6"
             environment["DOTNET_ROOT"] = runtime.deletingLastPathComponent().path
             environment["DOTNET_MULTILEVEL_LOOKUP"] = "0"
             environment["DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE"] = "false"
@@ -389,6 +401,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTo
     }
 
     private func migrateExistingDataIfNeeded() throws {
+        if ProcessInfo.processInfo.environment["MAIL_ASSISTANT_DATA_DIRECTORY"] != nil { return }
         let fileManager = FileManager.default
         guard !fileManager.fileExists(atPath: dataDirectory.path) else { return }
 

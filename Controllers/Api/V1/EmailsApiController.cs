@@ -162,6 +162,8 @@ public class EmailsApiController : ApiControllerBase
 
         await _accessLogService.LogAccessAsync(CurrentUsername, AccessLogType.Download, emailId: id);
 
+        if (att.Size > 0 && att.Content.Length == 0)
+            return Problem(statusCode: 409, title: "Attachment content is not cached; refresh the mailbox before downloading.");
         return File(att.Content, att.ContentType, att.FileName);
     }
 

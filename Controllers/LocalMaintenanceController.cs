@@ -135,6 +135,11 @@ public sealed class LocalMaintenanceController : Controller
             return Unauthorized();
 
         var result = await _upstreamSync.PullAsync(userId.Value, cancellationToken);
+        if (result.IsBusy)
+        {
+            TempData["SuccessMessage"] = result.Summary;
+            return RedirectToAction("Index", "MailAccounts");
+        }
         if (!result.Enabled)
         {
             TempData["ErrorMessage"] = "交付包未启用平台邮箱同步，请联系交付方。";

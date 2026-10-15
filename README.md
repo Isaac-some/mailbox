@@ -1,6 +1,6 @@
 # 邮箱助手源码
 
-本地版支持 Gmail、Yahoo、GMX、Outlook 和自定义域名邮箱收发件。自定义域名会先尝试标准 Autoconfig，失败后回退到 `imap.<域名>` 与 `smtp.<域名>`，并以用户主动连接验证结果为准。创建、编辑和导入不会自动连接邮箱；只有打开邮箱或点击刷新时才同步邮件。写信支持纯文本、抄送和多个附件（默认最多 10 个、合计 10MB）。Gmail 优先应用专用密码，Yahoo/GMX 优先 IMAP 密码认证，失败后才尝试可用 OAuth；Outlook 优先 OAuth Refresh Token，收件 OAuth 失败后回退 IMAP 密码，发件按 Graph OAuth → SMTP OAuth → SMTP 密码依次尝试。
+本地版支持 Gmail、Yahoo、GMX、Outlook 和自定义域名邮箱收发件。自定义域名会先尝试标准 Autoconfig，失败后回退到 `imap.<域名>` 与 `smtp.<域名>`，并以用户主动连接验证结果为准。创建、编辑和导入不会立即连接邮箱；打开邮箱、点击刷新或精确搜索完整邮箱地址时，会优先同步邮件。写信支持纯文本、抄送和多个附件（默认最多 10 个、合计 10MB）。Gmail 优先应用专用密码，Yahoo/GMX 优先 IMAP 密码认证，失败后才尝试可用 OAuth；Outlook 优先 OAuth Refresh Token，收件 OAuth 失败后回退 IMAP 密码，发件按 Graph OAuth → SMTP OAuth → SMTP 密码依次尝试。
 
 可逐个授权，也可与其他服务商混合导入 `邮箱<TAB>密码<TAB>Client ID<TAB>Refresh Token` 格式的 TXT；程序逐行识别，密码会加密保存，仅在 OAuth 失败时作为回退。收件使用 IMAP，Outlook 发件优先使用 Microsoft Graph `Mail.Send`，再尝试 SMTP OAuth 和 SMTP 密码。浏览器部署版默认关闭发件；Windows/macOS 本地版默认开启。
 
@@ -9,7 +9,7 @@
 在本项目当前目录运行：
 
 ```sh
-cd "/Users/zhaoxiaohandexinwanju/Documents/邮箱助手/mail-archiver-main"
+cd "/Users/isaac/Downloads/邮箱/mailbox"
 dotnet restore MailArchiver.sln
 dotnet test MailArchiver.sln
 dotnet run --project MailArchiver.csproj
@@ -18,7 +18,7 @@ dotnet run --project MailArchiver.csproj
 macOS 一键构建并运行临时测试 App（不会生成 DMG）：
 
 ```sh
-cd "/Users/zhaoxiaohandexinwanju/Documents/邮箱助手/mail-archiver-main"
+cd "/Users/isaac/Downloads/邮箱/mailbox"
 ./script/build_and_run.sh --verify
 ```
 
@@ -35,7 +35,7 @@ cd "/Users/zhaoxiaohandexinwanju/Documents/邮箱助手/mail-archiver-main"
 
 ## 平台邮箱凭据同步
 
-发布版本机 App 不显示登录页。启动时使用打包时注入的租户 token 自动增量拉取账号凭据，用户不需要填写账号、token、服务地址或导入 CSV。
+发布版本机 App 不显示登录页。首次打开即自动拉取，先获取约 20 个邮箱铺满第一页，其余在后台继续初始化；界面显示真实数量及失败原因。输入完整邮箱地址后，即使账号尚未显示，也会优先检索授权、拉取邮件。用户无需填写账号、token、服务地址或导入 CSV。
 
 构建发布包时在终端隐式输入 Token，脚本会把它注入安装包。接口地址已有默认值。Token 会进入最终安装包，因此拿到安装包的人可以提取并使用它；不要把安装包公开发布：
 
@@ -65,7 +65,7 @@ cd "/Users/isaac/Downloads/邮箱/mailbox"
 MAIL_ASSISTANT_UPSTREAM_TOKEN="$(jq -r '.UpstreamMailboxSync.BearerToken' 'local-app/build/邮箱助手.app/Contents/Resources/server/appsettings.Local.json')" bash ./script/build-windows-on-macos.sh
 ```
 
-Windows 交付文件为 `windows-app/build/MailAssistant-Windows-x64-v2.3.5.zip`。解压整个文件夹后双击 `邮箱助手.exe`；不能只复制 exe。
+Windows 交付文件为 `windows-app/build/MailAssistant-Windows-x64-v2.3.6.zip`。解压整个文件夹后双击 `邮箱助手.exe`；不能只复制 exe。
 
 服务地址变化时，再设置 `MAIL_ASSISTANT_UPSTREAM_ENDPOINT` 为完整的 HTTPS 接口地址。缺少 Token 时，发布构建会直接失败。
 
@@ -75,10 +75,10 @@ Windows 交付文件为 `windows-app/build/MailAssistant-Windows-x64-v2.3.5.zip`
 
 ## 后续打包
 
-本次源码交付不包含 DMG/EXE。需要发布时再执行：
+当前版本 v2.3.6 的更新与验收记录见 [发布说明](doc/release-v2.3.6.md) 和 [验收报告](doc/acceptance-20261015.md)。重新打包时执行：
 
 ```sh
-cd "/Users/zhaoxiaohandexinwanju/Documents/邮箱助手/mail-archiver-main"
+cd "/Users/isaac/Downloads/邮箱/mailbox"
 dotnet build --configuration Release
 ./local-app/build-dmg.sh
 ```

@@ -129,7 +129,7 @@ namespace MailArchiver.Controllers
         }
 
         // GET: MailAccounts
-        public async Task<IActionResult> Index(string? q, int page = 1, int pageSize = 50, bool priorityLookup = false)
+        public async Task<IActionResult> Index(string? q, int page = 1, int pageSize = 20, bool priorityLookup = false)
         {
             // Use the authentication service to get user info properly
             var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
@@ -146,6 +146,19 @@ namespace MailArchiver.Controllers
                     var result = await _upstreamMailboxSync.PullEmailAsync(userId.Value, q, HttpContext.RequestAborted);
                     if (result.Enabled && !result.Succeeded)
                         ViewBag.PrioritySyncError = result.Error;
+                    if (result.Enabled && result.Succeeded)
+                    {
+                        var normalizedEmail = q.ToLowerInvariant();
+                        var account = await ManageableMailAccounts().AsNoTracking()
+                            .FirstOrDefaultAsync(a => a.EmailAddress.ToLower() == normalizedEmail);
+                        if (account is { IsEnabled: true } && account.Provider != ProviderType.IMPORT)
+                        {
+                            var requestedAt = DateTime.UtcNow;
+                            var queued = _onDemandSyncQueue.Enqueue(account.Id, MailSyncRequestPriority.Interactive);
+                            ViewBag.PriorityAccountId = account.Id;
+                            ViewBag.PriorityRequestedAt = queued.State == MailSyncQueueState.Running ? null : requestedAt.ToString("O");
+                        }
+                    }
                 }
             }
 
@@ -171,7 +184,7 @@ namespace MailArchiver.Controllers
                     a.EmailAddress.ToLower().Contains(search));
             }
 
-            pageSize = pageSize is 25 or 50 or 100 ? pageSize : 50;
+            pageSize = pageSize is 20 or 25 or 50 or 100 ? pageSize : 20;
             var totalCount = await mailAccountsQuery.CountAsync();
             var totalPages = Math.Max(1, (int)Math.Ceiling(totalCount / (double)pageSize));
             page = Math.Clamp(page, 1, totalPages);
@@ -466,6 +479,7 @@ namespace MailArchiver.Controllers
                     LastSync = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)
                 };
                 mailProviderModule!.PrepareAccount(account);
+                account.CredentialDetectionStatus = "PendingVerification";
 
                 // Validate local retention policy
                 if (account.LocalRetentionDays.HasValue && !account.DeleteAfterDays.HasValue)
@@ -1643,6 +1657,7 @@ namespace MailArchiver.Controllers
                     jobId = latestJob.JobId,
                     status = latestJob.Status.ToString(),
                     errorCode = latestJob.ErrorCode,
+                    newEmails = latestJob.NewEmails,
                     message = latestJob.Status is SyncJobStatus.Failed or SyncJobStatus.Cancelled or SyncJobStatus.RateLimited
                         ? MailConnectionFailurePolicy.SafeMessage(latestJob.ErrorCode)
                         : null
@@ -1681,6 +1696,29 @@ namespace MailArchiver.Controllers
                     completed = latestJob.Completed?.ToString("O")
                 }
             });
+        }
+
+        [HttpGet]
+        [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+        public async Task<IActionResult> InitializationStatus()
+        {
+            var auth = HttpContext.RequestServices.GetRequiredService<IAuthenticationService>();
+            var userId = auth.GetCurrentUserId(HttpContext);
+            if (!userId.HasValue) return Unauthorized();
+            var options = HttpContext.RequestServices.GetRequiredService<IOptions<UpstreamMailboxSyncOptions>>().Value;
+            var progress = HttpContext.RequestServices.GetRequiredService<UpstreamMailboxSyncProgress>().Get(userId.Value);
+            var loaded = await ManageableMailAccounts().CountAsync(HttpContext.RequestAborted);
+            var enabled = options.Enabled;
+            var configured = !string.IsNullOrWhiteSpace(options.BearerToken);
+            var ready = loaded >= 20 || (progress.Started && !progress.Running && progress.Error is null);
+            var message = !configured && enabled ? "交付包缺少平台租户 Token，请联系交付方重新打包。"
+                : progress.Error is not null ? $"拉取暂未完成：{progress.Error} 已加载的邮箱仍可使用。"
+                : ready && progress.Running ? $"已加载 {loaded} 个邮箱，可以开始使用；其余邮箱正在后台拉取。"
+                : progress.Started && !progress.Running ? $"初始化完成，已加载 {loaded} 个邮箱。" + (progress.Rejected > 0 ? $" 已跳过 {progress.Rejected} 条无效记录。" : string.Empty)
+                : "正在初始化，正在检索与拉取邮箱信息；可直接搜索完整邮箱地址优先查看。";
+            return Json(new { enabled, ready, loaded, progress.Total, progress.Rejected,
+                running = configured && (!progress.Started || progress.Running),
+                error = !configured && enabled ? message : progress.Error, message });
         }
 
         // POST: MailAccounts/Resync/5

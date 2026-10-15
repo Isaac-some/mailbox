@@ -25,22 +25,26 @@ namespace MailArchiver.Models
         // these bytes into AttachmentContents and sets this column to NULL.
         public byte[]? LegacyContent { get; set; }
 
-        // Holds the bytes of a freshly created attachment until the
-        // AttachmentDeduplicationInterceptor turns them into a deduplicated
-        // AttachmentContent reference on SaveChanges. Not mapped to the database.
+        // PostgreSQL consumes pending bytes in its deduplication interceptor.
+        // SQLite has no such interceptor and persists the inline column instead.
         private byte[]? _pendingContent;
 
         /// <summary>
         /// Convenience accessor used throughout the codebase.
         /// On read it resolves the bytes from the deduplicated content (preferred),
         /// then the legacy column, then any pending (not yet persisted) bytes.
-        /// On write it stashes the bytes for the dedup interceptor.
+        /// On write it also sets the persisted fallback; the dedup interceptor
+        /// clears that fallback after creating an AttachmentContent reference.
         /// </summary>
         [NotMapped]
         public byte[] Content
         {
             get => AttachmentContent?.Content ?? LegacyContent ?? _pendingContent ?? Array.Empty<byte>();
-            set => _pendingContent = value;
+            set
+            {
+                _pendingContent = value;
+                LegacyContent = value;
+            }
         }
 
         /// <summary>Pending bytes consumed by the dedup interceptor (internal use).</summary>

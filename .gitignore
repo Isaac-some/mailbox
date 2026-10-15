@@ -26,6 +26,7 @@ Data/logs/
 
 # Keep the macOS wrapper source in this repository. Generated packages stay ignored.
 local-app/build/
+local-app/build-v*/
 local-app/.DS_Store
 local-app/AppIcon.png
 

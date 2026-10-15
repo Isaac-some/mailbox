@@ -3,6 +3,9 @@ using System.Security.Cryptography.X509Certificates;
 using MailArchiver.Models;
 using MailArchiver.Services;
 using MailKit.Net.Proxy;
+using MailKit.Net.Imap;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace MailArchiver.Tests.Services;
 
@@ -96,6 +99,30 @@ public class MailTransportPolicyTests
         var route = resolver.Resolve(new Uri("https://imap.example.test:993"));
         Assert.Equal(NetworkRouteType.ExplicitProxy, route.Type);
         Assert.False(route.AllowDirectFallback);
+    }
+
+    [Fact]
+    public async Task Mail_connection_obeys_configured_deadline_even_when_server_never_greets()
+    {
+        using var services = new ServiceCollection()
+            .AddSingleton<IOptions<MailSyncOptions>>(Options.Create(new MailSyncOptions { ConnectionTimeoutSeconds = 1 }))
+            .BuildServiceProvider();
+        var resolver = new NetworkPolicyResolver(new StubNetworkPolicyStore(new NetworkPolicySettings()));
+        var factory = ActivatorUtilities.CreateInstance<NetworkMailProxyFactory>(services, resolver);
+        using var client = new ImapClient();
+        using var stop = new CancellationTokenSource();
+        var connection = factory.ConnectAsync(client, "imap.example.test", 993,
+            token => Task.Delay(Timeout.Infinite, token), stop.Token);
+        try
+        {
+            Assert.Same(connection, await Task.WhenAny(connection, Task.Delay(3000)));
+            await Assert.ThrowsAsync<TimeoutException>(() => connection);
+        }
+        finally
+        {
+            stop.Cancel();
+            try { await connection; } catch { }
+        }
     }
 
     private sealed class StubNetworkPolicyStore(NetworkPolicySettings settings) : INetworkPolicyStore

@@ -953,6 +953,8 @@ namespace MailArchiver.Services.Core
 
         private async Task ExportSingleEmailAsEml(ArchivedEmail email, MemoryStream ms)
         {
+            if (email.Attachments.Any(a => a.Size > 0 && a.Content.Length == 0))
+                throw new InvalidOperationException("附件尚未完整缓存，请刷新该邮箱后重新导出。");
             var message = new MimeMessage();
             message.Subject = email.Subject;
 
@@ -1300,6 +1302,7 @@ namespace MailArchiver.Services.Core
                     _logger.LogInformation("Updated folder for existing email: {Subject} from '{OldFolder}' to '{NewFolder}'",
                         existingEmail.Subject, oldFolder, cleanFolderName);
 
+                await RepairMissingAttachmentContentAsync(existingEmail, message);
                 return false; // E-Mail existiert bereits
             }
 
@@ -1609,6 +1612,41 @@ namespace MailArchiver.Services.Core
                     message.Subject, message.From, ex.Message);
                 return false;
             }
+        }
+
+        private async Task RepairMissingAttachmentContentAsync(ArchivedEmail email, MimeMessage message)
+        {
+            var attachments = await _context.EmailAttachments
+                .Include(a => a.AttachmentContent)
+                .Where(a => a.ArchivedEmailId == email.Id)
+                .ToListAsync();
+            var missing = attachments.Where(a => a.Size > 0 && a.Content.Length == 0).ToList();
+            if (missing.Count == 0 || message.Body == null)
+                return;
+
+            var parts = new List<MimePart>();
+            CollectAllAttachments(message.Body, parts);
+            var repaired = false;
+            foreach (var attachment in missing)
+            {
+                var part = parts.FirstOrDefault(p =>
+                    (!string.IsNullOrEmpty(attachment.ContentId) && p.ContentId == attachment.ContentId)
+                    || (string.IsNullOrEmpty(attachment.ContentId)
+                        && MailContentHelper.CleanText(p.FileName ?? string.Empty) == attachment.FileName));
+                if (part?.Content == null)
+                    continue;
+                using var bytes = new MemoryStream();
+                await part.Content.DecodeToAsync(bytes);
+                if (bytes.Length != attachment.Size)
+                    continue;
+                attachment.AttachmentContent = null;
+                attachment.AttachmentContentId = null;
+                attachment.Content = bytes.ToArray();
+                repaired = true;
+                parts.Remove(part);
+            }
+            if (repaired)
+                await _context.SaveChangesAsync();
         }
 
         private void CollectAllAttachments(MimeEntity entity, List<MimePart> attachments)

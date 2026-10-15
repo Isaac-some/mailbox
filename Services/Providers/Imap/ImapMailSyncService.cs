@@ -1068,6 +1068,9 @@ namespace MailArchiver.Services.Providers.Imap
                         .Where(email =>
                             email.MailAccountId == accountId
                             && summaryMessageIds.Contains(email.MessageId))
+                        .Where(email => !email.Attachments.Any(a => a.Size > 0
+                            && (a.LegacyContent == null || a.LegacyContent.Length == 0)
+                            && (a.AttachmentContent == null || a.AttachmentContent.Content.Length == 0)))
                         .Select(email => email.MessageId)
                         .ToListAsync())
                         .ToHashSet(StringComparer.Ordinal);

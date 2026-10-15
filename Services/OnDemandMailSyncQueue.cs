@@ -300,7 +300,7 @@ public sealed class OnDemandMailSyncQueue : BackgroundService, IOnDemandMailSync
             await provider.SyncMailAccountAsync(account, jobId, entry.Options);
             if (providerModule is not null)
             {
-                var canSend = await providerModule.TestOutgoingConnectionAsync(account, stoppingToken);
+                var canSend = await providerModule.TestOutgoingConnectionAsync(account, timeout.Token);
                 UpdateCredentialCapabilities(account, canReceive: true, canSend: canSend);
                 await dbContext.SaveChangesAsync(stoppingToken);
             }
@@ -317,7 +317,7 @@ public sealed class OnDemandMailSyncQueue : BackgroundService, IOnDemandMailSync
                 var canSend = false;
                 try
                 {
-                    canSend = await providerModule.TestOutgoingConnectionAsync(account, stoppingToken);
+                    canSend = await providerModule.TestOutgoingConnectionAsync(account, timeout.Token);
                 }
                 catch (Exception probeException)
                 {

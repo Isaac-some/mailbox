@@ -78,7 +78,7 @@ public class UpstreamMailboxSyncServiceTests
         Assert.Equal(1, result.Updated);
         Assert.Equal("https://platform.example/api/mailboxes", handler.RequestUri?.GetLeftPart(UriPartial.Path));
         Assert.Contains("page=1", handler.RequestUri?.Query, StringComparison.Ordinal);
-        Assert.Contains("pageSize=1000", handler.RequestUri?.Query, StringComparison.Ordinal);
+        Assert.Contains("pageSize=20", handler.RequestUri?.Query, StringComparison.Ordinal);
         Assert.Equal("Bearer", handler.AuthorizationScheme);
         Assert.Equal("platform-token", handler.AuthorizationParameter);
         Assert.Equal("server-config", handler.InstallationId);
@@ -236,6 +236,92 @@ public class UpstreamMailboxSyncServiceTests
 
         Assert.False(result.Succeeded);
         Assert.Empty(await fixture.Context.MailAccounts.ToListAsync());
+    }
+
+    [Fact]
+    public async Task First_screen_is_saved_before_bulk_fetch_and_search_bypasses_bulk_without_skipping_rows()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var handler = new FirstScreenHandler();
+        var cursor = new FakeCursorStore();
+        var progress = new UpstreamMailboxSyncProgress();
+        var service = new UpstreamMailboxSyncService(new StubHttpClientFactory(handler), fixture.Intake, cursor,
+            Options.Create(new UpstreamMailboxSyncOptions { Enabled = true,
+                Endpoint = "https://platform.example/mailboxes", BearerToken = "test-token" }),
+            NullLogger<UpstreamMailboxSyncService>.Instance, progress);
+        var bulk = service.PullAsync(fixture.UserId);
+        try
+        {
+            await handler.BulkStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(20, await fixture.Context.MailAccounts.CountAsync());
+            Assert.Equal(20, progress.Get(fixture.UserId).Processed);
+            Assert.True(progress.Get(fixture.UserId).Running);
+            Assert.Null(cursor.Cursor);
+            Assert.Equal("page=1&pageSize=20", handler.Requests[0].Query.TrimStart('?'));
+            Assert.Equal("page=1&pageSize=1000", handler.Requests[1].Query.TrimStart('?'));
+            var priority = await service.PullEmailAsync(fixture.UserId, "person59@yahoo.com")
+                .WaitAsync(TimeSpan.FromSeconds(3));
+            Assert.True(priority.Succeeded);
+        }
+        finally { handler.ContinueBulk.TrySetResult(); }
+        var result = await bulk;
+        Assert.True(result.Succeeded);
+        Assert.Equal(60, await fixture.Context.MailAccounts.CountAsync());
+        Assert.Equal("123", cursor.Cursor);
+        Assert.False(progress.Get(fixture.UserId).Running);
+        Assert.Equal(60, progress.Get(fixture.UserId).Processed);
+        Assert.Equal("enc:priority-code", (await fixture.Context.MailAccounts.SingleAsync(a => a.EmailAddress == "person59@yahoo.com")).Password);
+        Assert.True(fixture.Context.ChangeTracker.Entries<MailAccount>().Count() < 20,
+            "A bulk import must release saved accounts instead of scanning an ever-growing tracker on every save.");
+    }
+
+    [Fact]
+    public async Task Cancelled_bootstrap_retains_the_first_screen_without_advancing_cursor()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var handler = new FirstScreenHandler();
+        var cursor = new FakeCursorStore();
+        var progress = new UpstreamMailboxSyncProgress();
+        var service = new UpstreamMailboxSyncService(new StubHttpClientFactory(handler), fixture.Intake, cursor,
+            Options.Create(new UpstreamMailboxSyncOptions { Enabled = true,
+                Endpoint = "https://platform.example/mailboxes", BearerToken = "test-token" }),
+            NullLogger<UpstreamMailboxSyncService>.Instance, progress);
+        using var cancel = new CancellationTokenSource();
+        var bulk = service.PullAsync(fixture.UserId, cancel.Token);
+        await handler.BulkStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        cancel.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => bulk);
+        Assert.Equal(20, await fixture.Context.MailAccounts.CountAsync());
+        Assert.Null(cursor.Cursor);
+        Assert.False(progress.Get(fixture.UserId).Running);
+        Assert.NotNull(progress.Get(fixture.UserId).Error);
+    }
+
+    private sealed class FirstScreenHandler : HttpMessageHandler
+    {
+        public List<Uri> Requests { get; } = [];
+        public TaskCompletionSource BulkStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ContinueBulk { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Requests.Add(request.RequestUri!);
+            var query = System.Web.HttpUtility.ParseQueryString(request.RequestUri!.Query);
+            if (query["email"] is string email)
+                return Json(new { data = new { total = 1, items = new[] { new { email, credential = "priority-code" } } } });
+            var preview = query["pageSize"] == "20";
+            if (!preview)
+            {
+                BulkStarted.TrySetResult();
+                await ContinueBulk.Task.WaitAsync(cancellationToken);
+            }
+            return Json(new { data = new { total = 60, page = 1, pageSize = preview ? 20 : 1000,
+                hasMore = preview, serverTimestamp = preview ? 123 : 456,
+                items = Enumerable.Range(0, preview ? 20 : 60).Select(i => new { email = $"person{i}@yahoo.com", credential = "bulk-code" }) } });
+        }
+        private static HttpResponseMessage Json(object payload) => new(HttpStatusCode.OK)
+        {
+            Content = new StringContent(System.Text.Json.JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
+        };
     }
 
     private sealed class ConcurrentPullHandler : HttpMessageHandler

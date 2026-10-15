@@ -49,7 +49,8 @@ public sealed class MailCredentialIntakeService
         bool enabled,
         CancellationToken cancellationToken = default,
         bool verifyCredential = true,
-        bool allowCrossUserCredentialUpdate = false)
+        bool allowCrossUserCredentialUpdate = false,
+        bool releaseTracking = false)
     {
         if (input is null)
             throw new ArgumentNullException(nameof(input));
@@ -150,6 +151,10 @@ public sealed class MailCredentialIntakeService
         // ownership links. The initial save above is only needed to obtain a
         // database-generated account ID for a newly created account.
         await _context.SaveChangesAsync(cancellationToken);
+
+        // Background imports use a dedicated scope. Keeping every completed
+        // account tracked makes each later SaveChanges rescan the whole import.
+        if (releaseTracking) _context.ChangeTracker.Clear();
 
         return new MailCredentialIntakeResult(
             account,

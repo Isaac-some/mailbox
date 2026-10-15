@@ -1,6 +1,7 @@
 using System.Net;
 using MailArchiver.Models;
 using MailKit.Net.Proxy;
+using Microsoft.Extensions.Options;
 
 namespace MailArchiver.Services;
 
@@ -17,7 +18,8 @@ public interface INetworkMailProxyFactory
 
 public sealed class NetworkMailProxyFactory(
     INetworkPolicyResolver resolver,
-    ILogger<NetworkMailProxyFactory>? logger = null) : INetworkMailProxyFactory
+    ILogger<NetworkMailProxyFactory>? logger = null,
+    IOptions<MailSyncOptions>? options = null) : INetworkMailProxyFactory
 {
     public NetworkRoute Apply(MailKit.IMailService client, string host, int port)
     {
@@ -35,18 +37,26 @@ public sealed class NetworkMailProxyFactory(
         Func<CancellationToken, Task> connect,
         CancellationToken cancellationToken = default)
     {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(options?.Value.ConnectionTimeoutSeconds ?? 180, 1, 180)));
         var route = Apply(client, host, port);
         try
         {
-            await connect(cancellationToken);
+            await connect(deadline.Token);
             return route;
         }
         catch (Exception exception) when (route.AllowDirectFallback && IsUnavailableProxy(exception))
         {
             client.ProxyClient = null;
-            await connect(cancellationToken);
+            try { await connect(deadline.Token); }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && deadline.IsCancellationRequested)
+            { throw new TimeoutException("连接邮箱服务器超时，请检查网络或稍后重试。"); }
             logger?.LogWarning("Mail proxy unavailable for {Host}:{Port}; used device direct connection once", host, port);
             return route with { Type = NetworkRouteType.Direct, Proxy = null };
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && deadline.IsCancellationRequested)
+        {
+            throw new TimeoutException("连接邮箱服务器超时，请检查网络或稍后重试。");
         }
     }
 

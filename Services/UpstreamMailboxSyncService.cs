@@ -14,7 +14,8 @@ public sealed record UpstreamMailboxSyncResult(
     int Updated,
     int Rejected,
     string? Error = null,
-    string? Summary = null)
+    string? Summary = null,
+    bool IsBusy = false)
 {
     public bool Succeeded => string.IsNullOrEmpty(Error);
 }
@@ -36,29 +37,45 @@ public sealed class UpstreamMailboxSyncService : IUpstreamMailboxSyncService
     private readonly IUpstreamMailboxSyncCursorStore _cursorStore;
     private readonly UpstreamMailboxSyncOptions _options;
     private readonly ILogger<UpstreamMailboxSyncService> _logger;
+    private readonly UpstreamMailboxSyncProgress? _progress;
 
     public UpstreamMailboxSyncService(
         IHttpClientFactory httpClientFactory,
         MailCredentialIntakeService intake,
         IUpstreamMailboxSyncCursorStore cursorStore,
         IOptions<UpstreamMailboxSyncOptions> options,
-        ILogger<UpstreamMailboxSyncService> logger)
+        ILogger<UpstreamMailboxSyncService> logger,
+        UpstreamMailboxSyncProgress? progress = null)
     {
         _httpClientFactory = httpClientFactory;
         _intake = intake;
         _cursorStore = cursorStore;
         _options = options.Value;
         _logger = logger;
+        _progress = progress;
     }
 
     public async Task<UpstreamMailboxSyncResult> PullAsync(int userId, CancellationToken cancellationToken = default)
     {
         if (!await SyncGate.WaitAsync(0, cancellationToken))
-            return Failed("正在同步中，请稍后再试。");
+            return new(true, 0, 0, 0, Summary: "邮箱账号正在后台同步，可继续使用或搜索邮箱。", IsBusy: true);
         try
         {
             PriorityEmails.Clear();
-            return await PullCoreAsync(userId, cancellationToken);
+            _progress?.Begin(userId);
+            var result = await PullCoreAsync(userId, cancellationToken);
+            _progress?.Complete(userId, result.Error);
+            return result;
+        }
+        catch (OperationCanceledException)
+        {
+            _progress?.Complete(userId, "初始化已中断，可重新打开应用继续。");
+            throw;
+        }
+        catch
+        {
+            _progress?.Complete(userId, "邮箱初始化暂时未完成，请重试。");
+            throw;
         }
         finally
         {
@@ -168,6 +185,12 @@ public sealed class UpstreamMailboxSyncService : IUpstreamMailboxSyncService
         {
             var updatedSince = await _cursorStore.ReadAsync(cancellationToken);
             var pageSize = Math.Clamp(_options.PageSize, 1, 1000);
+            // Fill the first screen quickly, then restart stable pagination at
+            // its normal size. Changing the size on page 2 would skip accounts.
+            var bootstrap = string.IsNullOrWhiteSpace(updatedSince) && pageSize > 20;
+            var normalPageSize = pageSize;
+            if (bootstrap) pageSize = 20;
+            var previewEmails = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var maxItems = _options.MaxItems <= 0 ? int.MaxValue : _options.MaxItems;
             var client = _httpClientFactory.CreateClient("UpstreamMailboxSync");
             var firstPageCursor = string.Empty;
@@ -204,12 +227,13 @@ public sealed class UpstreamMailboxSyncService : IUpstreamMailboxSyncService
                     return Failed($"线上账号接口返回页码错误：请求第 {page} 页，实际第 {data.Page} 页。");
                 if (page == 1)
                 {
-                    firstPageCursor = ExtractCursor(data);
+                    if (string.IsNullOrEmpty(firstPageCursor)) firstPageCursor = ExtractCursor(data);
                     if (string.IsNullOrWhiteSpace(firstPageCursor))
                         return Failed("线上账号接口返回缺少有效的 data.serverTimestamp。");
                 }
 
                 total = data.Total;
+                _progress?.Advance(userId, processed, total, rejected);
                 if (total > maxItems)
                     return Failed($"线上账号接口数据量 {total} 条，超过本地安全上限 {maxItems} 条。");
                 var items = data.Items ?? [];
@@ -229,6 +253,8 @@ public sealed class UpstreamMailboxSyncService : IUpstreamMailboxSyncService
                         await priorityPull.Task.WaitAsync(cancellationToken);
                     if (PriorityEmails.ContainsKey(priorityKey))
                         continue;
+                    if (!bootstrap && previewEmails.Contains(priorityKey.Item2))
+                        continue;
 
                     try
                     {
@@ -238,8 +264,11 @@ public sealed class UpstreamMailboxSyncService : IUpstreamMailboxSyncService
                             enabled: true,
                             cancellationToken,
                             verifyCredential: false,
-                            allowCrossUserCredentialUpdate: isLocalApp);
+                            allowCrossUserCredentialUpdate: isLocalApp,
+                            releaseTracking: true);
                         if (result.Created) created++; else updated++;
+                        if (bootstrap) previewEmails.Add(priorityKey.Item2);
+                        _progress?.Advance(userId, processed, total, rejected);
                     }
                     catch (Exception ex) when (ex is InvalidOperationException or FormatException)
                     {
@@ -248,6 +277,7 @@ public sealed class UpstreamMailboxSyncService : IUpstreamMailboxSyncService
                     }
                 }
 
+                _progress?.Advance(userId, processed, total, rejected);
                 var hasMore = data.HasMore ?? (data.PageSize > 0 && items.Count >= data.PageSize);
                 if (!hasMore)
                 {
@@ -257,6 +287,15 @@ public sealed class UpstreamMailboxSyncService : IUpstreamMailboxSyncService
                 }
                 if (items.Count == 0)
                     return Failed("线上账号接口声明还有下一页，但当前页没有数据。");
+                if (bootstrap)
+                {
+                    bootstrap = false;
+                    pageSize = normalPageSize;
+                    page = 1;
+                    processed = 0;
+                    rejected = 0;
+                    continue;
+                }
                 page++;
             }
 

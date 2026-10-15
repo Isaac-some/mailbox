@@ -1814,7 +1814,7 @@ body.resizing-folder-tree {
   --app-ink: #1d1d1f;
   --app-secondary: #6e6e73;
   --app-separator: rgba(60, 60, 67, .18);
-  --app-blue: #007aff;
+  --app-blue: #0066d6;
   --app-blue-pressed: #0066d6;
   --app-red: #ff3b30;
   --app-shadow: 0 14px 36px rgba(28, 28, 30, .08);
@@ -1982,6 +1982,9 @@ a:hover { color: var(--app-blue-pressed); }
 }
 .form-label { color: #3a3a3c; font-size: .87rem; font-weight: 550; }
 .form-text { color: var(--app-secondary); font-size: .8rem; }
+.text-muted { color: #62676d !important; }
+.text-danger { color: #b42332 !important; }
+.btn-danger { background-color: #b42332; border-color: #b42332; }
 .form-switch .form-check-input { width: 2.3em; height: 1.35em; }
 .form-check-input:checked { border-color: var(--app-blue); background-color: var(--app-blue); }
 .form-section {
