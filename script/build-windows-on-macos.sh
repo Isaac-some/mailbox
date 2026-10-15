@@ -66,7 +66,18 @@ cp "$ROOT_DIR/windows-app/README.md" "$OUTPUT_DIR/README.md"
 test -f "$SERVER_DIR/MailArchiver.exe"
 test -f "$OUTPUT_DIR/邮箱助手.exe"
 
-(cd "$STAGING_DIR" && zip -q -r -X "MailAssistant-Windows-x64-v$APP_VERSION.zip" "$PACKAGE_NAME")
+# Write UTF-8 entry names explicitly. macOS zip can omit the encoding flag,
+# making the Chinese launcher name unreadable after extraction on Windows.
+python3 - "$STAGING_DIR" "$PACKAGE_NAME" "$APP_VERSION" <<'PY'
+from pathlib import Path
+import sys
+import zipfile
+staging, package, version = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+with zipfile.ZipFile(staging / f"MailAssistant-Windows-x64-v{version}.zip", "w", zipfile.ZIP_DEFLATED) as archive:
+    for path in sorted((staging / package).rglob("*")):
+        if path.is_file():
+            archive.write(path, path.relative_to(staging).as_posix())
+PY
 mv "$OUTPUT_DIR" "$BUILD_DIR/$PACKAGE_NAME"
 mv "$STAGING_DIR/MailAssistant-Windows-x64-v$APP_VERSION.zip" "$BUILD_DIR/"
 printf '%s\n' "$BUILD_DIR/MailAssistant-Windows-x64-v$APP_VERSION.zip"
