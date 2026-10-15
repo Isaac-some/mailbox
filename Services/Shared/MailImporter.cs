@@ -36,13 +36,17 @@ namespace MailArchiver.Services.Shared
                 var checkFrom = string.Join(",", message.From.Mailboxes.Select(m => m.Address));
                 var checkTo = string.Join(",", message.To.Mailboxes.Select(m => m.Address));
                 var checkSubject = message.Subject ?? "(No Subject)";
+                var dateTimeHelper = scope.ServiceProvider.GetRequiredService<DateTimeHelper>();
+                var convertedSentDate = dateTimeHelper.ConvertToDisplayTimeZone(message.Date);
+                var minimumDate = convertedSentDate.AddSeconds(-2);
+                var maximumDate = convertedSentDate.AddSeconds(2);
 
                 var existing = await context.ArchivedEmails
                     .Where(e => e.MailAccountId == account.Id)
                     .Where(e =>
                         e.MessageId == messageId ||
                         (e.From == checkFrom && e.To == checkTo && e.Subject == checkSubject &&
-                         Math.Abs((e.SentDate - message.Date.DateTime).TotalSeconds) < 2))
+                         e.SentDate > minimumDate && e.SentDate < maximumDate))
                     .FirstOrDefaultAsync();
 
                 if (existing != null)
@@ -88,9 +92,6 @@ namespace MailArchiver.Services.Shared
 
                 var allAttachments = new List<MimePart>();
                 _attachmentCollector.CollectAllAttachments(message.Body, allAttachments);
-
-                var dateTimeHelper = scope.ServiceProvider.GetRequiredService<DateTimeHelper>();
-                var convertedSentDate = dateTimeHelper.ConvertToDisplayTimeZone(message.Date);
 
                 var subject = MailContentHelper.TruncateFieldForTsvector(
                     MailContentHelper.CleanText(message.Subject ?? "(No Subject)"), 50_000);

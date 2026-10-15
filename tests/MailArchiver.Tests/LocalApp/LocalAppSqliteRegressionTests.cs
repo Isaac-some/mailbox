@@ -10,11 +10,42 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using MimeKit;
 using MailArchiver.ViewModels;
+using MailArchiver.Services.Shared;
+using MailArchiver.Services.Providers.Eml;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace MailArchiver.Tests.LocalApp;
 
 public class LocalAppSqliteRegressionTests
 {
+    [Fact]
+    public async Task Local_import_persists_message_and_deduplicates_across_header_timezones()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var services = new ServiceCollection();
+        services.AddDbContext<MailArchiverDbContext>(options => options.UseSqlite(connection));
+        services.AddSingleton(new DateTimeHelper(Options.Create(new TimeZoneOptions { StorageTimeZoneId = "Etc/UTC" })));
+        await using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<MailArchiverDbContext>();
+        await context.Database.EnsureCreatedAsync();
+        var account = await SeedAccountAsync(context);
+        var message = new MimeMessage { Subject = "local import", MessageId = "first@test",
+            Date = new DateTimeOffset(2026, 10, 15, 12, 30, 0, TimeSpan.FromHours(8)) };
+        message.From.Add(MailboxAddress.Parse("sender@example.com"));
+        message.To.Add(MailboxAddress.Parse(account.EmailAddress));
+        message.Body = new TextPart("plain") { Text = "local import" };
+        var importer = new MailImporter(provider, NullLogger<MailImporter>.Instance,
+            new EmlAttachmentCollector(NullLogger<EmlAttachmentCollector>.Instance));
+        var result = await importer.ImportEmailToDatabase(message, account, "test", "INBOX");
+        Assert.True(result.Success, result.Error);
+        message.MessageId = "different-id@test";
+        message.Date = message.Date.ToOffset(TimeSpan.FromHours(-5)).AddSeconds(1);
+        Assert.True((await importer.ImportEmailToDatabase(message, account, "test", "INBOX")).AlreadyExists);
+        Assert.Equal(1, await context.ArchivedEmails.CountAsync());
+    }
+
     [Fact]
     public async Task Local_attachment_bytes_survive_reopen_and_eml_export()
     {

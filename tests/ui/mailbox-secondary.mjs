@@ -42,7 +42,7 @@ try {
     assert.match(await page.locator('main').innerText(),/已完成/);
     checks.push('import a synthetic MBox into local storage and observe completion');
     await page.goto(base+'/MailAccounts/Export/'+fixture.accountId);
-    await page.locator('#formatEML').check();
+    await page.locator('input[name="Format"][value="EML"]').check();
     page.once('dialog',d=>d.accept());
     await page.locator('form button[type=submit]').click();
     await page.waitForURL('**/MailAccounts/ExportStatus?*');
