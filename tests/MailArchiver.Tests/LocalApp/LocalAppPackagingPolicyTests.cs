@@ -614,6 +614,6 @@ public class LocalAppPackagingPolicyTests
 
     private static string ReadBundledFile(string fileName)
     {
-        return File.ReadAllText(Path.Combine(AppContext.BaseDirectory, fileName));
+        return File.ReadAllText(Path.Combine(AppContext.BaseDirectory, fileName)).Replace("\r\n", "\n");
     }
 }

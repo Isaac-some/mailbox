@@ -219,14 +219,16 @@
                         // IMAP/M365 account: Show dropdown
                         $('#folderInput').hide().prop('disabled', true);
                         $('#folderSelect').show().prop('disabled', false);
-                        $('#folderHelpText').text(loc.placeholderSelectAccountFirst);
-                        $('#folderSelect').html('<option>' + loc.loadingFolders + '</option>');
+                        $('#folderHelpText').text('邮件仅导入到本机，不会上传到邮箱。可直接选择收件箱，其他文件夹正在后台读取。');
+                        $('#folderSelect').html('<option value="INBOX">收件箱（INBOX）</option>');
+                        updateSubmitButton();
                         
                         $.ajax({
                             url: '@Url.Action("GetFolders", "MailAccounts")',
                             data: { accountId: accountId },
                             type: 'GET',
                             dataType: 'json',
+                            timeout: 8000,
                             success: function (data) {
                                 let options = '<option value="">' + loc.placeholderSelectFolder + '</option>';
                                 let inboxFound = false;
@@ -249,7 +251,8 @@
                                 updateSubmitButton();
                             },
                             error: function () {
-                                $('#folderSelect').html('<option value="">' + loc.errorLoadingFolders + '</option><option value="INBOX">INBOX</option>');
+                                $('#folderHelpText').text('暂时无法读取远程文件夹，仍可将邮件导入到本机收件箱。');
+                                updateSubmitButton();
                             }
                         });
                     }
