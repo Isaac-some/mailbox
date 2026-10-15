@@ -31,7 +31,7 @@
     <None Include="..\..\appsettings.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\appsettings.Development.json" CopyToOutputDirectory="PreserveNewest" Condition="Exists('..\..\appsettings.Development.json')" />
     <None Include="appsettings.Test.json" CopyToOutputDirectory="PreserveNewest" Condition="Exists('appsettings.Test.json')" />
-    <None Include="..\..\appsettings.Local.json" Link="appsettings.Local.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\appsettings.Local.template.json" Link="appsettings.Local.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\Program.cs" Link="Program.cs" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\local-app\MailAssistant.swift" Link="MailAssistant.swift" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\local-app\Info.plist" Link="Info.plist" CopyToOutputDirectory="PreserveNewest" />

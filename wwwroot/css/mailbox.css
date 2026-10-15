@@ -285,6 +285,10 @@ body {
   padding: 0;
 }
 
+.account-icon-btn { width: auto; min-width: 34px; padding: 0 .55rem; white-space: nowrap; }
+.account-row-actions .btn-outline-warning { color: #815600; border-color: #bd8a18; }
+.account-row-actions .btn-outline-warning:hover { color: #fff; background: #815600; }
+
 .icon-button {
   flex: 0 0 auto;
   border: 1px solid var(--mail-line);

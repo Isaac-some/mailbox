@@ -38,7 +38,7 @@
                 <button type="button" class="btn btn-outline-danger btn-sm" data-bs-toggle="modal"
                         data-bs-target="#whitelistDeletionModal">
                     <i class="bi bi-shield-check" aria-hidden="true"></i>
-                    @(isAdmin ? "全局加白删除" : "加白删除")
+                    按保留名单清理
                 </button>
             }
             @if (OutboundMailOptions.Value.Enabled)
@@ -157,6 +157,7 @@
                                             @Html.AntiForgeryToken()
                                             <button type="submit" class="btn btn-outline-secondary btn-sm account-icon-btn account-sync-button" title="刷新收件箱" aria-label="刷新收件箱">
                                                 <i class="bi bi-arrow-clockwise" aria-hidden="true"></i>
+                                                刷新
                                             </button>
                                         </form>
                                     }
@@ -165,6 +166,7 @@
                                         <a asp-controller="OutboundMail" asp-action="Index" asp-route-accountId="@item.Id"
                                            class="btn btn-outline-primary btn-sm account-icon-btn" title="用此账号写邮件" aria-label="用此账号写邮件">
                                             <i class="bi bi-send" aria-hidden="true"></i>
+                                            写信
                                         </a>
                                     }
                                     else if (OutboundMailOptions.Value.Enabled && item.MailProviderKind == MailProviderKind.Outlook)
@@ -172,10 +174,12 @@
                                         <a asp-action="AuthorizeMsaDevice" asp-route-id="@item.Id"
                                            class="btn btn-outline-warning btn-sm account-icon-btn" title="授权 Outlook 收发" aria-label="授权 Outlook 收发">
                                             <i class="bi bi-shield-lock" aria-hidden="true"></i>
+                                            授权
                                         </a>
                                     }
                                     <a asp-action="Edit" asp-route-id="@item.Id" class="btn btn-outline-secondary btn-sm account-icon-btn" title="编辑账号" aria-label="编辑账号">
                                         <i class="bi bi-three-dots" aria-hidden="true"></i>
+                                        编辑
                                     </a>
                                     <button type="button"
                                             class="btn btn-outline-danger btn-sm account-icon-btn"
@@ -187,6 +191,7 @@
                                             data-account-email="@item.EmailAddress"
                                             data-email-count="@item.ArchivedEmailCount">
                                         <i class="bi bi-trash3" aria-hidden="true"></i>
+                                        删除
                                     </button>
                                 </div>
                             </td>
@@ -265,7 +270,7 @@
             @Html.AntiForgeryToken()
             <input type="hidden" name="PreviewFingerprint" id="whitelistPreviewFingerprint" />
             <div class="modal-header">
-                <h2 class="modal-title fs-6" id="whitelistDeletionModalLabel">@(isAdmin ? "全局加白删除" : "加白删除")</h2>
+                <h2 class="modal-title fs-6" id="whitelistDeletionModalLabel">按保留名单清理邮箱</h2>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="取消"></button>
             </div>
             <div class="modal-body">

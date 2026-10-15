@@ -107,7 +107,7 @@ try {
     report.checks.push('sender selection, clear, disabled empty download, CSV template');
 
     await page.goto(base+'/MailAccounts');
-    await page.getByRole('button',{name:'全局加白删除',exact:true}).click();
+    await page.getByRole('button',{name:'按保留名单清理',exact:true}).click();
     await page.locator('#whitelistSourceText').fill('no-valid-address');
     await page.locator('#previewWhitelistDeletion').click();
     await page.waitForTimeout(300);
