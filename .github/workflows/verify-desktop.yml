@@ -68,6 +68,10 @@ jobs:
           Invoke-WebRequest $env:RELEASE_ASSET_URL -OutFile $zip -TimeoutSec 180
           $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($hash -ne $env:RELEASE_ASSET_SHA256.ToLowerInvariant()) { throw 'Release ZIP checksum mismatch.' }
+          $mac = Join-Path $env:RUNNER_TEMP 'mac-release.dmg'
+          Invoke-WebRequest 'https://github.com/Isaac-some/mailbox-releases/releases/download/v2.3.7/MailAssistant-AppleSilicon-v2.3.7.dmg' -OutFile $mac -TimeoutSec 180
+          if ((Get-FileHash $mac -Algorithm SHA256).Hash.ToLowerInvariant() -ne '7ea3379bb532a63e941d4575ebd4d441c832ccd0ed55e52d5f318555c945d5f3') { throw 'Mac public download checksum mismatch.' }
+          'PASS: both public release links downloaded without GitHub login and passed SHA-256 verification.' | Out-File TestResults/public-downloads.txt
           $extract = Join-Path $env:RUNNER_TEMP 'exact-release'
           Expand-Archive $zip -DestinationPath $extract
           $launcher = Get-ChildItem $extract -Recurse -Filter '邮箱助手.exe' | Select-Object -First 1
