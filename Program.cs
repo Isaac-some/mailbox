@@ -69,6 +69,7 @@ var isLocalApp = builder.Configuration.GetValue<bool>("LocalApp:Enabled") ||
 
 if (isLocalApp)
 {
+    BundledPlatformAuthorization.Apply(builder.Configuration);
     builder.Configuration["AccountStorage:Enabled"] = "false";
 }
 
@@ -217,6 +218,7 @@ builder.Services.AddHostedService<CsvImportService>(provider => provider.GetRequ
 builder.Services.AddScoped<MailArchiver.Services.IMailCredentialVerifier, MailArchiver.Services.MailCredentialVerifier>();
 builder.Services.AddScoped<MailArchiver.Services.IUpstreamMailboxSyncService, MailArchiver.Services.UpstreamMailboxSyncService>();
 builder.Services.AddSingleton<UpstreamMailboxSyncProgress>();
+builder.Services.AddSingleton<UpstreamMailboxRequestJournal>();
 builder.Services.AddSingleton<MailArchiver.Services.IUpstreamMailboxConnectionStore, MailArchiver.Services.UpstreamMailboxConnectionStore>();
 builder.Services.AddSingleton<MailArchiver.Services.IUpstreamMailboxSyncCursorStore, MailArchiver.Services.UpstreamMailboxSyncCursorStore>();
 builder.Services.AddSingleton<MailArchiver.Services.ILocalAccessService, MailArchiver.Services.LocalAccessService>();

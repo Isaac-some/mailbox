@@ -95,8 +95,8 @@ public class LocalAppPackagingPolicyTests
     {
         var source = ReadBundledFile("Info.plist");
 
-        Assert.Contains("<string>2.3.6</string>", source, StringComparison.Ordinal);
-        Assert.Contains("<string>236</string>", source, StringComparison.Ordinal);
+        Assert.Contains("<string>2.3.7</string>", source, StringComparison.Ordinal);
+        Assert.Contains("<string>237</string>", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -104,8 +104,8 @@ public class LocalAppPackagingPolicyTests
     {
         var source = ReadBundledFile("MailAssistant.Windows.csproj");
 
-        Assert.Contains("<Version>2.3.6</Version>", source, StringComparison.Ordinal);
-        Assert.Contains("<FileVersion>2.3.6.0</FileVersion>", source, StringComparison.Ordinal);
+        Assert.Contains("<Version>2.3.7</Version>", source, StringComparison.Ordinal);
+        Assert.Contains("<FileVersion>2.3.7.0</FileVersion>", source, StringComparison.Ordinal);
         Assert.Contains("<ApplicationIcon>AppIcon.ico</ApplicationIcon>", source, StringComparison.Ordinal);
     }
 

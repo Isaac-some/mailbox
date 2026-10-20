@@ -10,7 +10,7 @@ $env:MAIL_ASSISTANT_UPSTREAM_TOKEN = [System.Net.NetworkCredential]::new("", $se
 Remove-Item Env:MAIL_ASSISTANT_UPSTREAM_TOKEN
 ```
 
-接口地址已有默认值。服务地址变化时，再设置 `MAIL_ASSISTANT_UPSTREAM_ENDPOINT` 为完整的 HTTPS 接口地址。缺少 Token 时构建会失败。Token 会进入发布文件夹，不要公开分发。
+接口地址已有默认值。服务地址变化时，再设置 `MAIL_ASSISTANT_UPSTREAM_ENDPOINT` 为完整的 HTTPS 接口地址。缺少 Token 时构建会失败。授权编译进程序，JSON 配置不含 Token。公开二进制仍可被分析并提取授权，编译并非保密机制。
 
 已有 Mac 交付包时，也可以在 Mac 工作区运行 `bash ./script/build-windows-on-macos.sh` 交叉构建；命令需通过 `MAIL_ASSISTANT_UPSTREAM_TOKEN` 提供同一 Token。具体命令见项目根目录 README。
 
@@ -21,3 +21,9 @@ Remove-Item Env:MAIL_ASSISTANT_UPSTREAM_TOKEN
 应用菜单“窗口”提供“桌面窗口”“手机窄窗”和“始终置顶”。窗口模式、两种模式各自的尺寸和置顶状态会保存在 `%LOCALAPPDATA%\MailAssistant\window-preferences.json`，切换窗口模式不会重新加载当前邮件页面。
 
 打包时会内置 .NET 运行时，目标电脑无需另装 .NET、Docker 或 PostgreSQL。
+
+## 接口验证与下载
+
+“本机数据 → 下载接口检测报告”可导出本次实际请求的 HTTP 状态、分页、数量和请求编号。后端按同一 `X-Request-ID` 对照日志；报告不含 Token、邮箱地址、密码或邮件正文。
+
+GitHub 下载无需登录或仓库授权。VPN 须覆盖 `github.com` 和 `release-assets.githubusercontent.com`；仅开启 VPN 开关但没有将这些域名走代理，仍可能连接失败。
