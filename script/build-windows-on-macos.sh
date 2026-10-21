@@ -63,6 +63,10 @@ if [[ -n "${MAIL_ASSISTANT_UPSTREAM_ENDPOINT:-}" ]]; then
   mv "$SERVER_DIR/appsettings.Local.json.tmp" "$SERVER_DIR/appsettings.Local.json"
 fi
 mv "$OUTPUT_DIR/MailAssistant.exe" "$OUTPUT_DIR/邮箱助手.exe"
+"$DOTNET_BIN" publish "$ROOT_DIR/desktop-updater/MailAssistant.Updater.csproj" \
+  --configuration Release --runtime win-x64 --self-contained true \
+  --output "$SERVER_DIR/updater" -p:PublishSingleFile=true \
+  -p:IncludeNativeLibrariesForSelfExtract=true -p:NuGetAudit=false
 cp "$ROOT_DIR/windows-app/README.md" "$OUTPUT_DIR/README.md"
 test -f "$SERVER_DIR/MailArchiver.exe"
 test -f "$OUTPUT_DIR/邮箱助手.exe"

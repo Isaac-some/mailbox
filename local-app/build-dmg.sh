@@ -101,6 +101,11 @@ if [[ -d "$PROJECT_DIR/wwwroot" && ! -d "$APP_BUILD_PATH/Contents/Resources/serv
   ditto "$PROJECT_DIR/wwwroot" "$APP_BUILD_PATH/Contents/Resources/server/wwwroot"
 fi
 
+"$DOTNET_BIN" publish "$PROJECT_DIR/desktop-updater/MailAssistant.Updater.csproj" \
+  --configuration Release --runtime osx-arm64 --self-contained true \
+  --output "$APP_BUILD_PATH/Contents/Resources/server/updater" \
+  -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:NuGetAudit=false
+
 # The release token is compiled by build-local-macos-release.sh. Keep the public
 # package's JSON settings free of tenant credentials.
 APP_SETTINGS_PATH="$APP_BUILD_PATH/Contents/Resources/server/appsettings.Local.json"
@@ -122,7 +127,7 @@ if [[ -n "${MAIL_ASSISTANT_UPSTREAM_ENDPOINT:-}" ]]; then
   fi
 fi
 
-for excluded_directory in local-app mailbox-service-v2 tests windows-app; do
+for excluded_directory in local-app mailbox-service-v2 tests windows-app desktop-updater; do
   if [[ -e "$APP_BUILD_PATH/Contents/Resources/server/$excluded_directory" ]]; then
     print -u2 "服务发布物错误包含目录：$excluded_directory"
     exit 4
@@ -230,6 +235,8 @@ mkdir -p "$STAGING_DIR"
 ditto --noextattr --noqtn "$APP_BUILD_PATH" "$STAGING_DIR/$APP_NAME.app"
 cp "$SCRIPT_DIR/后端测试说明.md" "$STAGING_DIR/后端测试说明.md"
 codesign --verify --deep --strict --verbose=2 "$STAGING_DIR/$APP_NAME.app"
+/usr/bin/ditto -c -k --sequesterRsrc --keepParent "$STAGING_DIR/$APP_NAME.app" \
+  "$BUILD_DIR/MailAssistant-AppleSilicon-v$APP_VERSION-update.zip"
 ln -s /Applications "$STAGING_DIR/Applications"
 hdiutil create \
   -volname "$APP_NAME" \

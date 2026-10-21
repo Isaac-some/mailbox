@@ -515,6 +515,8 @@ builder.Services.AddScoped<IAccessLogService, AccessLogService>();
 
 // Register VersionUpdateService (release notes / changelog splash screen)
 builder.Services.AddSingleton<IVersionUpdateService, VersionUpdateService>();
+builder.Services.AddSingleton<DesktopUpdateActivity>();
+builder.Services.AddSingleton<DesktopUpdateService>();
 
 // Register BandwidthService for rate limit management
 builder.Services.AddScoped<IBandwidthService, BandwidthService>();
@@ -944,6 +946,21 @@ app.UseRateLimiter();
 
 // Add our custom authentication middleware
 app.UseAuth();
+
+if (isLocalApp)
+{
+    app.Use(async (context, next) =>
+    {
+        if (!HttpMethods.IsGet(context.Request.Method) && !HttpMethods.IsHead(context.Request.Method)
+            && context.RequestServices.GetRequiredService<DesktopUpdateActivity>().Installing)
+        {
+            context.Response.StatusCode = 409;
+            await context.Response.WriteAsync("应用正在准备更新，请完成重启后再操作。");
+            return;
+        }
+        await next();
+    });
+}
 
 // OpenAPI document + Swagger UI for the REST API. Mapped only when the
 // API and its UI are enabled. Both paths sit OUTSIDE /api/, so the cookie

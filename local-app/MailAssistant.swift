@@ -1,6 +1,7 @@
 import Cocoa
 import Security
 import WebKit
+import CryptoKit
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolbarDelegate, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate {
     private enum WindowMode: String {
@@ -25,7 +26,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTo
 
     private let appName = "邮箱助手"
     private let localPort = Int(ProcessInfo.processInfo.environment["MAIL_ASSISTANT_PORT"] ?? "5180") ?? 5180
-    private let defaults = UserDefaults.standard
+    private let defaults = ProcessInfo.processInfo.environment["MAIL_ASSISTANT_DATA_DIRECTORY"].map {
+        UserDefaults(suiteName: "com.mailbox.assistant.isolated." + SHA256.hash(data: Data($0.utf8)).map { String(format: "%02x", $0) }.joined())!
+    } ?? UserDefaults.standard
     private var window: NSWindow!
     private var webView: WKWebView!
     private var server: Process?
@@ -79,6 +82,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTo
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if let pidFile = ProcessInfo.processInfo.environment["MAIL_ASSISTANT_UPDATE_PID_FILE"] {
+            try? String(ProcessInfo.processInfo.processIdentifier).write(toFile: pidFile, atomically: true, encoding: .utf8)
+        }
         NSApp.setActivationPolicy(.regular)
         configureMainMenu()
         configureWindow()
@@ -116,6 +122,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTo
 
         let appMenuItem = NSMenuItem()
         let appMenu = NSMenu(title: appName)
+        let updateItem = NSMenuItem(title: "检查更新…", action: #selector(checkForUpdates(_:)), keyEquivalent: "")
+        updateItem.target = self
+        appMenu.addItem(updateItem)
+        appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "退出\(appName)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appMenuItem.submenu = appMenu
         mainMenu.addItem(appMenuItem)
@@ -203,6 +213,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTo
 
     @objc private func useDesktopWindow(_ sender: Any?) {
         applyWindowMode(.desktop, animated: true, centered: false)
+    }
+
+    @objc private func checkForUpdates(_ sender: Any?) {
+        webView.load(URLRequest(url: URL(string: "http://127.0.0.1:\(localPort)/DesktopUpdates")!))
     }
 
     @objc private func useCompactWindow(_ sender: Any?) {
@@ -379,9 +393,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTo
             environment["ASPNETCORE_URLS"] = "http://127.0.0.1:\(localPort)"
             environment["MAIL_ASSISTANT_LOCAL_APP"] = "1"
             environment["MAIL_ASSISTANT_DATA_DIRECTORY"] = dataDirectory.path
+            environment["MAIL_ASSISTANT_INSTALL_DIRECTORY"] = Bundle.main.bundleURL.path
+            environment["MAIL_ASSISTANT_ISOLATED_PROFILE"] = ProcessInfo.processInfo.environment["MAIL_ASSISTANT_DATA_DIRECTORY"] == nil ? "0" : "1"
+            environment["MAIL_ASSISTANT_NATIVE_PID"] = String(ProcessInfo.processInfo.processIdentifier)
+            environment["MAIL_ASSISTANT_PORT"] = String(localPort)
             environment["MAIL_ASSISTANT_FACTORY_RESET_MARKER"] = resetMarker.path
             environment["ReleaseNotes__AppVersion"] = Bundle.main.object(
-                forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.3.6"
+                forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.4.0"
             environment["DOTNET_ROOT"] = runtime.deletingLastPathComponent().path
             environment["DOTNET_MULTILEVEL_LOOKUP"] = "0"
             environment["DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE"] = "false"
@@ -425,6 +443,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTo
     }
 
     private func serverStopped() {
+        if FileManager.default.fileExists(atPath: dataDirectory.appendingPathComponent("update-request.json").path) {
+            NSApp.terminate(nil)
+            return
+        }
         guard !isQuitting else { return }
         if FileManager.default.fileExists(atPath: resetMarker.path) {
             do {

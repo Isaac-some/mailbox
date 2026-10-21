@@ -50,6 +50,8 @@ public sealed class OutboundMailTaskWorker : BackgroundService
 
     internal async Task<bool> ProcessNextDueItemAsync(CancellationToken cancellationToken)
     {
+        using var activityScope = _scopeFactory.CreateScope();
+        using var updateLease = activityScope.ServiceProvider.GetService<DesktopUpdateActivity>()?.EnterSend();
         int itemId;
         await using (var scope = _scopeFactory.CreateAsyncScope())
         {

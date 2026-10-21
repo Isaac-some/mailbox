@@ -19,13 +19,18 @@ internal static class Program
             return;
         }
 
-        using var instanceLock = new Mutex(true, "Local\\MailAssistant", out var isFirstInstance);
+        var isolated = Environment.GetEnvironmentVariable("MAIL_ASSISTANT_DATA_DIRECTORY");
+        var instanceName = isolated is null ? "Local\\MailAssistant" : "Local\\MailAssistant-" +
+            Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(Path.GetFullPath(isolated).ToLowerInvariant())))[..24];
+        using var instanceLock = new Mutex(true, instanceName, out var isFirstInstance);
         if (!isFirstInstance)
         {
             MessageBox.Show("邮箱助手已经在运行。", "邮箱助手", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
 
+        if (Environment.GetEnvironmentVariable("MAIL_ASSISTANT_UPDATE_PID_FILE") is { } pidFile)
+            File.WriteAllText(pidFile, Environment.ProcessId.ToString());
         ApplicationConfiguration.Initialize();
         Application.Run(new MainForm());
     }
@@ -161,6 +166,14 @@ internal sealed class MainForm : Form
 
     private void ConfigureWindowMenu()
     {
+        var updateMenu = new ToolStripMenuItem("检查更新");
+        updateMenu.Click += (_, _) =>
+        {
+            var url = $"http://127.0.0.1:{LocalPort}/DesktopUpdates";
+            if (_browserFallback) Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+            else _webView.CoreWebView2?.Navigate(url);
+        };
+        _menuStrip.Items.Add(updateMenu);
         var windowMenu = new ToolStripMenuItem("窗口");
 
         _desktopWindowMenuItem.Click += (_, _) => ApplyWindowMode(WindowMode.Desktop, centered: false);
@@ -385,6 +398,10 @@ internal sealed class MainForm : Form
         startInfo.Environment["ASPNETCORE_URLS"] = $"http://127.0.0.1:{LocalPort}";
         startInfo.Environment["MAIL_ASSISTANT_LOCAL_APP"] = "1";
         startInfo.Environment["MAIL_ASSISTANT_DATA_DIRECTORY"] = _dataDirectory;
+        startInfo.Environment["MAIL_ASSISTANT_INSTALL_DIRECTORY"] = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
+        startInfo.Environment["MAIL_ASSISTANT_ISOLATED_PROFILE"] = Environment.GetEnvironmentVariable("MAIL_ASSISTANT_DATA_DIRECTORY") is null ? "0" : "1";
+        startInfo.Environment["MAIL_ASSISTANT_NATIVE_PID"] = Environment.ProcessId.ToString();
+        startInfo.Environment["MAIL_ASSISTANT_PORT"] = LocalPort.ToString();
         startInfo.Environment["MAIL_ASSISTANT_FACTORY_RESET_MARKER"] = ResetMarkerPath;
         startInfo.Environment["ReleaseNotes__AppVersion"] =
             typeof(Program).Assembly.GetName().Version?.ToString(3) ?? "2.3.9";
@@ -476,6 +493,11 @@ internal sealed class MainForm : Form
 
         BeginInvoke(() =>
         {
+            if (File.Exists(Path.Combine(_dataDirectory, "update-request.json")))
+            {
+                Close();
+                return;
+            }
             if (File.Exists(ResetMarkerPath))
             {
                 BeginFactoryReset();

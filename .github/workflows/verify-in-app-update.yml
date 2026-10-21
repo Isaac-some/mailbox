@@ -1,0 +1,52 @@
+name: Verify In-App Update
+on:
+  workflow_dispatch:
+    inputs:
+      base_tag:
+        description: Isolated baseline prerelease tag
+        required: true
+        default: v2.3.90-update-test
+      target_tag:
+        description: Signed update target prerelease tag
+        required: true
+        default: v2.4.0-rc.1
+      expected_version:
+        description: Expected installed version
+        required: true
+        default: 2.4.0
+permissions:
+  contents: read
+jobs:
+  real-windows-update:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download public baseline
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_TAG: ${{ inputs.base_tag }}
+        run: gh release download $env:BASE_TAG --repo Isaac-some/mailbox-releases --pattern 'MailAssistant-Windows-x64-*.zip' --dir "$env:RUNNER_TEMP/update-download"
+      - name: Verify actual native update and data preservation
+        shell: pwsh
+        env:
+          TARGET_TAG: ${{ inputs.target_tag }}
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+        run: |
+          $zip = (Get-ChildItem "$env:RUNNER_TEMP/update-download/*.zip").FullName
+          python script/verify-desktop-update.py --package $zip --root "$env:RUNNER_TEMP/update-success" --target-tag $env:TARGET_TAG --expected-version $env:EXPECTED_VERSION --scenario success --port 5162
+          python script/verify-desktop-update.py --package $zip --root "$env:RUNNER_TEMP/update-corrupt" --target-tag $env:TARGET_TAG --expected-version $env:EXPECTED_VERSION --scenario corrupt --port 5163
+          python script/verify-desktop-update.py --package $zip --root "$env:RUNNER_TEMP/update-rollback" --target-tag $env:TARGET_TAG --expected-version $env:EXPECTED_VERSION --scenario rollback --port 5164
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-in-app-update-evidence
+          path: |
+            ${{ runner.temp }}/update-*/report.json
+            ${{ runner.temp }}/update-*/data/update-result.json
+            ${{ runner.temp }}/update-*/data/updates/*/installer-error.txt
+            ${{ runner.temp }}/update-*/native.log

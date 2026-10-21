@@ -91,12 +91,12 @@ public class LocalAppPackagingPolicyTests
     }
 
     [Fact]
-    public void LocalAppRelease_version_identifies_the_background_startup_sync()
+    public void LocalAppRelease_version_matches_the_bundled_server()
     {
         var source = ReadBundledFile("Info.plist");
 
-        Assert.Contains("<string>2.3.9</string>", source, StringComparison.Ordinal);
-        Assert.Contains("<string>239</string>", source, StringComparison.Ordinal);
+        var version = typeof(MailArchiver.Services.DesktopUpdateService).Assembly.GetName().Version!.ToString(3);
+        Assert.Contains($"<string>{version}</string>", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -104,8 +104,9 @@ public class LocalAppPackagingPolicyTests
     {
         var source = ReadBundledFile("MailAssistant.Windows.csproj");
 
-        Assert.Contains("<Version>2.3.9</Version>", source, StringComparison.Ordinal);
-        Assert.Contains("<FileVersion>2.3.9.0</FileVersion>", source, StringComparison.Ordinal);
+        var version = typeof(MailArchiver.Services.DesktopUpdateService).Assembly.GetName().Version!.ToString(3);
+        Assert.Contains($"<Version>{version}</Version>", source, StringComparison.Ordinal);
+        Assert.Contains($"<FileVersion>{version}.0</FileVersion>", source, StringComparison.Ordinal);
         Assert.Contains("<ApplicationIcon>AppIcon.ico</ApplicationIcon>", source, StringComparison.Ordinal);
     }
 

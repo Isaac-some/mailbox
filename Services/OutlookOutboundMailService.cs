@@ -17,6 +17,7 @@ public sealed class OutboundMailService : IOutboundMailService
     private readonly EmailCoreService _emailCoreService;
     private readonly OutboundMailOptions _options;
     private readonly ILogger<OutboundMailService> _logger;
+    private readonly DesktopUpdateActivity? _updateActivity;
 
     public OutboundMailService(
         IMailProviderRegistry mailProviderRegistry,
@@ -24,7 +25,7 @@ public sealed class OutboundMailService : IOutboundMailService
         IImapFolderService folderService,
         EmailCoreService emailCoreService,
         IOptions<OutboundMailOptions> options,
-        ILogger<OutboundMailService> logger)
+        ILogger<OutboundMailService> logger, DesktopUpdateActivity? updateActivity = null)
     {
         _mailProviderRegistry = mailProviderRegistry;
         _imapConnectionFactory = imapConnectionFactory;
@@ -32,6 +33,7 @@ public sealed class OutboundMailService : IOutboundMailService
         _emailCoreService = emailCoreService;
         _options = options.Value;
         _logger = logger;
+        _updateActivity = updateActivity;
     }
 
     public async Task<OutboundMailResult> SendAsync(
@@ -39,6 +41,7 @@ public sealed class OutboundMailService : IOutboundMailService
         OutboundMailMessage request,
         CancellationToken cancellationToken = default)
     {
+        using var activity = _updateActivity?.EnterSend();
         if (!_options.Enabled)
             throw new InvalidOperationException("当前运行环境未启用发件功能。");
         if (!CanSend(account))

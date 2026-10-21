@@ -1,0 +1,27 @@
+@{
+    ViewData["Title"] = "检查更新";
+}
+<div class="row justify-content-center">
+    <section class="col-12 col-lg-8 col-xl-7" id="desktop-updates">
+        <h1 class="h3 mb-3">检查更新</h1>
+        <p class="text-muted">下载后重启邮箱助手即可更新，账号、邮件和设置会保留。</p>
+        <p id="update-version"></p>
+        <div class="alert alert-info" id="update-message" role="status" aria-live="polite">正在读取版本信息…</div>
+        <progress id="update-progress" class="w-100 mb-3" hidden></progress>
+        <form id="update-actions" class="d-flex gap-2 flex-wrap">
+            @Html.AntiForgeryToken()
+            <button type="button" class="btn btn-outline-primary" id="update-check">检查更新</button>
+            <button type="button" class="btn btn-primary" id="update-download" hidden>下载更新</button>
+            <button type="button" class="btn btn-primary" id="update-install" hidden>重启并更新</button>
+        </form>
+        <p class="small text-muted mt-3">正在发送邮件或导入账号时，请等待任务完成后再重启更新。</p>
+        <section id="update-notes-section" class="border-top mt-4 pt-4" hidden>
+            <h2 class="h5">更新内容</h2>
+            <pre id="update-notes" class="text-wrap" style="font:inherit;white-space:pre-wrap"></pre>
+        </section>
+        <p class="mt-4"><a asp-controller="LocalMaintenance" asp-action="Index">返回本机数据</a></p>
+    </section>
+</div>
+@section Scripts {
+    <script src="~/js/desktop-updates.js" asp-append-version="true"></script>
+}

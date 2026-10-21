@@ -81,5 +81,9 @@ if ($env:MAIL_ASSISTANT_UPSTREAM_ENDPOINT) {
 }
 
 Rename-Item -Path $launcher -NewName "邮箱助手.exe"
+dotnet publish (Join-Path $projectRoot "desktop-updater/MailAssistant.Updater.csproj") `
+    --configuration Release --runtime win-x64 --self-contained true `
+    --output (Join-Path $serverOutput "updater") `
+    -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
 Copy-Item (Join-Path $PSScriptRoot "README.md") (Join-Path $OutputDirectory "README.md")
 Write-Host "Windows 发布包已生成：$OutputDirectory"
