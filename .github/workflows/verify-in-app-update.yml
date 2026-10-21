@@ -50,3 +50,37 @@ jobs:
             ${{ runner.temp }}/update-*/data/update-result.json
             ${{ runner.temp }}/update-*/data/updates/*/installer-error.txt
             ${{ runner.temp }}/update-*/native.log
+  real-macos-update:
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download public Apple Silicon baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_TAG: ${{ inputs.base_tag }}
+        run: |
+          test "$(uname -m)" = arm64
+          gh release download "$BASE_TAG" --repo Isaac-some/mailbox-releases --pattern 'MailAssistant-AppleSilicon-*-update.zip' --dir "$RUNNER_TEMP/update-download"
+      - name: Verify actual Mac update and data preservation
+        env:
+          TARGET_TAG: ${{ inputs.target_tag }}
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+        run: |
+          package_path=("$RUNNER_TEMP"/update-download/*.zip)
+          python script/verify-desktop-update.py --package "${package_path[0]}" --root "$RUNNER_TEMP/update-success" --target-tag "$TARGET_TAG" --expected-version "$EXPECTED_VERSION" --scenario success --port 5162
+          python script/verify-desktop-update.py --package "${package_path[0]}" --root "$RUNNER_TEMP/update-corrupt" --target-tag "$TARGET_TAG" --expected-version "$EXPECTED_VERSION" --scenario corrupt --port 5163
+          python script/verify-desktop-update.py --package "${package_path[0]}" --root "$RUNNER_TEMP/update-rollback" --target-tag "$TARGET_TAG" --expected-version "$EXPECTED_VERSION" --scenario rollback --port 5164
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-in-app-update-evidence
+          path: |
+            ${{ runner.temp }}/update-*/report.json
+            ${{ runner.temp }}/update-*/data/update-result.json
+            ${{ runner.temp }}/update-*/data/updates/*/installer-error.txt
+            ${{ runner.temp }}/update-*/native.log
+            ${{ runner.temp }}/update-*/native-errors.log

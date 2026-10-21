@@ -107,7 +107,7 @@ environment.update(MAIL_ASSISTANT_DATA_DIRECTORY=str(data), MAIL_ASSISTANT_PORT=
 native = None
 try:
     if mac:
-        command = ['/usr/bin/open', '-n']
+        command = ['/usr/bin/open', '-n', '-g', '-j', '-o', str(root / 'native.log'), '--stderr', str(root / 'native-errors.log')]
         for name, value in environment.items():
             if name.startswith('MAIL_ASSISTANT_') or '__' in name:
                 command += ['--env', name + '=' + value]
@@ -117,6 +117,7 @@ try:
             stdout=(root / 'native.log').open('w'), stderr=subprocess.STDOUT)
     until(lambda: status(), 90, 'initial native readiness')
     original_version = status()['currentVersion']
+    print('Native ready:', original_version, 'scenario:', args.scenario, flush=True)
     original_pid = json.loads(get('/DesktopUpdates/Health'))['processId']
     seed()
     before = snapshot()
@@ -129,8 +130,9 @@ try:
     assert checked['phase'] == 'available', checked
     assert checked['latestVersion'] == args.expected_version, checked
     assert post('Download')['phase'] == 'downloading'
-    downloaded = until(lambda: (s if (s := status())['phase'] in ('ready', 'error') else None), 1200, 'real public download')
+    downloaded = until(lambda: (s if (s := status())['phase'] in ('ready', 'error') else None), 1900, 'real public download')
     assert downloaded['phase'] == 'ready', downloaded
+    print('Public download verified:', downloaded['downloaded'], 'bytes', flush=True)
     session = next(path for path in (data / 'updates').iterdir() if (path / 'archive.zip').exists())
     if args.scenario == 'corrupt':
         with (session / 'archive.zip').open('r+b') as stream:
