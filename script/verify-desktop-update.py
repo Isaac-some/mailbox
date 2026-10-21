@@ -90,6 +90,8 @@ def seed():
                     'sender@example.invalid','update-fixture@example.invalid','','','2026-01-01 00:00:00',
                     '2026-01-01 00:00:00',0,0,'INBOX','Inbox')''', (account,))
     (data / 'update-preservation-sentinel.json').write_text('{"setting":"preserve-exactly"}')
+    (data / 'network-settings.json').write_text(json.dumps(dict(Mode=0, Type=None, Host=None,
+        Port=None, Username=None, EncryptedPassword=None, Version=424242)))
 
 def snapshot():
     with sqlite3.connect(data / 'mail-archive.sqlite', timeout=30) as connection:
@@ -97,7 +99,8 @@ def snapshot():
             emails=connection.execute('SELECT Id,MessageId,Subject,Body FROM ArchivedEmails').fetchall(),
             users=connection.execute('SELECT Id,Username FROM Users').fetchall(),
             key=hashlib.sha256((data / 'credential-encryption.key').read_bytes()).hexdigest(),
-            settings=(data / 'update-preservation-sentinel.json').read_text())
+            settings=(data / 'update-preservation-sentinel.json').read_text(),
+            networkSettings=(data / 'network-settings.json').read_text())
 
 environment = os.environ.copy()
 environment.update(MAIL_ASSISTANT_DATA_DIRECTORY=str(data), MAIL_ASSISTANT_PORT=str(args.port),
@@ -134,6 +137,21 @@ try:
     assert downloaded['phase'] == 'ready', downloaded
     print('Public download verified:', downloaded['downloaded'], 'bytes', flush=True)
     session = next(path for path in (data / 'updates').iterdir() if (path / 'archive.zip').exists())
+    # An in-progress send must block installation without quitting the app. The worker is disabled.
+    with sqlite3.connect(data / 'mail-archive.sqlite', timeout=30) as connection:
+        user = before['users'][0][0]
+        account = before['accounts'][0][0]
+        connection.execute("INSERT INTO OutboundMailTasks (CreatedByUserId,Name,CreatedAtUtc) VALUES (?,'update-busy-fixture','2026-01-01 00:00:00')", (user,))
+        task = connection.execute('SELECT last_insert_rowid()').fetchone()[0]
+        connection.execute('''INSERT INTO OutboundMailTaskItems
+            (OutboundMailTaskId,MailAccountId,CsvRowNumber,ScheduledAtUtc,Recipient,Subject,Body,Status)
+            VALUES (?,?,1,'2099-01-01 00:00:00','fixture@example.invalid','synthetic','synthetic','Sending')''', (task, account))
+    busy = post('Install')
+    assert busy['phase'] == 'ready' and '后台任务' in busy['message'], busy
+    assert json.loads(get('/DesktopUpdates/Health'))['processId'] == original_pid
+    with sqlite3.connect(data / 'mail-archive.sqlite', timeout=30) as connection:
+        connection.execute('DELETE FROM OutboundMailTaskItems WHERE OutboundMailTaskId=?', (task,))
+        connection.execute('DELETE FROM OutboundMailTasks WHERE Id=?', (task,))
     if args.scenario == 'corrupt':
         with (session / 'archive.zip').open('r+b') as stream:
             stream.seek(-1, 2)
@@ -175,7 +193,8 @@ try:
     assert snapshot() == before, 'Account, email, key or settings changed during the update'
     report = dict(result='PASS', platform=sys.platform, scenario=args.scenario, fromVersion=original_version,
         toVersion=status()['currentVersion'], targetTag=args.target_tag, accountCount=len(before['accounts']),
-        emailCount=len(before['emails']), dataPreserved=True, csrfRejected=True, publicDownload=True)
+        emailCount=len(before['emails']), dataPreserved=True, csrfRejected=True, publicDownload=True,
+        activeTaskBlocked=True, networkSettingsPreserved=True)
     (root / 'report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2))
     print(json.dumps(report, ensure_ascii=False), flush=True)
 finally:
