@@ -22,7 +22,7 @@ public static class MailConnectionFailurePolicy
 
         if (failures.Any(failure => failure is ProxyProtocolException))
             return Failure(MailFailureCode.ProxyUnavailable,
-                "代理拒绝了邮箱目标连接，请检查代理是否允许该目标主机和端口。",
+                SafeMessage(nameof(MailFailureCode.ProxyUnavailable)),
                 MailFailureStage.ProxyHandshake, exception);
 
         if (failures.Any(failure => failure is AuthenticationException))
@@ -33,7 +33,7 @@ public static class MailConnectionFailurePolicy
         if (failures.Any(failure => failure is SslHandshakeException
             or System.Security.Authentication.AuthenticationException))
             return Failure(MailFailureCode.TlsFailed,
-                "TLS 安全连接失败，可能是服务器地址与证书不匹配、端口或加密方式不正确，也可能受代理影响；请检查域名连接设置。",
+                SafeMessage(nameof(MailFailureCode.TlsFailed)),
                 MailFailureStage.Tls, exception);
 
         if (failures.Any(failure => failure is OperationCanceledException))
@@ -62,9 +62,9 @@ public static class MailConnectionFailurePolicy
             {
                 MailFailureCode.GmailCredentialFormatInvalid => "Gmail 应用专用密码去除空白和不可见字符后必须恰好是 16 位。",
                 MailFailureCode.AuthenticationRejected => "授权码无效，请检查邮箱与授权码是否匹配。",
-                MailFailureCode.ProxyUnavailable => "代理拒绝了邮箱目标连接，请检查代理是否允许该目标主机和端口。",
+                MailFailureCode.ProxyUnavailable => "当前代理节点拒绝连接该邮箱域名的收发端口，请切换节点后重试，或联系节点提供方检查端口限制。",
                 MailFailureCode.TargetUnavailable => "连接失败，请检查网络、VPN、代理或邮箱服务是否可访问。",
-                MailFailureCode.TlsFailed => "TLS 安全连接失败，可能是服务器地址与证书不匹配、端口或加密方式不正确，也可能受代理影响；请检查域名连接设置。",
+                MailFailureCode.TlsFailed => "TLS 安全连接失败：当前 VPN/代理节点可能无法连接该邮箱域名的收发端口，请切换节点后重试；若仍失败，请检查域名连接设置中的服务器地址、端口、加密方式及证书。",
                 MailFailureCode.ProtocolFailed => "邮箱服务器协议响应异常，请稍后重试。",
                 MailFailureCode.RateLimited => "当前同步已限流，请稍后重试。",
                 MailFailureCode.Cancelled => "同步任务已取消。",
