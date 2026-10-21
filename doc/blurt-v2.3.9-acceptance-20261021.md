@@ -36,7 +36,8 @@ CSV 任务可先入队，后台在发送前完成所需授权更新与 SMTP 验�
 - 最终 Mac 包再次通过七种 CSV 变体、重复覆盖、空凭据拒绝、域名纠正、导入不联网、手动 IMAP STARTTLS／SMTP TLS／标准 OAuth 及防伪回归。
 - 本轮未发送真实测试邮件。上一版的真实双向收发证据保留在 `doc/mail-domain-connectivity-acceptance-20261021.md`，不冒充为本轮重复实测。
 - Mac 应用通过递归严格签名校验，DMG 通过映像校验。本地签名，未进行 Apple 公证。
-- Windows x64 已交叉构建；ZIP CRC、中文文件名 UTF-8 标记、启动器与服务文件、私有数据排除检查通过。尚未在 Windows 机器启动；用户确认后再推送并运行 Windows GitHub Actions 验证、发布和核验公开下载。
+- Windows x64 交叉构建、ZIP CRC、中文文件名 UTF-8 标记及私有数据排除检查通过。用户验收后，在独立 Windows 环境通过 88 项回归、完整构建与原生启动；最终公开 ZIP 再次实际解压、启动、创建空 SQLite，从真实平台载入 355 个账号并导出 HTTP 200 请求报告。报告时邮件表仍为空，账号授权接口与邮件下载证据保持区分。
+- 两个平台公开下载均在 Windows 环境匿名完成，并通过验收安装包的 SHA-256 校验。[最终验证记录](https://github.com/Isaac-some/mailbox/actions/runs/39544610527)。
 - 两个平台包均不含测试数据库、录屏、用户密钥或域名私有记录。明文 JSON 不含平台 Token；继续沿用既有交付授权方式。
 
 ## 本地交付与后续发布
@@ -49,7 +50,7 @@ Windows：`windows-app/build/MailAssistant-Windows-x64-v2.3.9.zip`。
 
 用户验收时曾反馈待验证账号无法勾选，随后确认“现在没问题了，刚才可能测试错了”，明确验收通过。未因此修改已验收的二进制。源码仓库 `Isaac-some/mailbox`；公开交付仓库 `Isaac-some/mailbox-releases`。发布结果与 Windows 环境验证记录见 `doc/release-v2.3.9.md`。
 
-Windows 验证工作流已移除 v2.3.7 的固定版本判断，支持传入本次 Win/Mac 资产 URL 和 SHA-256；发布时须使用本次包的实际值。
+Windows 验证工作流已移除 v2.3.7 的固定版本判断，使用本次 Win/Mac 公开资产 URL 和 SHA-256 完成验证。源码标签 `v2.3.9` 对应 `51621eebc8b223344b6470be408aecff8699f4f8`；公开 Release 为 `https://github.com/Isaac-some/mailbox-releases/releases/tag/v2.3.9`。
 
 ## 清理
 
