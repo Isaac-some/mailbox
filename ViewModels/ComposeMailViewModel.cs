@@ -6,8 +6,9 @@ namespace MailArchiver.ViewModels;
 
 public sealed class ComposeMailViewModel
 {
-    [Range(1, int.MaxValue, ErrorMessage = "请选择发件账号。")]
     public int AccountId { get; set; }
+    public List<int> AccountIds { get; set; } = [];
+    public List<string> SendResults { get; set; } = [];
 
     [Required(ErrorMessage = "请填写收件人。")]
     public string To { get; set; } = string.Empty;

@@ -30,17 +30,19 @@ public sealed class MailCredentialIntakeService
     private readonly IMailProviderRegistry _registry;
     private readonly ICredentialEncryptionService _encryption;
     private readonly IMailCredentialVerifier _verifier;
+    private readonly IMailDomainProfileStore? _profiles;
 
     public MailCredentialIntakeService(
         MailArchiverDbContext context,
         IMailProviderRegistry registry,
         ICredentialEncryptionService encryption,
-        IMailCredentialVerifier verifier)
+        IMailCredentialVerifier verifier, IMailDomainProfileStore? profiles = null)
     {
         _context = context;
         _registry = registry;
         _encryption = encryption;
         _verifier = verifier;
+        _profiles = profiles;
     }
 
     public async Task<MailCredentialIntakeResult> UpsertAsync(
@@ -90,11 +92,13 @@ public sealed class MailCredentialIntakeService
         var actualDomain = email[(email.LastIndexOf('@') + 1)..].ToLowerInvariant();
         if (!string.Equals(domain, actualDomain, StringComparison.OrdinalIgnoreCase))
             domain = actualDomain;
-        // The standard export repeats the IMAP code in its 2FA/ClientId column
-        // for Yahoo and GMX. Only Outlook's OAuth flow consumes that field.
-        var clientId = provider.Kind == MailProviderKind.Outlook && !string.IsNullOrWhiteSpace(input.ClientId)
+        // Some exports repeat the password in client_id. Preserve real OAuth
+        // client IDs consistently across providers, but never treat that duplicate as one.
+        var clientId = !string.IsNullOrWhiteSpace(input.ClientId)
             ? input.ClientId.Trim()
             : null;
+        if (provider.Kind != MailProviderKind.Outlook && string.Equals(clientId, credential, StringComparison.Ordinal))
+            clientId = null;
         var unchanged = !created
             && string.Equals(account.ImportedDomain, domain, StringComparison.Ordinal)
             && string.Equals(account.ClientId, clientId, StringComparison.Ordinal)
@@ -121,6 +125,9 @@ public sealed class MailCredentialIntakeService
             // Normalize legacy input without replacing a provider-rotated token.
             account.Password = _encryption.Encrypt(credential);
         }
+
+        if (provider.Kind == MailProviderKind.Custom && _profiles?.Find(domain) is { } profile)
+            MailDomainProfileStore.Apply(account, profile);
 
         if (verifyCredential)
             await _verifier.VerifyAsync(account, cancellationToken);

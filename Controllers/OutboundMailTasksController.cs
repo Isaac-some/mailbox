@@ -21,15 +21,18 @@ public sealed class OutboundMailTasksController : Controller
     private readonly IOutboundMailService _outboundMail;
     private readonly OutboundMailOptions _outboundOptions;
     private readonly TimeZoneInfo _displayTimeZone;
+    private readonly IOnDemandMailSyncQueue? _preparationQueue;
 
     public OutboundMailTasksController(
         MailArchiverDbContext context,
         IAuthenticationService authentication,
         IOutboundMailService outboundMail,
         IOptions<OutboundMailOptions> outboundOptions,
-        IOptions<TimeZoneOptions> timeZoneOptions)
+        IOptions<TimeZoneOptions> timeZoneOptions,
+        IOnDemandMailSyncQueue? preparationQueue = null)
     {
         _context = context;
+        _preparationQueue = preparationQueue;
         _authentication = authentication;
         _outboundMail = outboundMail;
         _outboundOptions = outboundOptions.Value;
@@ -86,9 +89,11 @@ public sealed class OutboundMailTasksController : Controller
         if (parsed.Rows.Count > MaxRows)
             errors.Add(new(1, $"每个任务最多 {MaxRows} 行。"));
 
-        var accounts = await GetManageableAccountsAsync(userId, cancellationToken);
+        var senderEmails = parsed.Rows.Select(row => row.Sender.ToLower()).Distinct().ToList();
+        var accounts = await ManageableAccounts(userId).Where(account => senderEmails.Contains(account.EmailAddress.ToLower()))
+            .ToListAsync(cancellationToken);
         var accountByEmail = accounts
-            .Where(account => account.IsEnabled && _outboundMail.CanSend(account))
+            .Where(account => account.IsEnabled && account.Provider != ProviderType.IMPORT)
             .GroupBy(account => account.EmailAddress, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
 
@@ -98,7 +103,7 @@ public sealed class OutboundMailTasksController : Controller
             {
                 errors.Add(new(
                     row.LineNumber,
-                    $"发件邮箱 {row.Sender} 未导入、已停用、无权使用或没有可用发件授权。"));
+                    $"发件邮箱 {row.Sender} 未导入、已停用、无权使用或仅支持本地归档。"));
             }
         }
 
@@ -298,7 +303,9 @@ public sealed class OutboundMailTasksController : Controller
             return BadRequest(new { message = $"一次最多匹配 {MaxRows:N0} 个邮箱。" });
 
         var userId = RequireUserId();
-        var accounts = await GetManageableAccountsAsync(userId, cancellationToken);
+        var normalizedEmails = recognized.Select(email => email.ToLowerInvariant()).ToList();
+        var accounts = await ManageableAccounts(userId).AsNoTracking()
+            .Where(account => normalizedEmails.Contains(account.EmailAddress.ToLower())).ToListAsync(cancellationToken);
         var accountGroups = accounts
             .GroupBy(account => account.EmailAddress, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.OrdinalIgnoreCase);
@@ -315,7 +322,7 @@ public sealed class OutboundMailTasksController : Controller
             }
 
             var available = candidates.FirstOrDefault(account =>
-                account.IsEnabled && _outboundMail.CanSend(account));
+                account.IsEnabled && account.Provider != ProviderType.IMPORT);
             if (available is null)
             {
                 unavailableEmails.Add(email);
@@ -332,6 +339,7 @@ public sealed class OutboundMailTasksController : Controller
             unavailableCount = unavailableEmails.Count,
             unmatchedCount = unmatchedEmails.Count,
             matchedAccountIds = matchedAccounts.Select(account => account.Id),
+            matchedAccounts = matchedAccounts.Select(account => new { account.Id, account.EmailAddress, account.Name, canSend = _outboundMail.CanSend(account), isEnabled = account.IsEnabled }),
             matchedEmails = matchedAccounts.Take(8).Select(account => account.EmailAddress),
             unavailableEmails = unavailableEmails.Take(8),
             unmatchedEmails = unmatchedEmails.Take(8)
@@ -340,6 +348,7 @@ public sealed class OutboundMailTasksController : Controller
 
     [HttpPost]
     [ValidateAntiForgeryToken]
+    [RequestFormLimits(ValueCountLimit = MaxRows + 10)]
     public async Task<IActionResult> DownloadSenderCsv(
         OutboundSenderDownloadRequest request,
         CancellationToken cancellationToken)
@@ -359,7 +368,7 @@ public sealed class OutboundMailTasksController : Controller
             .Where(account => selectedIds.Contains(account.Id))
             .ToListAsync(cancellationToken);
         var availableAccounts = accounts
-            .Where(account => account.IsEnabled && _outboundMail.CanSend(account))
+            .Where(account => account.IsEnabled && account.Provider != ProviderType.IMPORT)
             .ToList();
         if (availableAccounts.Count != selectedIds.Count)
             return BadRequest("账号列表或发件状态已经变化，请刷新页面后重新选择。");
@@ -378,52 +387,81 @@ public sealed class OutboundMailTasksController : Controller
         List<OutboundMailTaskCsvErrorViewModel>? errors = null,
         OutboundMailTaskTimingMode timingMode = OutboundMailTaskTimingMode.SendImmediately)
     {
-        var accounts = await GetManageableAccountsAsync(userId, cancellationToken);
+        var accountCount = await ManageableAccounts(userId)
+            .CountAsync(account => account.IsEnabled && account.Provider != ProviderType.IMPORT, cancellationToken);
         var tasks = await _context.OutboundMailTasks
             .AsNoTracking()
             .Where(task => task.CreatedByUserId == userId)
-            .Include(task => task.Items)
             .OrderByDescending(task => task.CreatedAtUtc)
             .Take(50)
-            .ToListAsync(cancellationToken);
+            .Select(task => new OutboundMailTaskSummaryViewModel {
+                Id = task.Id, Name = task.Name, CreatedAtUtc = task.CreatedAtUtc, Total = task.Items.Count,
+                Pending = task.Items.Count(i => i.Status == OutboundMailTaskItemStatus.Pending),
+                Sending = task.Items.Count(i => i.Status == OutboundMailTaskItemStatus.Sending),
+                Sent = task.Items.Count(i => i.Status == OutboundMailTaskItemStatus.Sent || i.Status == OutboundMailTaskItemStatus.SentWithoutCopy),
+                Failed = task.Items.Count(i => i.Status == OutboundMailTaskItemStatus.Failed),
+                Interrupted = task.Items.Count(i => i.Status == OutboundMailTaskItemStatus.Interrupted),
+                Cancelled = task.Items.Count(i => i.Status == OutboundMailTaskItemStatus.Cancelled)
+            }).ToListAsync(cancellationToken);
 
         return new OutboundMailTaskIndexViewModel
         {
             TimeZoneId = _displayTimeZone.Id,
             TimingMode = timingMode,
             ImportErrors = errors ?? [],
-            SenderAccounts = accounts
-                .GroupBy(account => account.EmailAddress, StringComparer.OrdinalIgnoreCase)
-                .Select(group =>
-                {
-                    var selected = group.FirstOrDefault(account =>
-                            account.IsEnabled && _outboundMail.CanSend(account))
-                        ?? group.OrderBy(account => account.Id).First();
-                    return new OutboundSenderAccountViewModel
-                    {
-                        Id = selected.Id,
-                        Name = selected.Name,
-                        EmailAddress = selected.EmailAddress,
-                        IsEnabled = selected.IsEnabled,
-                        CanSend = selected.IsEnabled && _outboundMail.CanSend(selected)
-                    };
-                })
-                .OrderBy(account => account.EmailAddress, StringComparer.OrdinalIgnoreCase)
-                .ToList(),
-            Tasks = tasks.Select(task => new OutboundMailTaskSummaryViewModel
-            {
-                Id = task.Id,
-                Name = task.Name,
-                CreatedAtUtc = task.CreatedAtUtc,
-                Total = task.Items.Count,
-                Pending = task.Items.Count(item => item.Status == OutboundMailTaskItemStatus.Pending),
-                Sending = task.Items.Count(item => item.Status == OutboundMailTaskItemStatus.Sending),
-                Sent = task.Items.Count(item => item.Status is OutboundMailTaskItemStatus.Sent or OutboundMailTaskItemStatus.SentWithoutCopy),
-                Failed = task.Items.Count(item => item.Status == OutboundMailTaskItemStatus.Failed),
-                Interrupted = task.Items.Count(item => item.Status == OutboundMailTaskItemStatus.Interrupted),
-                Cancelled = task.Items.Count(item => item.Status == OutboundMailTaskItemStatus.Cancelled)
-            }).ToList()
+            SenderAccountCount = accountCount,
+            Tasks = tasks
         };
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> SearchSenders(string? query, int page = 1, CancellationToken cancellationToken = default)
+    {
+        if (!_outboundOptions.Enabled) return NotFound();
+        var accounts = ManageableAccounts(RequireUserId()).AsNoTracking()
+            .Where(account => account.Provider != ProviderType.IMPORT);
+        if (!string.IsNullOrWhiteSpace(query))
+        {
+            var term = query.Trim().ToLower();
+            accounts = accounts.Where(a => a.EmailAddress.ToLower().Contains(term) || a.Name.ToLower().Contains(term));
+        }
+        var rows = await accounts.OrderBy(a => a.EmailAddress).ThenBy(a => a.Id)
+            .Skip((Math.Clamp(page, 1, 2000) - 1) * 50).Take(51).ToListAsync(cancellationToken);
+        return Json(new { hasMore = rows.Count > 50, accounts = rows.Take(50).Select(a => new {
+            a.Id, a.EmailAddress, a.Name, a.IsEnabled, canSend = _outboundMail.CanSend(a),
+            state = _preparationQueue?.GetStatus(a.Id).State.ToString() ?? "NotQueued",
+            status = a.CredentialDetectionStatus
+        }) });
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    [RequestFormLimits(ValueCountLimit = MaxRows + 10)]
+    public async Task<IActionResult> PrepareSenders(OutboundSenderDownloadRequest request, CancellationToken cancellationToken)
+    {
+        if (!_outboundOptions.Enabled) return NotFound();
+        var ids = request.SelectedAccountIds.Distinct().ToList();
+        if (ids.Count is 0 or > MaxRows) return BadRequest(new { message = "请选择 1–5000 个账号。" });
+        var userId = RequireUserId();
+        var accounts = await ManageableAccounts(userId).Where(a => ids.Contains(a.Id)
+            && a.IsEnabled && a.Provider != ProviderType.IMPORT).Select(a => a.Id).ToListAsync(cancellationToken);
+        if (accounts.Count != ids.Count) return BadRequest(new { message = "所选账号已停用、不存在或无权使用。" });
+        foreach (var id in accounts) _preparationQueue!.Enqueue(id, MailSyncRequestPriority.Interactive,
+            MailSyncRequestKind.PrepareSending, new MailSyncRequestOptions(7, RequestedByUserId: userId));
+        return Json(new { queued = accounts.Count });
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    [RequestFormLimits(ValueCountLimit = MaxRows + 10)]
+    public async Task<IActionResult> SenderStatus(OutboundSenderDownloadRequest request, CancellationToken cancellationToken)
+    {
+        if (!_outboundOptions.Enabled) return NotFound();
+        var ids = request.SelectedAccountIds.Distinct().Take(MaxRows).ToList();
+        var accounts = await ManageableAccounts(RequireUserId()).AsNoTracking().Where(a => ids.Contains(a.Id)).ToListAsync(cancellationToken);
+        return Json(new { accounts = accounts.Select(a => new { a.Id, a.EmailAddress,
+            canSend = _outboundMail.CanSend(a), state = _preparationQueue!.GetStatus(a.Id).State.ToString(),
+            status = a.CredentialDetectionStatus }) });
     }
 
     private IQueryable<MailAccount> ManageableAccounts(int userId)
@@ -431,13 +469,6 @@ public sealed class OutboundMailTasksController : Controller
             _context.MailAccounts,
             userId,
             _authentication.IsCurrentUserAdmin(HttpContext));
-
-    private Task<List<MailAccount>> GetManageableAccountsAsync(
-        int userId,
-        CancellationToken cancellationToken)
-        => ManageableAccounts(userId)
-            .AsNoTracking()
-            .ToListAsync(cancellationToken);
 
     private int RequireUserId()
         => _authentication.GetCurrentUserId(HttpContext)

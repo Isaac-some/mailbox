@@ -2,6 +2,24 @@ name: Verify Desktop Release
 
 on:
   workflow_dispatch:
+    inputs:
+      release_asset_url:
+        description: Public Windows ZIP to verify on Windows after the build checks
+        required: false
+        type: string
+      release_asset_sha256:
+        description: SHA-256 of the exact Windows ZIP
+        required: false
+        type: string
+
+      mac_release_asset_url:
+        description: Public Mac DMG for the same release
+        required: false
+        type: string
+      mac_release_asset_sha256:
+        description: SHA-256 of the exact Mac DMG
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -44,6 +62,59 @@ jobs:
             if ($status.enabled) { throw 'The isolated CI test must not call the live platform.' }
             if (-not (Test-Path "$env:MAIL_ASSISTANT_DATA_DIRECTORY/mail-archive.sqlite")) { throw 'Isolated SQLite database was not created.' }
             'PASS: Windows native launcher, packaged runtime, local HTTP, SQLite, initialization status.' | Out-File TestResults/windows-startup.txt
+          } finally {
+            if (-not $app.HasExited) { & taskkill /PID $app.Id /T /F }
+          }
+      - name: Verify the exact public Windows release ZIP
+        if: inputs.release_asset_url != ''
+        shell: pwsh
+        env:
+          RELEASE_ASSET_URL: ${{ inputs.release_asset_url }}
+          RELEASE_ASSET_SHA256: ${{ inputs.release_asset_sha256 }}
+          MAC_RELEASE_ASSET_URL: ${{ inputs.mac_release_asset_url }}
+          MAC_RELEASE_ASSET_SHA256: ${{ inputs.mac_release_asset_sha256 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = Join-Path $env:RUNNER_TEMP 'release.zip'
+          Invoke-WebRequest $env:RELEASE_ASSET_URL -OutFile $zip -TimeoutSec 180
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne $env:RELEASE_ASSET_SHA256.ToLowerInvariant()) { throw 'Release ZIP checksum mismatch.' }
+          if ($env:MAC_RELEASE_ASSET_URL) {
+            $mac = Join-Path $env:RUNNER_TEMP 'mac-release.dmg'
+            Invoke-WebRequest $env:MAC_RELEASE_ASSET_URL -OutFile $mac -TimeoutSec 180
+            if ((Get-FileHash $mac -Algorithm SHA256).Hash.ToLowerInvariant() -ne $env:MAC_RELEASE_ASSET_SHA256.ToLowerInvariant()) { throw 'Mac public download checksum mismatch.' }
+          }
+          'PASS: supplied public release links downloaded and passed SHA-256 verification.' | Out-File TestResults/public-downloads.txt
+          $extract = Join-Path $env:RUNNER_TEMP 'exact-release'
+          Expand-Archive $zip -DestinationPath $extract
+          $launcher = Get-ChildItem $extract -Recurse -Filter '邮箱助手.exe' | Select-Object -First 1
+          if (-not $launcher) { throw 'UTF-8 launcher is missing.' }
+          $settings = Get-Content (Join-Path $launcher.DirectoryName 'server/appsettings.Local.json') -Raw | ConvertFrom-Json
+          if ($settings.UpstreamMailboxSync.BearerToken) { throw 'Release settings contain a plaintext token.' }
+          $env:MAIL_ASSISTANT_DATA_DIRECTORY = Join-Path $env:RUNNER_TEMP 'exact-release-data'
+          $env:MAIL_ASSISTANT_PORT = '5140'
+          Remove-Item Env:UpstreamMailboxSync__Enabled -ErrorAction SilentlyContinue
+          $app = Start-Process $launcher.FullName -PassThru
+          try {
+            $ready = $false
+            for ($attempt = 0; $attempt -lt 180; $attempt++) {
+              if ($app.HasExited) { throw 'Release native app exited before readiness.' }
+              try {
+                $status = Invoke-RestMethod 'http://127.0.0.1:5140/MailAccounts/InitializationStatus' -TimeoutSec 3
+                if ($status.error) { throw 'Platform initialization failed; inspect the platform report.' }
+                if ($status.ready -and $status.loaded -ge 20) { $ready = $true; break }
+              } catch {
+                if ($_.Exception.Message -like 'Platform initialization failed*') { throw }
+              }
+              Start-Sleep -Seconds 1
+            }
+            if (-not $ready) { throw 'Exact release did not load real platform accounts.' }
+            $report = Invoke-RestMethod 'http://127.0.0.1:5140/LocalMaintenance/PlatformReport'
+            $expectedVersion = ([xml](Get-Content windows-app/MailAssistant.Windows.csproj)).Project.PropertyGroup.Version
+            if ($report.appVersion -ne $expectedVersion -or $report.accountCount -lt 20) { throw 'Invalid release report.' }
+            if (-not ($report.requests | Where-Object { $_.HttpStatus -eq 200 -and $_.RequestId -like 'mailbox-*' })) { throw 'Real HTTP 200 receipt missing.' }
+            $report | ConvertTo-Json -Depth 10 | Out-File TestResults/exact-release-report.json
+            "PASS: exact public ZIP SHA256=$hash; Unicode extraction, native Windows launcher, bundled runtime, fresh SQLite, compiled authorization, real platform accounts, safe request report." | Out-File TestResults/exact-release-startup.txt
           } finally {
             if (-not $app.HasExited) { & taskkill /PID $app.Id /T /F }
           }

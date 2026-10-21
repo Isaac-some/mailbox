@@ -38,6 +38,7 @@ public sealed class UpstreamMailboxSyncService : IUpstreamMailboxSyncService
     private readonly UpstreamMailboxSyncOptions _options;
     private readonly ILogger<UpstreamMailboxSyncService> _logger;
     private readonly UpstreamMailboxSyncProgress? _progress;
+    private readonly UpstreamMailboxRequestJournal? _journal;
 
     public UpstreamMailboxSyncService(
         IHttpClientFactory httpClientFactory,
@@ -45,7 +46,8 @@ public sealed class UpstreamMailboxSyncService : IUpstreamMailboxSyncService
         IUpstreamMailboxSyncCursorStore cursorStore,
         IOptions<UpstreamMailboxSyncOptions> options,
         ILogger<UpstreamMailboxSyncService> logger,
-        UpstreamMailboxSyncProgress? progress = null)
+        UpstreamMailboxSyncProgress? progress = null,
+        UpstreamMailboxRequestJournal? journal = null)
     {
         _httpClientFactory = httpClientFactory;
         _intake = intake;
@@ -53,6 +55,7 @@ public sealed class UpstreamMailboxSyncService : IUpstreamMailboxSyncService
         _options = options.Value;
         _logger = logger;
         _progress = progress;
+        _journal = journal;
     }
 
     public async Task<UpstreamMailboxSyncResult> PullAsync(int userId, CancellationToken cancellationToken = default)
@@ -361,15 +364,32 @@ public sealed class UpstreamMailboxSyncService : IUpstreamMailboxSyncService
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearerToken);
             AddClientMetadataHeaders(request, metadata);
+            var requestId = "mailbox-" + Guid.NewGuid().ToString("N");
+            request.Headers.TryAddWithoutValidation("X-Request-ID", requestId);
+            var startedAt = DateTimeOffset.UtcNow;
+            var elapsed = System.Diagnostics.Stopwatch.StartNew();
+            int? httpStatus = null;
 
             HttpResponseMessage response;
             try
             {
                 response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+                httpStatus = (int)response.StatusCode;
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
                 return new HttpResponseMessage(System.Net.HttpStatusCode.RequestTimeout);
+            }
+            finally
+            {
+                var query = System.Web.HttpUtility.ParseQueryString(requestUri.Query);
+                _journal?.Record(new(requestId, startedAt, requestUri.Host,
+                    int.TryParse(query["page"], out var page) ? page : 0,
+                    int.TryParse(query["pageSize"], out var size) ? size : 0,
+                    query["email"] is not null, query["updatedSince"] is not null,
+                    httpStatus, elapsed.ElapsedMilliseconds));
+                _logger.LogInformation("Platform request {RequestId}: HTTP {Status}, headers in {DurationMs} ms",
+                    requestId, httpStatus, elapsed.ElapsedMilliseconds);
             }
 
             if (response.IsSuccessStatusCode)

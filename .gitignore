@@ -321,3 +321,10 @@ update_resource_files.ps1
 nextrelease.md
 AGENTS.md
 tests/MailArchiver.Tests/appsettings.Test.json
+
+# Local learned mail connectivity; never distribute mailbox/domain observations.
+mail-domain-profiles.json
+mail-domain-profiles.json.*.tmp
+
+# Private screen recordings and extracted feedback.
+.blurt/sessions/

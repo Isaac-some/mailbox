@@ -20,12 +20,13 @@
                 <ul class="mb-2 mt-1">
                     <li>不要求固定列数；程序会从常见中英文表头或行内容中识别邮箱和授权码，可直接导入截图这类带“邮箱、密码、IMAP授权码、2fa”的文件。</li>
                     <li>自动清理授权码中的空格、换行和不可见字符；保留大小写和符号。</li>
-                    <li>标准格式固定为 <code>email, domain, credential, client_id</code>；Outlook OAuth2 才填写 <code>client_id</code>，其他邮箱留空。</li>
+                    <li>标准格式固定为 <code>email, domain, credential, client_id</code>；使用 OAuth2 时填写 <code>client_id</code>，使用密码时留空。</li>
                     <li>能识别到有效邮箱和非空授权码即进入“已保存，等待验证”；不在导入阶段连接邮箱服务器。</li>
                     <li>导入完成后可点击“验证本批账号”；单独打开邮箱或点击刷新仍会按单账号流程验证。</li>
                     <li>同邮箱再次导入时，用新四字段完整覆盖旧数据。</li>
                     <li>@Localizer["CsvImportAdminOnlyNote"]</li>
                 </ul>
+                <a asp-controller="MailDomains" asp-action="Index" class="btn btn-sm btn-outline-secondary">域名连接设置</a>
                 <a asp-action="DownloadExampleCsv" class="btn btn-sm btn-outline-info">
                     <i class="bi bi-download me-1"></i> @Localizer["DownloadExampleCsv"]
                 </a>

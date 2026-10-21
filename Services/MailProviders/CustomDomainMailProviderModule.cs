@@ -11,6 +11,7 @@ namespace MailArchiver.Services.MailProviders;
 /// </summary>
 public sealed class CustomDomainMailProviderModule : PasswordAndOAuthMailProviderModule
 {
+    private readonly IMailDomainProfileStore? _profiles;
     private static readonly HashSet<string> BuiltInDomains = new(StringComparer.OrdinalIgnoreCase)
     {
         "gmail.com", "googlemail.com",
@@ -20,8 +21,9 @@ public sealed class CustomDomainMailProviderModule : PasswordAndOAuthMailProvide
     public CustomDomainMailProviderModule(
         IExternalOAuthTokenManager tokenManager,
         ICredentialEncryptionService credentialEncryption,
-        INetworkMailProxyFactory? networkMail = null)
-        : base(tokenManager, credentialEncryption, networkMail) { }
+        INetworkMailProxyFactory? networkMail = null,
+        IMailDomainProfileStore? profiles = null)
+        : base(tokenManager, credentialEncryption, networkMail, profiles) { _profiles = profiles; }
 
     public override MailProviderKind Kind => MailProviderKind.Custom;
     public override string DisplayName => "自定义域名";
@@ -36,23 +38,29 @@ public sealed class CustomDomainMailProviderModule : PasswordAndOAuthMailProvide
     }
 
     public override ImapEndpoint GetIncomingEndpoint(MailAccount account)
-        => new(
+        => _profiles?.Find(DomainOf(account.EmailAddress)!)?.Incoming is { } saved
+            ? new(saved.Host, saved.Port, true, saved.SocketOptions)
+            : new(
             string.IsNullOrWhiteSpace(account.ImapServer)
                 ? $"imap.{DomainOf(account.EmailAddress)}"
                 : account.ImapServer,
             account.ImapPort ?? 993,
             account.UseSSL);
 
+    protected override ExternalOAuthSettings? GetOAuth(MailAccount account)
+        => _profiles?.Find(DomainOf(account.EmailAddress)!)?.OAuth;
+
     protected override string GetSmtpHost(MailAccount account)
-        => string.IsNullOrWhiteSpace(account.SmtpServer)
+        => _profiles?.Find(DomainOf(account.EmailAddress)!)?.Outgoing?.Host ?? (string.IsNullOrWhiteSpace(account.SmtpServer)
             ? $"smtp.{DomainOf(account.EmailAddress)}"
-            : account.SmtpServer;
+            : account.SmtpServer);
 
     protected override int GetSmtpPort(MailAccount account)
-        => account.SmtpPort ?? base.GetSmtpPort(account);
+        => _profiles?.Find(DomainOf(account.EmailAddress)!)?.Outgoing?.Port ?? account.SmtpPort ?? base.GetSmtpPort(account);
 
     protected override MailKit.Security.SecureSocketOptions GetSmtpSocketOptions(MailAccount account)
     {
+        if (_profiles?.Find(DomainOf(account.EmailAddress)!)?.Outgoing is { } saved) return saved.SocketOptions;
         if (account.SmtpUseSSL == false)
             return MailKit.Security.SecureSocketOptions.None;
         return GetSmtpPort(account) == 465

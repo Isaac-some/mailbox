@@ -8,8 +8,8 @@ public sealed class GmxMailProviderModule : PasswordAndOAuthMailProviderModule
     public GmxMailProviderModule(
         IExternalOAuthTokenManager tokenManager,
         ICredentialEncryptionService credentialEncryption,
-        INetworkMailProxyFactory? networkMail = null)
-        : base(tokenManager, credentialEncryption, networkMail) { }
+        INetworkMailProxyFactory? networkMail = null, IMailDomainProfileStore? profiles = null)
+        : base(tokenManager, credentialEncryption, networkMail, profiles) { }
 
     public override MailProviderKind Kind => MailProviderKind.Gmx;
     public override string DisplayName => "GMX";

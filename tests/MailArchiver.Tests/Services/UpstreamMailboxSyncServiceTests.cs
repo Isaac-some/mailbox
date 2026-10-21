@@ -161,6 +161,7 @@ public class UpstreamMailboxSyncServiceTests
     {
         await using var fixture = await Fixture.CreateAsync();
         var handler = new RetryHandler();
+        var journal = new UpstreamMailboxRequestJournal();
         var service = new UpstreamMailboxSyncService(
             new StubHttpClientFactory(handler),
             fixture.Intake,
@@ -172,7 +173,7 @@ public class UpstreamMailboxSyncServiceTests
                 BearerToken = "bundled-token",
                 RequireBearerToken = true
             }),
-            NullLogger<UpstreamMailboxSyncService>.Instance);
+            NullLogger<UpstreamMailboxSyncService>.Instance, journal: journal);
 
         var result = await service.PullAsync(fixture.UserId);
 
@@ -180,6 +181,13 @@ public class UpstreamMailboxSyncServiceTests
         Assert.Contains("HTTP 401", result.Error);
         Assert.Equal(1, handler.RequestCount);
         Assert.Equal("bundled-token", handler.LastAuthorization);
+        Assert.Empty(await fixture.Context.MailAccounts.ToListAsync());
+        var receipt = Assert.Single(journal.Read());
+        Assert.Equal(401, receipt.HttpStatus);
+        Assert.StartsWith("mailbox-", receipt.RequestId);
+        Assert.Equal(handler.LastRequestId, receipt.RequestId);
+        var report = System.Text.Json.JsonSerializer.Serialize(receipt);
+        Assert.DoesNotContain("bundled-token", report);
     }
 
     [Fact]
@@ -412,6 +420,7 @@ public class UpstreamMailboxSyncServiceTests
     {
         public int RequestCount { get; private set; }
         public string? LastAuthorization { get; private set; }
+        public string? LastRequestId { get; private set; }
 
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
@@ -419,6 +428,7 @@ public class UpstreamMailboxSyncServiceTests
         {
             RequestCount++;
             LastAuthorization = request.Headers.Authorization?.Parameter;
+            LastRequestId = request.Headers.GetValues("X-Request-ID").Single();
             if (RequestCount == 1)
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized)
                 {

@@ -4,7 +4,7 @@ using MimeKit;
 
 namespace MailArchiver.Services.MailProviders;
 
-public sealed record ImapEndpoint(string Host, int Port, bool UseSsl);
+public sealed record ImapEndpoint(string Host, int Port, bool UseSsl, MailKit.Security.SecureSocketOptions? SocketOptions = null);
 
 public sealed record MailAccountCapabilities(
     bool CanReceive,

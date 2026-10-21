@@ -8,18 +8,9 @@ public sealed class OutboundMailTaskIndexViewModel
     public IFormFile? CsvFile { get; set; }
     public OutboundMailTaskTimingMode TimingMode { get; set; } = OutboundMailTaskTimingMode.SendImmediately;
     public List<OutboundMailTaskCsvErrorViewModel> ImportErrors { get; set; } = [];
-    public List<OutboundSenderAccountViewModel> SenderAccounts { get; set; } = [];
+    public int SenderAccountCount { get; set; }
     public List<OutboundMailTaskSummaryViewModel> Tasks { get; set; } = [];
     public string TimeZoneId { get; set; } = "Asia/Shanghai";
-}
-
-public sealed class OutboundSenderAccountViewModel
-{
-    public int Id { get; set; }
-    public string Name { get; set; } = string.Empty;
-    public string EmailAddress { get; set; } = string.Empty;
-    public bool IsEnabled { get; set; }
-    public bool CanSend { get; set; }
 }
 
 public sealed class OutboundSenderMatchRequest

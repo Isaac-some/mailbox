@@ -16,7 +16,8 @@ public enum MailSyncRequestKind
 {
     ValidateConnection,
     Synchronize,
-    FullResync
+    FullResync,
+    PrepareSending
 }
 
 public enum MailSyncQueueState
@@ -219,6 +220,25 @@ public sealed class OnDemandMailSyncQueue : BackgroundService, IOnDemandMailSync
         if (account is null || !account.IsEnabled || account.Provider == ProviderType.IMPORT)
         {
             _logger.LogWarning("Skipping queued mail task for unavailable account {AccountId}", entry.AccountId);
+            return;
+        }
+
+        if (entry.Kind == MailSyncRequestKind.PrepareSending)
+        {
+            var ownerId = entry.Options?.RequestedByUserId
+                ?? throw new InvalidOperationException("发件验证缺少请求用户。");
+            try
+            {
+                await services.GetRequiredService<OutboundAccountPreparation>()
+                    .PrepareAsync(account, ownerId, stoppingToken);
+            }
+            catch (Exception) when (!stoppingToken.IsCancellationRequested)
+            {
+                account.CredentialLastCheckedAt = DateTime.UtcNow;
+                account.CredentialDetectionStatus = "VerificationFailed";
+                await dbContext.SaveChangesAsync(stoppingToken);
+                throw;
+            }
             return;
         }
 

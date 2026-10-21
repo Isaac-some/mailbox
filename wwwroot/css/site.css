@@ -2076,3 +2076,20 @@ a:hover { color: var(--app-blue-pressed); }
 @media (max-width: 576px) {
     .csv-import-tasks { right: 8px; bottom: 8px; width: calc(100vw - 16px); }
 }
+
+/* Sender selection and the three-stage outbound workflow. */
+.sender-chips { display: flex; flex-wrap: wrap; gap: .45rem; margin-bottom: .6rem; max-height: 160px; overflow: auto; }
+.sender-chip { display: inline-flex; align-items: center; gap: .35rem; background: #e9effa; color: #183a71; border-radius: 8px; padding: .2rem .45rem; overflow-wrap: anywhere; }
+.sender-chip button { padding: 0 .35rem; font-size: 1.15rem; }
+.sender-picker-results { max-height: 240px; overflow: auto; margin-top: .4rem; }
+.outbound-steps { display: flex; gap: .6rem; margin: 0 0 1.25rem; flex-wrap: wrap; }
+.outbound-steps button { border: 1px solid #d4d8df; background: #fff; padding: .65rem 1rem; border-radius: 9px; color: #495465; }
+.outbound-steps button[aria-selected="true"] { color: #fff; background: #285dbc; border-color: #285dbc; }
+[data-task-panel][hidden] { display: none !important; }
+.app-chrome .navbar { padding-inline: 1.5rem; }
+.app-chrome .navbar > .container-fluid { max-width: 1552px; margin-inline: auto; }
+@media (max-width: 767px) { .app-chrome .navbar { padding-inline: 1rem; } }
+
+.page-back-link { display: inline-flex; align-items: center; gap: .4rem; margin-bottom: 1rem; text-decoration: none; }
+.sender-picker-results .sender-account-row,
+[data-sender-picker] .sender-account-row { display: block; text-align: left !important; font-weight: 400; }

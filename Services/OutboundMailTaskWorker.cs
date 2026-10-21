@@ -80,6 +80,13 @@ public sealed class OutboundMailTaskWorker : BackgroundService
 
         try
         {
+            var preparation = sendScope.ServiceProvider.GetService<OutboundAccountPreparation>();
+            if (preparation is not null)
+            {
+                var userId = await sendContext.OutboundMailTasks.Where(t => t.Id == claimedItem.OutboundMailTaskId)
+                    .Select(t => t.CreatedByUserId).SingleAsync(cancellationToken);
+                await preparation.PrepareAsync(claimedItem.MailAccount, userId, cancellationToken, forceRefresh: false);
+            }
             var result = await sendService.SendAsync(
                 claimedItem.MailAccount,
                 new OutboundMailMessage(

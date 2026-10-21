@@ -7,7 +7,7 @@ BUILD_DIR="${MAIL_ASSISTANT_BUILD_DIR:-$SCRIPT_DIR/build}"
 APP_NAME="邮箱助手"
 APP_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$SCRIPT_DIR/Info.plist")"
 DMG_PATH="$BUILD_DIR/MailAssistant-AppleSilicon-v$APP_VERSION.dmg"
-ICON_FILE="$SCRIPT_DIR/AppIcon.icns"
+ICON_FILE="${MAIL_ASSISTANT_ICON_FILE:-$SCRIPT_DIR/AppIcon.icns}"
 LOCAL_DOTNET="$PROJECT_DIR/.local-tools/dotnet/dotnet"
 if [[ -n "${DOTNET_BIN:-}" ]]; then
   DOTNET_BIN="$DOTNET_BIN"
@@ -101,20 +101,18 @@ if [[ -d "$PROJECT_DIR/wwwroot" && ! -d "$APP_BUILD_PATH/Contents/Resources/serv
   ditto "$PROJECT_DIR/wwwroot" "$APP_BUILD_PATH/Contents/Resources/server/wwwroot"
 fi
 
-# Inject release-only platform settings. The live credential is supplied by the
-# build environment and is never written to the source checkout or git history.
+# The release token is compiled by build-local-macos-release.sh. Keep the public
+# package's JSON settings free of tenant credentials.
 APP_SETTINGS_PATH="$APP_BUILD_PATH/Contents/Resources/server/appsettings.Local.json"
 cp "$PROJECT_DIR/appsettings.Local.template.json" "$APP_SETTINGS_PATH"
-if [[ -n "${MAIL_ASSISTANT_UPSTREAM_TOKEN:-}" || -n "${MAIL_ASSISTANT_UPSTREAM_ENDPOINT:-}" ]]; then
+if [[ -n "${MAIL_ASSISTANT_UPSTREAM_TOKEN:-}" && -z "${BundledPlatformTokenSource:-}" ]]; then
+  print -u2 "请通过 script/build-local-macos-release.sh 构建，确保授权编译进程序。"
+  exit 5
+fi
+if [[ -n "${MAIL_ASSISTANT_UPSTREAM_ENDPOINT:-}" ]]; then
   if ! command -v jq >/dev/null 2>&1; then
     print -u2 "缺少 jq，无法把平台配置注入发布包。请先安装 jq。"
     exit 5
-  fi
-  if [[ -n "${MAIL_ASSISTANT_UPSTREAM_TOKEN:-}" ]]; then
-    jq --arg token "$MAIL_ASSISTANT_UPSTREAM_TOKEN" \
-      '.UpstreamMailboxSync.BearerToken = $token' \
-      "$APP_SETTINGS_PATH" > "$APP_SETTINGS_PATH.tmp"
-    mv "$APP_SETTINGS_PATH.tmp" "$APP_SETTINGS_PATH"
   fi
   if [[ -n "${MAIL_ASSISTANT_UPSTREAM_ENDPOINT:-}" ]]; then
     jq --arg endpoint "$MAIL_ASSISTANT_UPSTREAM_ENDPOINT" \
@@ -230,6 +228,7 @@ codesign --verify --deep --verbose=2 "$APP_PATH"
 STAGING_DIR="$WORK_DIR/dmg-root"
 mkdir -p "$STAGING_DIR"
 ditto --noextattr --noqtn "$APP_BUILD_PATH" "$STAGING_DIR/$APP_NAME.app"
+cp "$SCRIPT_DIR/后端测试说明.md" "$STAGING_DIR/后端测试说明.md"
 codesign --verify --deep --strict --verbose=2 "$STAGING_DIR/$APP_NAME.app"
 ln -s /Applications "$STAGING_DIR/Applications"
 hdiutil create \

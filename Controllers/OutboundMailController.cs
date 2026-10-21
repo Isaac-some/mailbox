@@ -20,15 +20,17 @@ public sealed class OutboundMailController : Controller
     private readonly IOutboundMailService _outboundMail;
     private readonly OutboundMailOptions _options;
     private readonly ILogger<OutboundMailController> _logger;
+    private readonly OutboundAccountPreparation? _preparation;
 
     public OutboundMailController(
         MailArchiverDbContext context,
         IAuthenticationService authentication,
         IOutboundMailService outboundMail,
         IOptions<OutboundMailOptions> options,
-        ILogger<OutboundMailController> logger)
+        ILogger<OutboundMailController> logger, OutboundAccountPreparation? preparation = null)
     {
         _context = context;
+        _preparation = preparation;
         _authentication = authentication;
         _outboundMail = outboundMail;
         _options = options.Value;
@@ -66,16 +68,8 @@ public sealed class OutboundMailController : Controller
             model.Body = "\n\n----- 原邮件 -----\n" + original.Body;
         }
         await PopulateOptionsAsync(model, model.AccountQuery);
-        if (model.SendingAccounts.Count == 0)
-        {
-            ViewBag.AccountSearchMessage = string.IsNullOrWhiteSpace(model.AccountQuery)
-                ? "没有可发件的账号。请先在邮箱账号页点击“刷新收件箱”，完成 SMTP 发件检测；GMX 还需要应用专用密码。"
-                : "没有找到匹配且可发件的账号。请检查该账号的 SMTP 发件检测和应用专用密码。";
-            return View(model);
-        }
-
-        if (model.AccountId == 0 || model.SendingAccounts.All(item => item.Value != model.AccountId.ToString()))
-            model.AccountId = int.Parse(model.SendingAccounts[0].Value!);
+        if (model.AccountId > 0 && model.SendingAccounts.Any(item => item.Value == model.AccountId.ToString()))
+            model.AccountIds = [model.AccountId];
 
         return View(model);
     }
@@ -94,24 +88,21 @@ public sealed class OutboundMailController : Controller
         if (model.Subject?.Contains('\r') == true || model.Subject?.Contains('\n') == true)
             ModelState.AddModelError(nameof(model.Subject), "主题不能包含换行符。");
         ValidateAttachments(model);
+        if (to?.Count != 1) ModelState.AddModelError(nameof(model.To), "请填写一个收件邮箱；多个收件人请使用发件任务。");
+        var selectedIds = model.AccountIds.Count > 0 ? model.AccountIds.Distinct().ToList()
+            : model.AccountId > 0 ? [model.AccountId] : new List<int>();
+        model.AccountIds = selectedIds;
+        if (selectedIds.Count is 0 or > 20) ModelState.AddModelError(nameof(model.AccountIds), "请选择 1–20 个发件账号。");
 
         var userId = _authentication.GetCurrentUserId(HttpContext);
         var isAdmin = userId.HasValue && await IsAdministratorAsync(userId.Value, HttpContext.RequestAborted);
-        var account = userId.HasValue
-            ? await _context.MailAccounts
-                .FirstOrDefaultAsync(candidate =>
-                    candidate.Id == model.AccountId
-                    && candidate.IsEnabled
-                    && candidate.Provider != ProviderType.IMPORT
-                    && (isAdmin
-                        || candidate.UserMailAccounts.Any(ownership => ownership.UserId == userId.Value)),
-                    cancellationToken)
-            : null;
-
-        if (account is null)
-            ModelState.AddModelError(nameof(model.AccountId), "发件账号不存在、已停用或无权使用。");
-        else if (!_outboundMail.CanSend(account))
-            ModelState.AddModelError(nameof(model.AccountId), "该账号没有可用的发件凭据。");
+        var accounts = userId.HasValue
+            ? await _context.MailAccounts.Where(candidate => selectedIds.Contains(candidate.Id)
+                && candidate.IsEnabled && candidate.Provider != ProviderType.IMPORT
+                && (isAdmin || candidate.UserMailAccounts.Any(ownership => ownership.UserId == userId.Value)))
+                .OrderBy(candidate => candidate.Id).ToListAsync(cancellationToken) : [];
+        if (accounts.Count != selectedIds.Count)
+            ModelState.AddModelError(nameof(model.AccountIds), "发件账号不存在、已停用或无权使用。");
 
         if (!ModelState.IsValid)
         {
@@ -130,25 +121,36 @@ public sealed class OutboundMailController : Controller
                 stream.ToArray()));
         }
 
-        try
+        var remaining = new List<int>();
+        foreach (var account in accounts)
         {
-            var result = await _outboundMail.SendAsync(
-                account!,
-                new OutboundMailMessage(to!, cc!, model.Subject, model.Body, attachments),
-                cancellationToken);
-
-            TempData[result.SentCopySaved ? "SuccessMessage" : "ErrorMessage"] = result.SentCopySaved
-                ? "邮件已发送，并已保存到“已发送”。"
-                : "邮件已经发送，但“已发送”副本保存失败，请勿重复发送。";
-            return RedirectToAction("Index", "Emails", new { SelectedAccountId = account!.Id });
+            try
+            {
+                if (_preparation is not null) await _preparation.PrepareAsync(account, userId!.Value, cancellationToken, forceRefresh: false);
+                var result = await _outboundMail.SendAsync(account,
+                    new OutboundMailMessage(to!, cc!, model.Subject, model.Body, attachments), cancellationToken);
+                model.SendResults.Add($"{account.EmailAddress}：" + (result.SentCopySaved
+                    ? "已发送并保存到已发送。" : "已发出，副本保存失败，请勿重复发送。"));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("Outbound mail failed for account {AccountId}: {ExceptionType}", account.Id, ex.GetType().Name);
+                remaining.Add(account.Id);
+                ModelState.AddModelError(string.Empty, $"{account.EmailAddress}：{OutboundMailFailurePolicy.ToSafeMessage(ex)}");
+            }
         }
-        catch (Exception ex)
+        if (remaining.Count == 0)
         {
-            _logger.LogWarning(ex, "Outbound mail failed before completion for account {AccountId}", model.AccountId);
-            ModelState.AddModelError(string.Empty, OutboundMailFailurePolicy.ToSafeMessage(ex));
-            await PopulateOptionsAsync(model);
-            return View(model);
+            TempData["SuccessMessage"] = string.Join(" ", model.SendResults);
+            return RedirectToAction("Index", "Emails", new { SelectedAccountId = accounts[0].Id });
         }
+        // Successful senders are removed so a retry cannot resend their mail.
+        model.AccountId = 0;
+        model.AccountIds = remaining;
+        ModelState.Remove(nameof(model.AccountId));
+        ModelState.Remove(nameof(model.AccountIds));
+        await PopulateOptionsAsync(model);
+        return View(model);
     }
 
     private IReadOnlyList<string>? ParseRecipients(string? value, string fieldName)
@@ -207,10 +209,13 @@ public sealed class OutboundMailController : Controller
                 && account.Provider != ProviderType.IMPORT
                 && (isAdmin
                     || account.UserMailAccounts.Any(ownership => ownership.UserId == userId.Value))
-                && ((account.Password != null && account.Password != string.Empty)
-                    || (account.OAuthRefreshToken != null && account.OAuthRefreshToken != string.Empty)));
+                );
 
-        if (model.AccountId > 0)
+        if (model.AccountIds.Count > 0)
+        {
+            query = query.Where(account => model.AccountIds.Contains(account.Id));
+        }
+        else if (model.AccountId > 0)
         {
             query = query.Where(account => account.Id == model.AccountId);
         }
@@ -229,10 +234,7 @@ public sealed class OutboundMailController : Controller
             .OrderBy(account => account.EmailAddress)
             .Take(candidateLimit)
             .ToListAsync();
-        var sendingAccounts = accounts
-            .Where(_outboundMail.CanSend)
-            .Take(MaxSendingAccountOptions + 1)
-            .ToList();
+        var sendingAccounts = accounts.Take(MaxSendingAccountOptions + 1).ToList();
 
         model.HasMoreSendingAccounts = sendingAccounts.Count > MaxSendingAccountOptions
             || (model.AccountId == 0 && accounts.Count == candidateLimit);

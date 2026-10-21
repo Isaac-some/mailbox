@@ -143,7 +143,16 @@ namespace MailArchiver.Models.ViewModels
 
             if (Provider == ProviderType.IMAP && string.IsNullOrWhiteSpace(Password))
             {
-                if (!ExternalOAuthProviderPolicy.TryResolve(EmailAddress, out var oauthProvider) ||
+                ExternalOAuthProviderPolicy.TryResolve(EmailAddress, out var oauthProvider);
+                if (oauthProvider is null && !string.IsNullOrWhiteSpace(EmailAddress))
+                {
+                    var store = validationContext.GetService(typeof(IMailDomainProfileStore)) as IMailDomainProfileStore;
+                    if (System.Net.Mail.MailAddress.TryCreate(EmailAddress, out var address)
+                        && MailDomainProfileStore.IsSafeHost(address.Host)
+                        && store?.Find(address.Host)?.OAuth is { } configured)
+                        oauthProvider = new(configured.ProviderName, configured.TokenEndpoint, configured.RequiresClientSecret, configured.RequiresRedirectUri);
+                }
+                if (oauthProvider is null ||
                     string.IsNullOrWhiteSpace(ExternalOAuthClientId) ||
                     string.IsNullOrWhiteSpace(OAuthRefreshToken) ||
                     (oauthProvider.RequiresClientSecret && string.IsNullOrWhiteSpace(ExternalOAuthClientSecret)) ||
@@ -152,7 +161,7 @@ namespace MailArchiver.Models.ViewModels
                     yield return new ValidationResult(
                         oauthProvider?.RequiresClientSecret == true
                             ? "Yahoo 必须提供应用专用密码，或完整的 Client ID、Client Secret、Refresh Token、Redirect URI。"
-                            : "必须提供应用专用密码，或 Gmail 的 Client ID、Refresh Token。",
+                            : "必须提供邮箱密码 / 应用专用密码，或配置此域名的 OAuth 并填写 Client ID、Refresh Token。",
                         new[] { nameof(Password) });
                 }
             }

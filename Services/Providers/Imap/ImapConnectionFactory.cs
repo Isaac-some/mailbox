@@ -21,19 +21,23 @@ namespace MailArchiver.Services.Providers.Imap
         private readonly BatchOperationOptions _batchOptions;
         private readonly IMailProviderRegistry _mailProviderRegistry;
         private readonly INetworkMailProxyFactory _networkMail;
+        private readonly IMailEndpointDiscoveryService? _discovery;
+        private readonly IMailDomainProfileStore? _profiles;
 
         public ImapConnectionFactory(
             ILogger<ImapConnectionFactory> logger,
             IOptions<MailSyncOptions> mailSyncOptions,
             IOptions<BatchOperationOptions> batchOptions,
             IMailProviderRegistry mailProviderRegistry,
-            INetworkMailProxyFactory networkMail)
+            INetworkMailProxyFactory networkMail, IMailEndpointDiscoveryService? discovery = null, IMailDomainProfileStore? profiles = null)
         {
             _logger = logger;
             _mailSyncOptions = mailSyncOptions.Value;
             _batchOptions = batchOptions.Value;
             _mailProviderRegistry = mailProviderRegistry;
             _networkMail = networkMail;
+            _discovery = discovery;
+            _profiles = profiles;
         }
 
         /// <summary>
@@ -97,16 +101,27 @@ namespace MailArchiver.Services.Providers.Imap
 
         public async Task ConnectAccountAsync(ImapClient client, MailAccount account)
         {
+            if (_discovery is not null) await _discovery.DiscoverAsync(account);
             var module = _mailProviderRegistry.For(account);
             var endpoint = module.GetIncomingEndpoint(account);
+            account.ImapServer = endpoint.Host;
+            account.ImapPort = endpoint.Port;
             client.ServerCertificateValidationCallback = ServerCertificateValidationCallback;
-            await ConnectWithFallbackAsync(
-                client,
-                endpoint.Host,
-                endpoint.Port,
-                endpoint.UseSsl,
-                account.Name);
-            await module.AuthenticateIncomingAsync(client, account);
+            try
+            {
+                var socketOptions = endpoint.SocketOptions ?? (endpoint.UseSsl
+                    ? (endpoint.Port == 143 ? SecureSocketOptions.StartTls : SecureSocketOptions.SslOnConnect)
+                    : SecureSocketOptions.None);
+                await _networkMail.ConnectAsync(client, endpoint.Host, endpoint.Port,
+                    token => client.ConnectAsync(endpoint.Host, endpoint.Port, socketOptions, token));
+                await module.AuthenticateIncomingAsync(client, account);
+                if (_profiles is not null) await _profiles.RecordAttemptAsync(account, false, true);
+            }
+            catch (Exception ex)
+            {
+                if (_profiles is not null) await _profiles.RecordAttemptAsync(account, false, false, MailConnectionFailurePolicy.Classify(ex).Code.ToString());
+                throw;
+            }
         }
 
         /// <summary>

@@ -33,7 +33,7 @@ public static class MailConnectionFailurePolicy
         if (failures.Any(failure => failure is SslHandshakeException
             or System.Security.Authentication.AuthenticationException))
             return Failure(MailFailureCode.TlsFailed,
-                "TLS 安全连接失败，请检查代理或邮箱服务器证书。",
+                "TLS 安全连接失败，可能是服务器地址与证书不匹配、端口或加密方式不正确，也可能受代理影响；请检查域名连接设置。",
                 MailFailureStage.Tls, exception);
 
         if (failures.Any(failure => failure is OperationCanceledException))
@@ -64,7 +64,7 @@ public static class MailConnectionFailurePolicy
                 MailFailureCode.AuthenticationRejected => "授权码无效，请检查邮箱与授权码是否匹配。",
                 MailFailureCode.ProxyUnavailable => "代理拒绝了邮箱目标连接，请检查代理是否允许该目标主机和端口。",
                 MailFailureCode.TargetUnavailable => "连接失败，请检查网络、VPN、代理或邮箱服务是否可访问。",
-                MailFailureCode.TlsFailed => "TLS 安全连接失败，请检查代理或邮箱服务器证书。",
+                MailFailureCode.TlsFailed => "TLS 安全连接失败，可能是服务器地址与证书不匹配、端口或加密方式不正确，也可能受代理影响；请检查域名连接设置。",
                 MailFailureCode.ProtocolFailed => "邮箱服务器协议响应异常，请稍后重试。",
                 MailFailureCode.RateLimited => "当前同步已限流，请稍后重试。",
                 MailFailureCode.Cancelled => "同步任务已取消。",

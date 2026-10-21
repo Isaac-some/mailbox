@@ -155,6 +155,32 @@ public sealed class LocalMaintenanceController : Controller
         return RedirectToAction("Index", "MailAccounts");
     }
 
+    [HttpGet]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+    public async Task<IActionResult> PlatformReport(CancellationToken cancellationToken)
+    {
+        if (!IsLocalApp()) return NotFound();
+        var authentication = HttpContext.RequestServices.GetRequiredService<IAuthenticationService>();
+        var userId = authentication.GetCurrentUserId(HttpContext);
+        if (!userId.HasValue) return Unauthorized();
+        var receipts = HttpContext.RequestServices.GetRequiredService<UpstreamMailboxRequestJournal>().Read();
+        var progress = HttpContext.RequestServices.GetRequiredService<UpstreamMailboxSyncProgress>().Get(userId.Value);
+        var report = new
+        {
+            generatedAt = DateTimeOffset.UtcNow,
+            appVersion = typeof(LocalMaintenanceController).Assembly.GetName().Version?.ToString(3),
+            accountCount = await _context.MailAccounts.CountAsync(cancellationToken),
+            archivedMailCount = await _context.ArchivedEmails.CountAsync(cancellationToken),
+            initialization = new { progress.Started, progress.Running, progress.Processed, progress.Total,
+                progress.Rejected, failed = progress.Error is not null },
+            note = "HTTP status describes the platform account API response headers, not mail delivery. RequestId is also sent as X-Request-ID. Existing data may come from earlier syncs or imports. No passwords, addresses, tokens or mail bodies are included.",
+            requests = receipts
+        };
+        return File(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(report,
+            new System.Text.Json.JsonSerializerOptions { WriteIndented = true }),
+            "application/json", $"mailbox-platform-report-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}.json");
+    }
+
     [HttpPost]
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> ClearMailData()

@@ -3,7 +3,8 @@ namespace MailArchiver.Models;
 public sealed record MailSyncRequestOptions(
     int LookbackDays,
     MailboxFolderCategory? TargetCategory = null,
-    int? TargetLimit = null)
+    int? TargetLimit = null,
+    int? RequestedByUserId = null)
 {
     public int RemoteDiscoveryLookbackDays => Math.Max(30, LookbackDays);
 
@@ -23,6 +24,7 @@ public sealed record MailSyncRequestOptions(
         return new MailSyncRequestOptions(
             Math.Max(left.LookbackDays, right.LookbackDays),
             target,
-            target.HasValue ? Math.Max(left.TargetLimit ?? 10, right.TargetLimit ?? 10) : null);
+            target.HasValue ? Math.Max(left.TargetLimit ?? 10, right.TargetLimit ?? 10) : null,
+            right.RequestedByUserId ?? left.RequestedByUserId);
     }
 }

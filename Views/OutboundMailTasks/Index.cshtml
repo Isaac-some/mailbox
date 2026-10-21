@@ -19,14 +19,19 @@
         </div>
     </header>
 
-    <section class="card sender-csv-builder mb-4">
+    <nav class="outbound-steps" aria-label="发件流程" role="tablist">
+        <button type="button" role="tab" data-step="prepare" aria-selected="true">1 · 生成发件 CSV</button>
+        <button type="button" role="tab" data-step="send" aria-selected="false">2 · 上传并发件</button>
+        <button type="button" role="tab" data-step="history" aria-selected="false">3 · 发件历史</button>
+    </nav>
+    <section class="card sender-csv-builder mb-4" id="step-prepare" role="tabpanel" data-task-panel="prepare">
         <div class="card-header d-flex align-items-center justify-content-between gap-3 flex-wrap">
             <div>
                 <h2 class="h5 mb-1">生成发件 CSV</h2>
                 <p class="small text-muted mb-0">从账号库选择，或导入一份名单自动匹配。</p>
             </div>
             <div class="sender-builder__count" aria-live="polite">
-                已选 <strong id="selectedSenderCount">0</strong> / <span id="availableSenderCount">@Model.SenderAccounts.Count(account => account.CanSend)</span>
+                已选 <strong id="selectedSenderCount">0</strong> / <span id="availableSenderCount">@Model.SenderAccountCount</span>
             </div>
         </div>
         <div class="sender-builder__layout">
@@ -34,7 +39,7 @@
                 <div class="sender-builder__toolbar">
                     <div>
                         <h3 class="h6 mb-1" id="senderAccountHeading">当前邮箱账号</h3>
-                        <p class="small text-muted mb-0">仅可发件账号能被选择。</p>
+                        <p class="small text-muted mb-0">选中后排队更新授权；可继续准备 CSV。</p>
                     </div>
                     <div class="d-flex gap-2">
                         <button type="button" class="btn btn-outline-secondary btn-sm" id="clearSenderSelection">清空</button>
@@ -46,30 +51,10 @@
                     <i class="bi bi-search" aria-hidden="true"></i>
                     <input type="search" id="senderAccountSearch" placeholder="搜索邮箱或名称" autocomplete="off" />
                 </div>
-                <div class="sender-account-list" id="senderAccountList">
-                    @if (Model.SenderAccounts.Count == 0)
-                    {
-                        <div class="sender-builder__empty">账号库中还没有邮箱。</div>
-                    }
-                    else
-                    {
-                        @foreach (var account in Model.SenderAccounts)
-                        {
-                            var searchText = $"{account.EmailAddress} {account.Name}".ToLowerInvariant();
-                            <label class="sender-account-row @(account.CanSend ? string.Empty : "sender-account-row--disabled")"
-                                   data-search="@searchText" data-account-id="@account.Id">
-                                <input type="checkbox" class="form-check-input sender-account-checkbox"
-                                       value="@account.Id" disabled="@(!account.CanSend)" />
-                                <span class="sender-account-row__body">
-                                    <span class="sender-account-row__email">@account.EmailAddress</span>
-                                    <span class="sender-account-row__name">@account.Name</span>
-                                </span>
-                                <span class="sender-account-row__status">
-                                    @(account.CanSend ? "可发件" : account.IsEnabled ? "缺少发件授权" : "已停用")
-                                </span>
-                            </label>
-                        }
-                    }
+                <div data-sender-picker id="taskSenders" data-input-name="SelectedAccountIds" data-max="5000" data-external-search="senderAccountSearch">
+                    <div class="sender-chips" data-selected></div>
+                    <div class="sender-account-list" id="senderAccountList" data-results aria-live="polite"></div>
+                    <p class="small" data-preparation aria-live="polite"></p>
                 </div>
             </section>
 
@@ -112,7 +97,8 @@
         </form>
     </section>
 
-    <section class="card mb-4">
+    <button type="button" class="btn btn-link" data-step="send">已有 CSV，跳过这一步 →</button>
+    <section class="card mb-4" id="step-send" role="tabpanel" data-task-panel="send" hidden>
         <div class="card-body p-4">
             <h2 class="h5 mb-3">新建任务</h2>
             <form asp-action="Import" method="post" enctype="multipart/form-data" id="taskImportForm">
@@ -171,7 +157,7 @@
         </div>
     </section>
 
-    <section class="card shadow-sm border-0">
+    <section class="card shadow-sm border-0" id="step-history" role="tabpanel" data-task-panel="history" hidden>
         <div class="card-body p-0">
             <div class="p-4 pb-2"><h2 class="h5 mb-0">最近任务</h2></div>
             @if (Model.Tasks.Count == 0)
@@ -211,105 +197,52 @@
 </div>
 
 @section Scripts {
+    <script src="~/js/sender-picker.js" asp-append-version="true"></script>
     <script>
-        const senderRows = Array.from(document.querySelectorAll('.sender-account-row'));
-        const senderCheckboxes = Array.from(document.querySelectorAll('.sender-account-checkbox:not(:disabled)'));
-        const senderSearch = document.getElementById('senderAccountSearch');
-        const selectedSenderCount = document.getElementById('selectedSenderCount');
-        const selectedSenderInputs = document.getElementById('selectedSenderInputs');
-        const downloadSenderCsv = document.getElementById('downloadSenderCsv');
-
-        function refreshSenderSelection() {
-            const selected = senderCheckboxes.filter(checkbox => checkbox.checked);
-            selectedSenderCount.textContent = selected.length.toLocaleString();
-            downloadSenderCsv.disabled = selected.length === 0;
-            selectedSenderInputs.replaceChildren(...selected.map(checkbox => {
-                const input = document.createElement('input');
-                input.type = 'hidden';
-                input.name = 'SelectedAccountIds';
-                input.value = checkbox.value;
-                return input;
-            }));
-            senderRows.forEach(row => {
-                const checkbox = row.querySelector('.sender-account-checkbox');
-                row.classList.toggle('sender-account-row--selected', Boolean(checkbox?.checked));
-            });
+        const tabs = document.querySelectorAll('.outbound-steps [data-step]');
+        function showStep(step) {
+            if (!['prepare','send','history'].includes(step)) step = 'prepare';
+            document.querySelectorAll('[data-task-panel]').forEach(panel => panel.hidden = panel.dataset.taskPanel !== step);
+            tabs.forEach(tab => tab.setAttribute('aria-selected', String(tab.dataset.step === step)));
+            history.replaceState(null, '', '#' + step);
         }
-
-        senderCheckboxes.forEach(checkbox => checkbox.addEventListener('change', refreshSenderSelection));
-        senderSearch?.addEventListener('input', function () {
-            const query = this.value.trim().toLowerCase();
-            senderRows.forEach(row => row.classList.toggle('d-none', !row.dataset.search.includes(query)));
-        });
-        document.getElementById('selectVisibleSenders')?.addEventListener('click', function () {
-            senderRows.filter(row => !row.classList.contains('d-none')).forEach(row => {
-                const checkbox = row.querySelector('.sender-account-checkbox:not(:disabled)');
-                if (checkbox) checkbox.checked = true;
-            });
-            refreshSenderSelection();
-        });
-        document.getElementById('clearSenderSelection')?.addEventListener('click', function () {
-            senderCheckboxes.forEach(checkbox => checkbox.checked = false);
-            refreshSenderSelection();
-        });
-
-        const senderMatchForm = document.getElementById('senderMatchForm');
-        senderMatchForm?.addEventListener('submit', async function (event) {
+        document.querySelectorAll('[data-step]').forEach(button => button.addEventListener('click', () => showStep(button.dataset.step)));
+        tabs.forEach((tab, i) => tab.addEventListener('keydown', event => {
+            if (!['ArrowLeft','ArrowRight'].includes(event.key)) return;
             event.preventDefault();
-            const button = document.getElementById('matchSenderButton');
-            const error = document.getElementById('senderMatchError');
-            const resultPanel = document.getElementById('senderMatchResult');
-            button.disabled = true;
-            button.textContent = '正在匹配...';
-            error.classList.add('d-none');
-            resultPanel.classList.add('d-none');
-
-            try {
-                const response = await fetch(this.dataset.previewUrl, {
-                    method: 'POST',
-                    body: new FormData(this),
-                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
-                });
-                const result = await response.json();
-                if (!response.ok) throw new Error(result.message || '名单匹配失败。');
-
-                senderCheckboxes.forEach(checkbox => checkbox.checked = false);
-                new Set(result.matchedAccountIds.map(String)).forEach(id => {
-                    const checkbox = document.querySelector(`.sender-account-checkbox[value="${id}"]`);
-                    if (checkbox) checkbox.checked = true;
-                });
-                senderSearch.value = '';
-                senderRows.forEach(row => row.classList.remove('d-none'));
-                refreshSenderSelection();
-
-                document.getElementById('senderMatchSummary').textContent =
-                    `识别 ${result.recognizedCount.toLocaleString()} 个邮箱，已匹配并选中 ${result.matchedCount.toLocaleString()} 个。`;
-                renderMatchDetail('unavailableSenderResult', 'unavailableSenderEmails', result.unavailableEmails, result.unavailableCount);
-                renderMatchDetail('unmatchedSenderResult', 'unmatchedSenderEmails', result.unmatchedEmails, result.unmatchedCount);
-                resultPanel.classList.remove('d-none');
-            } catch (exception) {
-                error.textContent = exception.message;
-                error.classList.remove('d-none');
-            } finally {
-                button.disabled = false;
-                button.innerHTML = '<i class="bi bi-check2-square" aria-hidden="true"></i> 重新匹配';
-            }
+            const target = tabs[(i + (event.key === 'ArrowRight' ? 1 : 2)) % 3];
+            target.focus(); showStep(target.dataset.step);
+        }));
+        showStep(@(Model.ImportErrors.Count > 0 ? "true" : "false") ? 'send' : location.hash.slice(1));
+        const picker = document.getElementById('taskSenders');
+        picker.addEventListener('selectionchange', event => {
+            const selected = event.detail;
+            document.getElementById('selectedSenderCount').textContent = selected.length.toLocaleString();
+            document.getElementById('downloadSenderCsv').disabled = selected.length === 0;
+            document.getElementById('selectedSenderInputs').replaceChildren(...selected.map(account => {
+                const input = document.createElement('input'); input.type = 'hidden';
+                input.name = 'SelectedAccountIds'; input.value = account.id; return input;
+            }));
         });
-
-        function renderMatchDetail(rowId, valueId, emails, count) {
-            const row = document.getElementById(rowId);
-            const value = document.getElementById(valueId);
-            row.classList.toggle('d-none', count === 0);
-            value.textContent = count > emails.length
-                ? `${emails.join('、')} 等 ${count.toLocaleString()} 个`
-                : emails.join('、');
-        }
-
-        document.getElementById('taskImportForm')?.addEventListener('submit', function () {
-            const button = document.getElementById('createTaskButton');
-            if (!button || !this.checkValidity()) return;
-            button.disabled = true;
-            button.innerHTML = '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span> 正在校验 CSV';
+        document.getElementById('clearSenderSelection').addEventListener('click', () => picker.senderPicker.clear());
+        document.getElementById('selectVisibleSenders').addEventListener('click', () => picker.senderPicker.selectVisible());
+        document.getElementById('senderMatchForm').addEventListener('submit', async function(event) {
+            event.preventDefault(); const button = document.getElementById('matchSenderButton');
+            const error = document.getElementById('senderMatchError');
+            button.disabled = true; button.textContent = '正在匹配…'; error.classList.add('d-none');
+            try {
+                const response = await fetch(this.dataset.previewUrl, { method: 'POST', body: new FormData(this) });
+                const result = await response.json(); if (!response.ok) throw new Error(result.message || '匹配失败，请重试。');
+                picker.senderPicker.replace(result.matchedAccounts);
+                document.getElementById('senderMatchResult').classList.remove('d-none');
+                document.getElementById('senderMatchSummary').textContent = `识别 ${result.recognizedCount} 个，已选中 ${result.matchedCount} 个；已停用 ${result.unavailableCount} 个，库内未找到 ${result.unmatchedCount} 个。`;
+            } catch(e) { error.textContent = e.message; error.classList.remove('d-none'); }
+            finally { button.disabled = false; button.textContent = '匹配并选中'; }
+        });
+        document.getElementById('taskImportForm').addEventListener('submit', function() {
+            if (!this.checkValidity()) return;
+            const button = document.getElementById('createTaskButton'); button.disabled = true;
+            button.textContent = '正在校验 CSV…';
         });
     </script>
 }

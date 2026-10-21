@@ -15,8 +15,8 @@ public class GmailMailProviderModule : PasswordAndOAuthMailProviderModule
     public GmailMailProviderModule(
         IExternalOAuthTokenManager tokenManager,
         ICredentialEncryptionService credentialEncryption,
-        INetworkMailProxyFactory? networkMail = null)
-        : base(tokenManager, credentialEncryption, networkMail) { }
+        INetworkMailProxyFactory? networkMail = null, IMailDomainProfileStore? profiles = null)
+        : base(tokenManager, credentialEncryption, networkMail, profiles) { }
 
     public override MailProviderKind Kind => MailProviderKind.Gmail;
     public override string DisplayName => "Gmail";

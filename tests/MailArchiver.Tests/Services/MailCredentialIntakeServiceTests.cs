@@ -37,9 +37,11 @@ public class MailCredentialIntakeServiceTests
 
     [Theory]
     [InlineData("person@outlook.com", "oauth-client", "oauth-client")]
-    [InlineData("person@yahoo.com", "same-imap-code", null)]
-    [InlineData("person@gmx.com", "same-imap-code", null)]
-    public async Task Standard_export_uses_client_id_only_for_outlook(
+    [InlineData("person@yahoo.com", "yahoo-client", "yahoo-client")]
+    [InlineData("person@gmx.com", "main-credential", null)]
+    [InlineData("person@gmail.com", "google-client", "google-client")]
+    [InlineData("person@corp.example", "custom-client", "custom-client")]
+    public async Task Standard_export_retains_oauth_client_ids_and_drops_repeated_passwords(
         string email,
         string secondColumn,
         string? expectedClientId)
@@ -220,7 +222,7 @@ public class MailCredentialIntakeServiceTests
         Assert.Equal("enc:old-code", stored.Password);
         Assert.Equal("rotated-token", stored.OAuthRefreshToken);
         Assert.Equal("yahoo.com", stored.ImportedDomain);
-        Assert.Null(stored.ClientId);
+        Assert.Equal("old-client", stored.ClientId);
         Assert.True(stored.IsEnabled);
         Assert.Equal(MailAuthenticationMethod.Password, stored.PreferredOutgoingAuth);
     }
@@ -251,6 +253,26 @@ public class MailCredentialIntakeServiceTests
         Assert.Equal("enc:original-token", first.Account.Password);
         Assert.Equal("rotated-token", first.Account.OAuthRefreshToken);
         Assert.Equal(MailAuthenticationMethod.OAuth2, first.Account.PreferredOutgoingAuth);
+    }
+
+    [Theory]
+    [InlineData("gmx.es")]
+    [InlineData("gmx.fr")]
+    [InlineData("new.company.example")]
+    [InlineData("gmail.com")]
+    [InlineData("outlook.com")]
+    public async Task New_domains_import_offline_without_testing_or_assuming_valid_credentials(string domain)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.Verifier.Reject = true;
+        var result = await fixture.Service.UpsertAsync(fixture.UserId,
+            new MailCredentialIntake($"reader@{domain}", "opaque-secret", domain, "opaque-secret"),
+            enabled: true, verifyCredential: false);
+        Assert.True(result.Created);
+        Assert.Equal("PendingVerification", result.Status);
+        Assert.Equal(0, fixture.Verifier.Calls);
+        Assert.Null(result.Account.CredentialLastCheckedAt);
+        if (domain != "outlook.com") Assert.Null(result.Account.ClientId);
     }
 
     private sealed class Fixture : IAsyncDisposable

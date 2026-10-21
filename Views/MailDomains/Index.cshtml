@@ -1,0 +1,71 @@
+@model MailArchiver.ViewModels.MailDomainSettingsViewModel
+@using MailArchiver.Services
+@{
+    ViewData["Title"] = "邮箱域名连接";
+    string AuthLabel(MailArchiver.Models.MailAuthenticationMethod auth) => auth switch {
+        MailArchiver.Models.MailAuthenticationMethod.Password => "密码 / 应用专用密码",
+        MailArchiver.Models.MailAuthenticationMethod.OAuth2 => "OAuth2",
+        _ => "待验证"
+    };
+}
+<div class="container">
+    <div class="d-flex align-items-center justify-content-between mb-3">
+        <h1 class="h3">邮箱域名连接</h1>
+        <a asp-controller="MailAccounts" asp-action="Index" class="btn btn-outline-secondary">返回邮箱</a>
+    </div>
+    <p>新域名会自动查找邮箱配置。连接成功后记住服务器和认证方式，同域名下次添加可直接复用。每个账号的授权仍需分别验证。</p>
+    @if (TempData["SuccessMessage"] is string message) { <div class="alert alert-success">@message</div> }
+    <div class="table-responsive mb-4">
+        <table class="table align-middle">
+            <thead><tr><th>域名</th><th>收件</th><th>发件</th><th>配置来源</th><th>最近连接</th><th></th></tr></thead>
+            <tbody>
+            @foreach (var profile in Model.Profiles)
+            {
+                <tr>
+                    <td>@profile.Domain</td>
+                    <td>@(profile.Incoming?.Host ?? "未发现")<br />@AuthLabel(profile.IncomingAuth) · @(profile.IncomingVerifiedAt.HasValue ? "已有账号连通" : "待验证")</td>
+                    <td>@(profile.Outgoing?.Host ?? "未发现")<br />@AuthLabel(profile.OutgoingAuth) · @(profile.OutgoingVerifiedAt.HasValue ? "已有账号连通" : "待验证")</td>
+                    <td>@(profile.Source switch { "Manual" => "手动配置", "ThunderbirdISPDB" => "公共配置库", "DomainAutoconfig" => "域名配置", "BuiltIn" => "内置配置", "VerifiedFallback" => "实测确认", _ => "需补充配置" })</td>
+                    <td>@(profile.LastAttemptAt?.ToLocalTime().ToString("MM-dd HH:mm") ?? "尚未验证")
+                        @if (profile.IncomingFailure is { } incomingFailure) { <div>收件：@MailConnectionFailurePolicy.SafeMessage(incomingFailure)</div> }
+                        @if (profile.OutgoingFailure is { } outgoingFailure) { <div>发件：@MailConnectionFailurePolicy.SafeMessage(outgoingFailure)</div> }
+                    </td>
+                    <td><a asp-action="Index" asp-route-domain="@profile.Domain">编辑</a></td>
+                </tr>
+            }
+            @if (Model.Profiles.Count == 0) { <tr><td colspan="6">连接邮箱后，这里会记录域名配置及结果。</td></tr> }
+            </tbody>
+        </table>
+    </div>
+    <div class="card"><div class="card-body">
+        <h2 class="h5">补充或修改域名配置</h2>
+        <p class="text-muted">自动发现失败时，按邮箱服务商说明填写一次即可。同域名的已有账号和新账号都会复用。保存后打开邮箱并刷新以验证。</p>
+        <form asp-action="Save" method="post">
+            <div asp-validation-summary="All" class="alert alert-danger"></div>
+            <label asp-for="Domain" class="form-label">邮箱域名</label>
+            <input asp-for="Domain" class="form-control mb-3" placeholder="example.com" required />
+            <div class="row">
+                <div class="col-md-6">
+                    <label asp-for="IncomingHost" class="form-label">收件服务器（IMAP）</label><input asp-for="IncomingHost" class="form-control mb-2" required />
+                    <label asp-for="IncomingPort" class="form-label">收件端口</label><input asp-for="IncomingPort" class="form-control mb-2" min="1" max="65535" />
+                    <label asp-for="IncomingImplicitTls" class="form-label">收件加密</label><select asp-for="IncomingImplicitTls" class="form-select mb-2"><option value="true">SSL/TLS（常见端口 993）</option><option value="false">STARTTLS（常见端口 143）</option></select>
+                    <label asp-for="IncomingUsername" class="form-label">收件用户名</label><select asp-for="IncomingUsername" class="form-select mb-3"><option value="%EMAILADDRESS%">完整邮箱地址</option><option value="%EMAILLOCALPART%">@@ 前面的部分</option></select>
+                </div>
+                <div class="col-md-6">
+                    <label asp-for="OutgoingHost" class="form-label">发件服务器（SMTP）</label><input asp-for="OutgoingHost" class="form-control mb-2" required />
+                    <label asp-for="OutgoingPort" class="form-label">发件端口</label><input asp-for="OutgoingPort" class="form-control mb-2" min="1" max="65535" />
+                    <label asp-for="OutgoingImplicitTls" class="form-label">发件加密</label><select asp-for="OutgoingImplicitTls" class="form-select mb-2"><option value="false">STARTTLS（常见端口 587）</option><option value="true">SSL/TLS（常见端口 465）</option></select>
+                    <label asp-for="OutgoingUsername" class="form-label">发件用户名</label><select asp-for="OutgoingUsername" class="form-select mb-3"><option value="%EMAILADDRESS%">完整邮箱地址</option><option value="%EMAILLOCALPART%">@@ 前面的部分</option></select>
+                </div>
+            </div>
+            <details class="mb-3">
+                <summary>OAuth 授权设置（使用密码时留空）</summary>
+                <p class="mt-2">OAuth 需要服务商提供授权，并取得可用于邮件的 Refresh Token。这里保存域名的令牌地址；每个邮箱自己的 Client ID、Refresh Token 等在邮箱编辑页填写。</p>
+                <label asp-for="OAuthTokenEndpoint" class="form-label">令牌刷新地址（HTTPS）</label><input asp-for="OAuthTokenEndpoint" class="form-control mb-2" placeholder="https://provider.example/oauth/token" />
+                <div class="form-check"><input asp-for="OAuthRequiresSecret" class="form-check-input" /><label asp-for="OAuthRequiresSecret" class="form-check-label">服务商要求 Client Secret</label></div>
+                <div class="form-check"><input asp-for="OAuthRequiresRedirect" class="form-check-input" /><label asp-for="OAuthRequiresRedirect" class="form-check-label">服务商要求 Redirect URI</label></div>
+            </details>
+            <button type="submit" class="btn btn-primary">保存域名配置</button>
+        </form>
+    </div></div>
+</div>

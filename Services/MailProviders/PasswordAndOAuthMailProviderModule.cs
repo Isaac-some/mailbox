@@ -14,15 +14,17 @@ public abstract class PasswordAndOAuthMailProviderModule : IMailProviderModule
     private readonly IExternalOAuthTokenManager _tokenManager;
     private readonly ICredentialEncryptionService _credentialEncryption;
     private readonly INetworkMailProxyFactory? _networkMail;
+    private readonly IMailDomainProfileStore? _profiles;
 
     protected PasswordAndOAuthMailProviderModule(
         IExternalOAuthTokenManager tokenManager,
         ICredentialEncryptionService credentialEncryption,
-        INetworkMailProxyFactory? networkMail = null)
+        INetworkMailProxyFactory? networkMail = null, IMailDomainProfileStore? profiles = null)
     {
         _tokenManager = tokenManager;
         _credentialEncryption = credentialEncryption;
         _networkMail = networkMail;
+        _profiles = profiles;
     }
 
     public abstract MailProviderKind Kind { get; }
@@ -35,6 +37,7 @@ public abstract class PasswordAndOAuthMailProviderModule : IMailProviderModule
     protected virtual SecureSocketOptions GetSmtpSocketOptions(MailAccount account) => SmtpSocketOptions;
     protected virtual bool SmtpSavesSentCopy => false;
     protected virtual ExternalOAuthSettings? OAuth => null;
+    protected virtual ExternalOAuthSettings? GetOAuth(MailAccount account) => OAuth;
 
     public abstract bool SupportsAddress(string emailAddress);
 
@@ -112,6 +115,7 @@ public abstract class PasswordAndOAuthMailProviderModule : IMailProviderModule
         var networkMail = _networkMail ?? throw new InvalidOperationException("网络策略服务未配置。");
         client.ServerCertificateValidationCallback = static (_, _, chain, errors) =>
             MailCertificatePolicy.IsAccepted(errors, chain);
+        ApplyDomainKnowledge(account);
         var smtpHost = GetSmtpHost(account);
         var smtpPort = GetSmtpPort(account);
         await networkMail.ConnectAsync(client, smtpHost, smtpPort,
@@ -124,6 +128,7 @@ public abstract class PasswordAndOAuthMailProviderModule : IMailProviderModule
             MailProviderCredentialPolicy.For(Kind, account.PreferredOutgoingAuth),
             cancellationToken);
 
+        if (_profiles is not null) await _profiles.RecordAttemptAsync(account, true, true, token: cancellationToken);
         await client.SendAsync(message, cancellationToken);
         await client.DisconnectAsync(true, cancellationToken);
         return new ProviderSendResult(SmtpSavesSentCopy);
@@ -140,6 +145,7 @@ public abstract class PasswordAndOAuthMailProviderModule : IMailProviderModule
             var networkMail = _networkMail ?? throw new InvalidOperationException("网络策略服务未配置。");
             client.ServerCertificateValidationCallback = static (_, _, chain, errors) =>
                 MailCertificatePolicy.IsAccepted(errors, chain);
+            ApplyDomainKnowledge(account);
             var smtpHost = GetSmtpHost(account);
             var smtpPort = GetSmtpPort(account);
             await networkMail.ConnectAsync(client, smtpHost, smtpPort,
@@ -151,13 +157,25 @@ public abstract class PasswordAndOAuthMailProviderModule : IMailProviderModule
                 () => AuthenticatePasswordAsync(client, account, cancellationToken),
                 MailProviderCredentialPolicy.For(Kind, account.PreferredOutgoingAuth),
                 cancellationToken);
+            if (_profiles is not null) await _profiles.RecordAttemptAsync(account, true, true, token: cancellationToken);
             await client.DisconnectAsync(true, cancellationToken);
             return true;
         }
-        catch
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception ex)
         {
+            if (_profiles is not null) await _profiles.RecordAttemptAsync(account, true, false, MailConnectionFailurePolicy.Classify(ex).Code.ToString(), cancellationToken);
             return false;
         }
+    }
+
+    private void ApplyDomainKnowledge(MailAccount account)
+    {
+        if (Kind == MailProviderKind.Custom && _profiles?.Find(DomainOf(account.EmailAddress)!) is { } profile)
+            MailDomainProfileStore.Apply(account, profile);
+        account.SmtpServer = GetSmtpHost(account);
+        account.SmtpPort = GetSmtpPort(account);
+        account.SmtpUseSSL = true;
     }
 
     protected static string? DomainOf(string emailAddress)
@@ -173,7 +191,7 @@ public abstract class PasswordAndOAuthMailProviderModule : IMailProviderModule
     }
 
     protected bool HasOAuth(MailAccount account)
-        => OAuth is not null && ExternalOAuthTokenManager.HasUsableCredentials(account, OAuth);
+        => GetOAuth(account) is { } oauth && ExternalOAuthTokenManager.HasUsableCredentials(account, oauth);
 
     protected static bool HasPassword(MailAccount account)
         => !string.IsNullOrWhiteSpace(account.Password);
@@ -196,7 +214,7 @@ public abstract class PasswordAndOAuthMailProviderModule : IMailProviderModule
         MailAccount account,
         CancellationToken cancellationToken)
     {
-        var oauth = OAuth ?? throw new InvalidOperationException($"{DisplayName} 不支持 OAuth。");
+        var oauth = GetOAuth(account) ?? throw new InvalidOperationException($"{DisplayName} 不支持 OAuth。");
         var token = await _tokenManager.GetAccessTokenAsync(account, oauth, cancellationToken: cancellationToken);
         try
         {
@@ -217,7 +235,10 @@ public abstract class PasswordAndOAuthMailProviderModule : IMailProviderModule
         MailAccount account,
         CancellationToken cancellationToken)
     {
-        var username = account.Username ?? account.EmailAddress;
+        var username = client is SmtpClient && Kind == MailProviderKind.Custom
+            && _profiles?.Find(DomainOf(account.EmailAddress)!)?.Outgoing is { } outgoing
+                ? MailDomainProfileStore.UsernameFor(account.EmailAddress, outgoing.Username)
+                : account.Username ?? account.EmailAddress;
         var password = NormalizeAppPassword(
             _credentialEncryption.Decrypt(account.Password
                 ?? throw new InvalidOperationException($"{DisplayName} 账号没有应用专用密码。")));

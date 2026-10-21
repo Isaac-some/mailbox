@@ -57,6 +57,32 @@ public class MailEndpointDiscoveryServiceTests
         Assert.Equal(1, handler.RequestCount);
     }
 
+    [Fact]
+    public async Task Unknown_domain_uses_public_isp_database_when_domain_hosts_are_unavailable()
+    {
+        var handler = new DatabaseResponseHandler();
+        var service = new MailEndpointDiscoveryService(new SingleClientFactory(new HttpClient(handler)),
+            NullLogger<MailEndpointDiscoveryService>.Instance);
+        var account = new MailAccount { EmailAddress = "reader@gmx.es", MailProviderKind = MailProviderKind.Custom,
+            ImapServer = "imap.gmx.es", ImapPort = 993, UseSSL = true };
+        await service.DiscoverAsync(account);
+        Assert.Equal("imap.gmx.com", account.ImapServer);
+        Assert.Equal("mail.gmx.com", account.SmtpServer);
+    }
+
+    private sealed class DatabaseResponseHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
+            => Task.FromResult(request.RequestUri!.Host == "autoconfig.thunderbird.net"
+                ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("""
+                    <clientConfig><emailProvider id="gmx.es"><domain>gmx.es</domain>
+                    <incomingServer type="imap"><hostname>imap.gmx.com</hostname><port>993</port><socketType>SSL</socketType></incomingServer>
+                    <outgoingServer type="smtp"><hostname>mail.gmx.com</hostname><port>587</port><socketType>STARTTLS</socketType></outgoingServer>
+                    </emailProvider></clientConfig>
+                    """) }
+                : new HttpResponseMessage(HttpStatusCode.NotFound));
+    }
+
     private sealed class SingleClientFactory : IHttpClientFactory
     {
         private readonly HttpClient _client;

@@ -2,16 +2,16 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
-    <Version>2.3.6</Version>
-    <Version>2.3.3</Version>
-    <AssemblyVersion>2.3.3.0</AssemblyVersion>
-    <FileVersion>2.3.3.0</FileVersion>
+    <Version>2.3.9</Version>
+    <AssemblyVersion>2.3.9.0</AssemblyVersion>
+    <FileVersion>2.3.9.0</FileVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <GenerateRuntimeConfigurationFiles>true</GenerateRuntimeConfigurationFiles>
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="$(BundledPlatformTokenSource)" Condition="'$(BundledPlatformTokenSource)' != ''" />
     <Compile Remove="local-app\**;mailbox-service-v2\**;tests\**;windows-app\**" />
     <Content Remove="local-app\**;mailbox-service-v2\**;tests\**;windows-app\**" />
     <None Remove="local-app\**;mailbox-service-v2\**;tests\**;windows-app\**" />

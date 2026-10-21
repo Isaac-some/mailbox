@@ -47,10 +47,7 @@
                     <i class="bi bi-calendar2-check" aria-hidden="true"></i>
                     发件任务
                 </a>
-                <a asp-controller="OutboundMail" asp-action="Index" class="btn btn-primary btn-sm">
-                    <i class="bi bi-pencil-square" aria-hidden="true"></i>
-                    写邮件
-                </a>
+
             }
             <a asp-action="Create" class="btn btn-primary btn-sm">
                 <i class="bi bi-plus-lg" aria-hidden="true"></i>
@@ -161,7 +158,7 @@
                                             </button>
                                         </form>
                                     }
-                                    @if (OutboundMailOptions.Value.Enabled && item.CanSend)
+                                    @if (OutboundMailOptions.Value.Enabled && item.IsEnabled && item.Provider != ProviderType.IMPORT)
                                     {
                                         <a asp-controller="OutboundMail" asp-action="Index" asp-route-accountId="@item.Id"
                                            class="btn btn-outline-primary btn-sm account-icon-btn" title="用此账号写邮件" aria-label="用此账号写邮件">

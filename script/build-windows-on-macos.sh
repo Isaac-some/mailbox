@@ -32,15 +32,19 @@ export DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
 
 mkdir -p "$BUILD_DIR"
 STAGING_DIR="$(mktemp -d "$BUILD_DIR/.windows-staging.XXXXXX")"
-trap 'rm -rf "$STAGING_DIR"' EXIT
+TOKEN_DIR="$(mktemp -d "${TMPDIR:-/private/tmp}/mailbox-windows-token.XXXXXX")"
+trap 'rm -rf "$STAGING_DIR" "$TOKEN_DIR"' EXIT
 OUTPUT_DIR="$STAGING_DIR/$PACKAGE_NAME"
 SERVER_DIR="$OUTPUT_DIR/server"
 mkdir -p "$SERVER_DIR"
+TOKEN_SOURCE="$TOKEN_DIR/PlatformAuthorization.g.cs"
+python3 "$ROOT_DIR/script/generate-bundled-platform-token.py" "$TOKEN_SOURCE"
 
 "$DOTNET_BIN" restore "$ROOT_DIR/MailArchiver.csproj" --runtime win-x64 --packages "$NUGET_PACKAGES" -p:NuGetAudit=false
 "$DOTNET_BIN" publish "$ROOT_DIR/MailArchiver.csproj" \
   --configuration Release --runtime win-x64 --self-contained true --no-restore \
-  --output "$SERVER_DIR" -p:PublishSingleFile=false -p:PublishTrimmed=false -p:WarningLevel=0
+  --output "$SERVER_DIR" -p:PublishSingleFile=false -p:PublishTrimmed=false -p:WarningLevel=0 \
+  -p:BundledPlatformTokenSource="$TOKEN_SOURCE"
 
 "$DOTNET_BIN" restore "$ROOT_DIR/windows-app/MailAssistant.Windows.csproj" --runtime win-x64 --packages "$NUGET_PACKAGES" -p:NuGetAudit=false
 "$DOTNET_BIN" publish "$ROOT_DIR/windows-app/MailAssistant.Windows.csproj" \
@@ -54,13 +58,10 @@ fi
 cp "$ROOT_DIR/appsettings.Local.template.json" "$SERVER_DIR/appsettings.Local.json"
 if [[ -n "${MAIL_ASSISTANT_UPSTREAM_ENDPOINT:-}" ]]; then
   jq --arg endpoint "$MAIL_ASSISTANT_UPSTREAM_ENDPOINT" \
-    '.UpstreamMailboxSync.BearerToken = env.MAIL_ASSISTANT_UPSTREAM_TOKEN | .UpstreamMailboxSync.Endpoint = $endpoint' \
+    '.UpstreamMailboxSync.Endpoint = $endpoint' \
     "$SERVER_DIR/appsettings.Local.json" > "$SERVER_DIR/appsettings.Local.json.tmp"
-else
-  jq '.UpstreamMailboxSync.BearerToken = env.MAIL_ASSISTANT_UPSTREAM_TOKEN' \
-    "$SERVER_DIR/appsettings.Local.json" > "$SERVER_DIR/appsettings.Local.json.tmp"
+  mv "$SERVER_DIR/appsettings.Local.json.tmp" "$SERVER_DIR/appsettings.Local.json"
 fi
-mv "$SERVER_DIR/appsettings.Local.json.tmp" "$SERVER_DIR/appsettings.Local.json"
 mv "$OUTPUT_DIR/MailAssistant.exe" "$OUTPUT_DIR/邮箱助手.exe"
 cp "$ROOT_DIR/windows-app/README.md" "$OUTPUT_DIR/README.md"
 test -f "$SERVER_DIR/MailArchiver.exe"

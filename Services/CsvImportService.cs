@@ -200,6 +200,7 @@ public sealed class CsvImportService : BackgroundService, ICsvImportService
                     job.AccountIds.Add(result.Account.Id);
                     job.PendingVerificationCount++;
                     if (result.Account.MailProviderKind == MailProviderKind.Gmail
+                        && !ExternalOAuthProviderPolicy.HasUsableCredentials(result.Account)
                         && MailCredentialInputPolicy.Normalize(row.Password).Length != 16)
                     {
                         job.FormatWarningCount++;
@@ -296,7 +297,7 @@ public sealed class CsvImportService : BackgroundService, ICsvImportService
                     }
                     var domain = account.EmailAddress.Split('@').LastOrDefault() ?? "unknown";
                     await using var lease = await _concurrency.AcquireAutomaticAsync(domain, token, account.MailProviderKind);
-                    if (account.MailProviderKind == MailProviderKind.Gmail)
+                    if (account.MailProviderKind == MailProviderKind.Gmail && !ExternalOAuthProviderPolicy.HasUsableCredentials(account))
                     {
                         var encryption = scope.ServiceProvider.GetRequiredService<ICredentialEncryptionService>();
                         var formatOk = false;

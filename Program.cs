@@ -69,6 +69,7 @@ var isLocalApp = builder.Configuration.GetValue<bool>("LocalApp:Enabled") ||
 
 if (isLocalApp)
 {
+    BundledPlatformAuthorization.Apply(builder.Configuration);
     builder.Configuration["AccountStorage:Enabled"] = "false";
 }
 
@@ -217,9 +218,11 @@ builder.Services.AddHostedService<CsvImportService>(provider => provider.GetRequ
 builder.Services.AddScoped<MailArchiver.Services.IMailCredentialVerifier, MailArchiver.Services.MailCredentialVerifier>();
 builder.Services.AddScoped<MailArchiver.Services.IUpstreamMailboxSyncService, MailArchiver.Services.UpstreamMailboxSyncService>();
 builder.Services.AddSingleton<UpstreamMailboxSyncProgress>();
+builder.Services.AddSingleton<UpstreamMailboxRequestJournal>();
 builder.Services.AddSingleton<MailArchiver.Services.IUpstreamMailboxConnectionStore, MailArchiver.Services.UpstreamMailboxConnectionStore>();
 builder.Services.AddSingleton<MailArchiver.Services.IUpstreamMailboxSyncCursorStore, MailArchiver.Services.UpstreamMailboxSyncCursorStore>();
 builder.Services.AddSingleton<MailArchiver.Services.ILocalAccessService, MailArchiver.Services.LocalAccessService>();
+builder.Services.AddSingleton<MailArchiver.Services.IMailDomainProfileStore, MailArchiver.Services.MailDomainProfileStore>();
 builder.Services.AddScoped<MailArchiver.Services.IMailEndpointDiscoveryService, MailArchiver.Services.MailEndpointDiscoveryService>();
 builder.Services.AddScoped<MailArchiver.Services.MailProviders.IMailProviderModule, MailArchiver.Services.MailProviders.GmailMailProviderModule>();
 builder.Services.AddScoped<MailArchiver.Services.MailProviders.IMailProviderModule, MailArchiver.Services.MailProviders.YahooMailProviderModule>();
@@ -231,6 +234,7 @@ builder.Services.Configure<OutboundMailOptions>(builder.Configuration.GetSection
 builder.Services.AddScoped<MailArchiver.Services.IOutlookGraphMailSender, MailArchiver.Services.OutlookGraphMailSender>();
 builder.Services.AddScoped<MailArchiver.Services.IOutlookSmtpMailSender, MailArchiver.Services.OutlookSmtpMailSender>();
 builder.Services.AddScoped<MailArchiver.Services.IOutboundMailService, MailArchiver.Services.OutboundMailService>();
+builder.Services.AddScoped<OutboundAccountPreparation>();
 builder.Services.AddHostedService<MailArchiver.Services.OutboundMailTaskWorker>();
 
 // Add Session support

@@ -76,6 +76,10 @@
                                 <span asp-validation-for="ImapPort" class="text-danger"></span>
                             </div>
                         </div>
+                        @if (Model.MailProviderKind == MailProviderKind.Custom)
+                        {
+                            <p><a asp-controller="MailDomains" asp-action="Index" asp-route-domain="@editDomain">设置此域名的收发服务器与 OAuth 方式</a></p>
+                        }
                         <h4 class="mt-4">@Localizer["Authentication"]</h4>
                         <div class="mb-3" style="display: @(isLocalApp ? "none" : "block");">
                             <label asp-for="Username" class="form-label">@Localizer["Username"]</label>

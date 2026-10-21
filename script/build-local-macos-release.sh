@@ -30,6 +30,13 @@ export NUGET_PACKAGES="$TOOLS_DIR/nuget-packages"
 export DOTNET_CLI_TELEMETRY_OPTOUT=1
 export DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
 
+if [[ -n "${MAIL_ASSISTANT_UPSTREAM_TOKEN:-}" ]]; then
+  private_build_dir="$(mktemp -d "${TMPDIR:-/private/tmp}/mailbox-release-token.XXXXXX")"
+  trap 'rm -rf "$private_build_dir"' EXIT
+  export BundledPlatformTokenSource="$private_build_dir/PlatformAuthorization.g.cs"
+  python3 "$ROOT_DIR/script/generate-bundled-platform-token.py" "$BundledPlatformTokenSource"
+fi
+
 printf '%s\n' "正在还原依赖并构建 Release..."
 "$DOTNET_BIN" restore "$ROOT_DIR/MailArchiver.csproj" \
   --packages "$NUGET_PACKAGES" \

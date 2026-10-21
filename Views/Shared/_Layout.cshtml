@@ -80,6 +80,17 @@
                     <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
                 </div>
             }
+            @if (!(ViewContext.RouteData.Values["controller"]?.ToString() == "MailAccounts" && ViewContext.RouteData.Values["action"]?.ToString() == "Index"))
+            {
+                <a asp-controller="MailAccounts" asp-action="Index" class="page-back-link" id="pageBackLink"><i class="bi bi-arrow-left" aria-hidden="true"></i> 返回上一页</a>
+                <script>
+                    document.getElementById('pageBackLink').addEventListener('click', function(event) {
+                        if (document.referrer && new URL(document.referrer).origin === location.origin && history.length > 1) {
+                            event.preventDefault(); history.back();
+                        }
+                    });
+                </script>
+            }
             @RenderBody()
         </main>
     </div>
