@@ -85,7 +85,12 @@ for required_file in \
   fi
 done
 
-for excluded_directory in local-app mailbox-service-v2 tests windows-app; do
+"$DOTNET_COMMAND" publish "$PROJECT_DIR/desktop-updater/MailAssistant.Updater.csproj" \
+  --configuration Release --runtime win-x64 --self-contained true \
+  --output "$SERVER_DIR/updater" -p:PublishSingleFile=true \
+  -p:IncludeNativeLibrariesForSelfExtract=true -p:NuGetAudit=false
+
+for excluded_directory in local-app mailbox-service-v2 tests windows-app desktop-updater; do
   if [[ -e "$SERVER_DIR/$excluded_directory" ]]; then
     printf '%s\n' "服务发布物错误包含目录：$excluded_directory" >&2
     exit 4

@@ -166,6 +166,11 @@ public sealed class DesktopUpdateService(
             var installDirectory = Environment.GetEnvironmentVariable("MAIL_ASSISTANT_INSTALL_DIRECTORY")!;
             var nativePid = int.Parse(Environment.GetEnvironmentVariable("MAIL_ASSISTANT_NATIVE_PID")!);
             var port = int.Parse(Environment.GetEnvironmentVariable("MAIL_ASSISTANT_PORT") ?? "5180");
+            foreach (var markerName in new[] { "installer-ready", "install-approved", "install-aborted" })
+            {
+                var marker = Path.Combine(_session, markerName);
+                if (File.Exists(marker)) File.Delete(marker);
+            }
             var plan = new UpdateInstallPlan(_session, installDirectory, DataDirectory, Platform,
                 nativePid, Environment.ProcessId, CurrentVersion, Convert.ToHexString(RandomNumberGenerator.GetBytes(24)), port);
             UpdateProtocol.WriteJson(Path.Combine(_session, "plan.json"), plan);
