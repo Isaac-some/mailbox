@@ -29,7 +29,7 @@ for platform, package, root in [('osx-arm64', args.mac, '邮箱助手.app'),
         size=package.stat().st_size, sha256=hashlib.sha256(package.read_bytes()).hexdigest(), rootDirectory=root))
 manifest = args.output / 'desktop-update.json'
 manifest.write_text(json.dumps(dict(schema=1, version=args.version, tag=args.tag,
-    prerelease=args.prerelease, artifacts=artifacts, notes=args.notes_file.read_text() if args.notes_file else None), ensure_ascii=False, indent=2) + '\n')
+    prerelease=args.prerelease, artifacts=artifacts, notes=args.notes_file.read_text(encoding='utf-8') if args.notes_file else None), ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
 subprocess.run(['openssl', 'dgst', '-sha256', '-sign', str(args.key), '-out',
     str(args.output / 'desktop-update.sig'), str(manifest)], check=True)
 print(f'Signed update manifest for {args.tag}.')

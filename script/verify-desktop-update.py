@@ -99,8 +99,8 @@ def snapshot():
             emails=connection.execute('SELECT Id,MessageId,Subject,Body FROM ArchivedEmails').fetchall(),
             users=connection.execute('SELECT Id,Username FROM Users').fetchall(),
             key=hashlib.sha256((data / 'credential-encryption.key').read_bytes()).hexdigest(),
-            settings=(data / 'update-preservation-sentinel.json').read_text(),
-            networkSettings=(data / 'network-settings.json').read_text())
+            settings=(data / 'update-preservation-sentinel.json').read_text(encoding='utf-8'),
+            networkSettings=(data / 'network-settings.json').read_text(encoding='utf-8'))
 
 environment = os.environ.copy()
 environment.update(MAIL_ASSISTANT_DATA_DIRECTORY=str(data), MAIL_ASSISTANT_PORT=str(args.port),
@@ -173,15 +173,15 @@ try:
         thread.start()
         if args.scenario == 'rollback':
             until(lambda: (session / 'installer-ready').exists(), 150, 'validated staging')
-            plan = json.loads((session / 'plan.json').read_text())
-            manifest = json.loads((session / 'desktop-update.json').read_text())
+            plan = json.loads((session / 'plan.json').read_text(encoding='utf-8'))
+            manifest = json.loads((session / 'desktop-update.json').read_text(encoding='utf-8'))
             artifact = next(a for a in manifest['artifacts'] if a['platform'] == ('osx-arm64' if mac else 'win-x64'))
             staged = installation / ('.mail-assistant-update-' + plan['nonce']) / artifact['rootDirectory']
             launcher = staged / 'Contents/MacOS/邮箱助手' if mac else staged / '邮箱助手.exe'
             launcher.write_bytes(b'intentionally invalid isolated test executable')
         thread.join(160)
         assert not thread.is_alive(), 'Install HTTP request did not finish'
-        result = until(lambda: json.loads((data / 'update-result.json').read_text())
+        result = until(lambda: json.loads((data / 'update-result.json').read_text(encoding='utf-8'))
             if (data / 'update-result.json').exists() else None, 240, 'installer completion')
         expected = args.expected_version if args.scenario == 'success' else original_version
         until(lambda: status()['currentVersion'] == expected, 90, 'restarted app')
@@ -195,7 +195,7 @@ try:
         toVersion=status()['currentVersion'], targetTag=args.target_tag, accountCount=len(before['accounts']),
         emailCount=len(before['emails']), dataPreserved=True, csrfRejected=True, publicDownload=True,
         activeTaskBlocked=True, networkSettingsPreserved=True)
-    (root / 'report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2))
+    (root / 'report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
     print(json.dumps(report, ensure_ascii=False), flush=True)
 finally:
     # Kill only PIDs written by this test's processes; never stop an application by name.
@@ -207,7 +207,7 @@ finally:
     pid_files = [root / 'initial-native.pid'] + list(data.glob('updates/*/new-native.pid'))
     for pid_file in pid_files:
         try:
-            pid = int(pid_file.read_text())
+            pid = int(pid_file.read_text(encoding='utf-8'))
             if mac:
                 os.kill(pid, 15)
             else:
