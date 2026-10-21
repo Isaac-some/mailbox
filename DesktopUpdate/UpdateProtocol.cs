@@ -5,7 +5,7 @@ using System.Text.Json;
 namespace MailAssistant.Updates;
 
 public sealed record UpdateArtifact(string Platform, string FileName, string Url, long Size, string Sha256, string RootDirectory);
-public sealed record UpdateManifest(int Schema, string Version, string Tag, bool Prerelease, UpdateArtifact[] Artifacts);
+public sealed record UpdateManifest(int Schema, string Version, string Tag, bool Prerelease, UpdateArtifact[] Artifacts, string? Notes = null);
 public sealed record UpdateInstallPlan(string SessionDirectory, string InstallDirectory, string DataDirectory,
     string Platform, int NativeProcessId, int ServerProcessId, string CurrentVersion, string Nonce, int Port);
 

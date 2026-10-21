@@ -6,7 +6,7 @@ Mac 菜单“邮箱助手 → 检查更新…”、Windows 菜单“检查更新
 
 ## 发布约定
 
-正式渠道读取 `Isaac-some/mailbox-releases` 的 latest 正式 Release，跳过草稿和预发布。无需仓库 Token。预发布仅能通过启动环境 `MAIL_ASSISTANT_UPDATE_TEST_TAG` 指定，网页请求不能修改渠道。
+正式渠道通过固定的 `releases/latest/download/desktop-update.json` 地址读取 `Isaac-some/mailbox-releases` 的签名更新清单，跳过草稿和预发布。不调用 GitHub REST API，避免共享 IP 的匿名 API 配额导致 403；无需仓库 Token。预发布仅能通过启动环境 `MAIL_ASSISTANT_UPDATE_TEST_TAG` 指定，网页请求不能修改渠道。
 
 每个版本发布：Mac DMG、保留应用 bundle 的 Mac 更新 ZIP、Windows ZIP、`desktop-update.json`、`desktop-update.sig`、校验文件和构建清单。Manifest 内包含平台、版本、Release 标签、下载地址、文件大小、SHA-256 和包内目录。
 

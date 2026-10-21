@@ -46,41 +46,21 @@ public sealed class DesktopUpdateService(
             Set(new("checking", CurrentVersion, Message: "正在检查更新…"));
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(40));
-            // Test tags are accepted only through a launch-time environment variable, never from a browser request.
-            var suffix = Channel == "stable" ? "latest" : "tags/" + Uri.EscapeDataString(Channel);
-            var releaseBytes = await GetSmallAsync(new Uri($"https://api.github.com/repos/{UpdateProtocol.Repository}/releases/{suffix}"), 2_000_000, timeout.Token);
-            using var release = JsonDocument.Parse(releaseBytes);
-            var root = release.RootElement;
-            var tag = root.GetProperty("tag_name").GetString()!;
-            var prerelease = root.GetProperty("prerelease").GetBoolean();
-            if (root.GetProperty("draft").GetBoolean() || (Channel == "stable" && prerelease)
-                || (Channel != "stable" && tag != Channel)) throw new InvalidOperationException("未找到可用的正式更新。");
-            if (Channel == "stable" && Version.TryParse(tag.TrimStart('v'), out var published)
-                && !UpdateProtocol.IsNewer(published.ToString(3), CurrentVersion))
-            {
-                Set(new("current", CurrentVersion, CurrentVersion, Message: "当前已是最新版本。"));
-                return State;
-            }
-            var assets = root.GetProperty("assets").EnumerateArray().ToArray();
-            Uri AssetUrl(string name)
-            {
-                var asset = assets.SingleOrDefault(a => a.GetProperty("name").GetString() == name);
-                if (asset.ValueKind == JsonValueKind.Undefined) throw new InvalidOperationException("新版尚未提供应用内更新包，请稍后重试。");
-                var url = new Uri(asset.GetProperty("browser_download_url").GetString()!);
-                if (url.AbsoluteUri != $"https://github.com/{UpdateProtocol.Repository}/releases/download/{tag}/{name}")
-                    throw new InvalidOperationException("更新来源无效。");
-                return url;
-            }
-            _manifestBytes = await GetSmallAsync(AssetUrl("desktop-update.json"), 100_000, timeout.Token);
-            _signature = await GetSmallAsync(AssetUrl("desktop-update.sig"), 1024, timeout.Token);
+            // Fixed public release assets avoid the shared-IP anonymous GitHub API quota.
+            // Test channels are selected only at native launch, never by a browser request.
+            var releasePath = Channel == "stable" ? "latest/download" : "download/" + Uri.EscapeDataString(Channel);
+            var releaseBase = $"https://github.com/{UpdateProtocol.Repository}/releases/{releasePath}/";
+            _manifestBytes = await GetSmallAsync(new Uri(releaseBase + "desktop-update.json"), 100_000, timeout.Token);
+            _signature = await GetSmallAsync(new Uri(releaseBase + "desktop-update.sig"), 1024, timeout.Token);
             var manifest = UpdateProtocol.VerifyManifest(_manifestBytes, _signature);
-            if (manifest.Tag != tag || manifest.Prerelease != prerelease) throw new InvalidOperationException("更新版本与签名信息不一致。");
+            if ((Channel == "stable" && manifest.Prerelease) || (Channel != "stable" && manifest.Tag != Channel))
+                throw new InvalidOperationException("更新版本与签名信息不一致。");
             _manifest = manifest;
             _artifact = manifest.Artifacts.SingleOrDefault(a => a.Platform == Platform)
                 ?? throw new InvalidOperationException("新版暂未提供当前系统的更新包。");
             var newer = UpdateProtocol.IsNewer(manifest.Version, CurrentVersion);
             Set(new(newer ? "available" : "current", CurrentVersion, manifest.Version,
-                root.TryGetProperty("body", out var body) ? body.GetString() : null,
+                manifest.Notes,
                 Total: _artifact.Size, Message: newer ? "发现新版本，可下载更新。" : "当前已是最新版本。"));
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
