@@ -66,7 +66,8 @@ jobs:
           test "$(uname -m)" = arm64
           gh release download "$BASE_TAG" --repo Isaac-some/mailbox-releases --pattern 'MailAssistant-AppleSilicon-*-update.zip' --dir "$RUNNER_TEMP/update-download"
       - name: Record anonymous API quota separately from the signed-asset update path
-        run: curl -sSI https://api.github.com/repos/Isaac-some/mailbox-releases/releases/latest | rg -i 'HTTP/|x-ratelimit-(remaining|limit|reset)'
+        continue-on-error: true
+        run: curl --max-time 10 -sSI https://api.github.com/repos/Isaac-some/mailbox-releases/releases/latest
       - name: Verify actual Mac update and data preservation
         env:
           TARGET_TAG: ${{ inputs.target_tag }}
