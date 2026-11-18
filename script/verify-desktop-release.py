@@ -42,7 +42,7 @@ verification_commit = run(['git', 'rev-parse', 'HEAD']).strip()
 source_commit = run(['git', 'rev-parse', args.source_commit or 'HEAD']).strip()
 if source_commit != verification_commit:
     changes = run(['git', 'diff', '--name-only', source_commit, verification_commit]).splitlines()
-    require(set(changes) <= {'script/verify-desktop-release.py'}, 'Application/build source changed; rebuild instead of reusing a source commit.')
+    require(all(name == 'script/verify-desktop-release.py' or name.startswith('tests/MailArchiver.Tests/') for name in changes), 'Application/build source changed; rebuild instead of reusing a source commit.')
 manifest = json.loads((assets / 'desktop-update.json').read_text())
 require(manifest['version'] == version and manifest['tag'] == 'v' + version and not manifest['prerelease'], 'Signed release version/tag mismatch')
 run(['openssl', 'dgst', '-sha256', '-verify', root / 'DesktopUpdate/update-public-key.pem', '-signature', assets / 'desktop-update.sig', assets / 'desktop-update.json'])

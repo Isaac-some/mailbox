@@ -154,7 +154,7 @@ public sealed class CsvImportPipelineTests
             var root = Path.Combine(Path.GetTempPath(), "csv-pipeline-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(root);
             var services = new ServiceCollection();
-            services.AddDbContext<MailArchiverDbContext>(o => o.UseSqlite($"Data Source={Path.Combine(root, "test.db")}"));
+            services.AddDbContext<MailArchiverDbContext>(o => o.UseSqlite($"Data Source={Path.Combine(root, "test.db")};Pooling=False"));
             var verifier = new OfflineVerifier();
             services.AddSingleton<IMailCredentialVerifier>(verifier);
             services.AddSingleton<ICredentialEncryptionService, Encryption>();
