@@ -22,7 +22,7 @@ public sealed class DesktopUpdatesController(DesktopUpdateService updates, MailA
         ? Json(await updates.StartDownloadAsync(token)) : NotFound();
     [HttpPost, ValidateAntiForgeryToken]
     public async Task<IActionResult> Install(CancellationToken token) => updates.Available
-        ? Json(await updates.InstallAsync(async () => imports.HasActiveJobs()
+        ? Json(await updates.InstallAsync(async () => imports.HasActiveImports()
             || await context.OutboundMailTaskItems.AnyAsync(i => i.Status == OutboundMailTaskItemStatus.Sending, token), token))
         : NotFound();
     [HttpGet]

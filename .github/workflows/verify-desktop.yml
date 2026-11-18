@@ -21,6 +21,15 @@ on:
         required: false
         type: string
 
+      windows_installer_url:
+        description: Public complete Windows Setup EXE to install and launch
+        required: false
+        type: string
+      windows_installer_sha256:
+        description: SHA-256 of the exact Windows Setup EXE
+        required: false
+        type: string
+
 permissions:
   contents: read
 
@@ -33,20 +42,28 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+      - name: Install NSIS packaging tools
+        run: choco install nsis --yes --no-progress
       - name: Verify desktop regression tests on Windows
-        run: dotnet test tests/MailArchiver.Tests/MailArchiver.Tests.csproj -c Release --filter "FullyQualifiedName~LocalApp|FullyQualifiedName~UpstreamMailboxSyncServiceTests|FullyQualifiedName~MailTransportPolicyTests" --logger "trx;LogFileName=windows.trx" --results-directory TestResults
+        run: dotnet test tests/MailArchiver.Tests/MailArchiver.Tests.csproj -c Release --filter "FullyQualifiedName~LocalApp|FullyQualifiedName~UpstreamMailboxSyncServiceTests|FullyQualifiedName~MailTransportPolicyTests|FullyQualifiedName~CsvOnlyAccountSourceTests|FullyQualifiedName~CsvImportPipelineTests|FullyQualifiedName~MailConcurrencyCoordinatorTests" --logger "trx;LogFileName=windows.trx" --results-directory TestResults
       - name: Build the complete Windows package
         shell: pwsh
-        env:
-          MAIL_ASSISTANT_UPSTREAM_TOKEN: ci-inert-validation-token
         run: ./windows-app/build-windows.ps1 -OutputDirectory "$env:RUNNER_TEMP/mailbox-package"
       - name: Launch the native app with isolated storage
         shell: pwsh
         run: |
           $env:MAIL_ASSISTANT_DATA_DIRECTORY = "$env:RUNNER_TEMP/mailbox-validation"
           $env:MAIL_ASSISTANT_PORT = '5139'
-          $env:UpstreamMailboxSync__Enabled = 'false'
-          $app = Start-Process "$env:RUNNER_TEMP/mailbox-package/邮箱助手.exe" -PassThru
+          $env:UpstreamMailboxSync__Enabled = 'true'
+          $env:UpstreamMailboxSync__BearerToken = 'revoked-ci-sentinel'
+          $setup = Get-ChildItem "$env:RUNNER_TEMP/MailAssistant-Windows-*-Setup.exe" | Select-Object -First 1
+          if (-not $setup) { throw 'Single-file installer is missing.' }
+          $installed = Join-Path $env:RUNNER_TEMP 'mailbox-installed'
+          $installation = Start-Process $setup.FullName -ArgumentList '/S', "/D=$installed" -Wait -PassThru
+          if ($installation.ExitCode -ne 0) { throw 'Silent installation failed.' }
+          if (-not (Test-Path "$installed/server/MailArchiver.exe")) { throw 'Installer omitted the server.' }
+          if ((Get-FileHash "$installed/邮箱助手.exe").Hash -ne (Get-FileHash "$env:RUNNER_TEMP/mailbox-package/邮箱助手.exe").Hash) { throw 'Installed launcher differs from the package.' }
+          $app = Start-Process "$installed/邮箱助手.exe" -PassThru
           try {
             $ready = $false
             for ($attempt = 0; $attempt -lt 60; $attempt++) {
@@ -101,20 +118,56 @@ jobs:
               if ($app.HasExited) { throw 'Release native app exited before readiness.' }
               try {
                 $status = Invoke-RestMethod 'http://127.0.0.1:5140/MailAccounts/InitializationStatus' -TimeoutSec 3
-                if ($status.error) { throw 'Platform initialization failed; inspect the platform report.' }
-                if ($status.ready -and $status.loaded -ge 20) { $ready = $true; break }
+                if ($status.error -or $status.enabled) { throw 'CSV-only initialization failed.' }
+                if ($status.ready -and $status.loaded -eq 0) { $ready = $true; break }
               } catch {
-                if ($_.Exception.Message -like 'Platform initialization failed*') { throw }
+                if ($_.Exception.Message -like 'CSV-only initialization failed*') { throw }
               }
               Start-Sleep -Seconds 1
             }
-            if (-not $ready) { throw 'Exact release did not load real platform accounts.' }
+            if (-not $ready) { throw 'Exact CSV-only release did not become ready.' }
             $report = Invoke-RestMethod 'http://127.0.0.1:5140/LocalMaintenance/PlatformReport'
             $expectedVersion = ([xml](Get-Content windows-app/MailAssistant.Windows.csproj)).Project.PropertyGroup.Version
-            if ($report.appVersion -ne $expectedVersion -or $report.accountCount -lt 20) { throw 'Invalid release report.' }
-            if (-not ($report.requests | Where-Object { $_.HttpStatus -eq 200 -and $_.RequestId -like 'mailbox-*' })) { throw 'Real HTTP 200 receipt missing.' }
+            if ($report.appVersion -ne $expectedVersion -or $report.accountCount -ne 0) { throw 'Invalid release report.' }
+            if (@($report.requests).Count -ne 0) { throw 'CSV-only release made platform requests.' }
             $report | ConvertTo-Json -Depth 10 | Out-File TestResults/exact-release-report.json
-            "PASS: exact public ZIP SHA256=$hash; Unicode extraction, native Windows launcher, bundled runtime, fresh SQLite, compiled authorization, real platform accounts, safe request report." | Out-File TestResults/exact-release-startup.txt
+            "PASS: exact public ZIP SHA256=$hash; Unicode extraction, native Windows launcher, bundled runtime, fresh SQLite, CSV-only account source, no platform requests, safe request report." | Out-File TestResults/exact-release-startup.txt
+          } finally {
+            if (-not $app.HasExited) { & taskkill /PID $app.Id /T /F }
+          }
+      - name: Install and launch the exact public Windows Setup EXE
+        if: inputs.windows_installer_url != ''
+        shell: pwsh
+        env:
+          INSTALLER_URL: ${{ inputs.windows_installer_url }}
+          INSTALLER_SHA256: ${{ inputs.windows_installer_sha256 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $setup = Join-Path $env:RUNNER_TEMP 'exact-setup.exe'
+          Invoke-WebRequest $env:INSTALLER_URL -OutFile $setup -TimeoutSec 180
+          if ((Get-FileHash $setup -Algorithm SHA256).Hash.ToLowerInvariant() -ne $env:INSTALLER_SHA256.ToLowerInvariant()) { throw 'Public installer checksum mismatch.' }
+          $installed = Join-Path $env:RUNNER_TEMP 'exact-setup-installed'
+          $installation = Start-Process $setup -ArgumentList '/S', "/D=$installed" -Wait -PassThru
+          if ($installation.ExitCode -ne 0) { throw 'Public installer failed.' }
+          $env:MAIL_ASSISTANT_DATA_DIRECTORY = Join-Path $env:RUNNER_TEMP 'exact-setup-data'
+          $env:MAIL_ASSISTANT_PORT = '5141'
+          $app = Start-Process "$installed/邮箱助手.exe" -PassThru
+          try {
+            $ready = $false
+            for ($attempt = 0; $attempt -lt 120; $attempt++) {
+              if ($app.HasExited) { throw 'Installed public app exited before readiness.' }
+              try {
+                $health = Invoke-RestMethod 'http://127.0.0.1:5141/DesktopUpdates/Health' -TimeoutSec 3
+                $expected = ([xml](Get-Content windows-app/MailAssistant.Windows.csproj)).Project.PropertyGroup.Version
+                if ($health.version -ne $expected) { throw 'Installed public app version mismatch.' }
+                $ready = $true; break
+              } catch {
+                if ($_.Exception.Message -like '*version mismatch*') { throw }
+              }
+              Start-Sleep -Seconds 1
+            }
+            if (-not $ready) { throw 'Public installer app did not become ready.' }
+            "PASS: exact public Setup EXE SHA-256 verified, silently installed, native launcher and backend started at v$expected." | Out-File TestResults/exact-installer-startup.txt
           } finally {
             if (-not $app.HasExited) { & taskkill /PID $app.Id /T /F }
           }

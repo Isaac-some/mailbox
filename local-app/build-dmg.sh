@@ -31,10 +31,6 @@ if (( $# > 0 )); then
   exit 2
 fi
 
-if (( ! APP_ONLY )) && [[ -z "${MAIL_ASSISTANT_UPSTREAM_TOKEN:-}" ]]; then
-  print -u2 "缺少租户 Token，不能生成交付包。请设置 MAIL_ASSISTANT_UPSTREAM_TOKEN。"
-  exit 2
-fi
 
 if [[ ! -f "$ICON_FILE" ]]; then
   print -u2 "缺少 App 图标文件：$ICON_FILE"
@@ -106,26 +102,9 @@ fi
   --output "$APP_BUILD_PATH/Contents/Resources/server/updater" \
   -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:NuGetAudit=false
 
-# The release token is compiled by build-local-macos-release.sh. Keep the public
-# package's JSON settings free of tenant credentials.
+# CSV-only releases contain no platform authorization.
 APP_SETTINGS_PATH="$APP_BUILD_PATH/Contents/Resources/server/appsettings.Local.json"
 cp "$PROJECT_DIR/appsettings.Local.template.json" "$APP_SETTINGS_PATH"
-if [[ -n "${MAIL_ASSISTANT_UPSTREAM_TOKEN:-}" && -z "${BundledPlatformTokenSource:-}" ]]; then
-  print -u2 "请通过 script/build-local-macos-release.sh 构建，确保授权编译进程序。"
-  exit 5
-fi
-if [[ -n "${MAIL_ASSISTANT_UPSTREAM_ENDPOINT:-}" ]]; then
-  if ! command -v jq >/dev/null 2>&1; then
-    print -u2 "缺少 jq，无法把平台配置注入发布包。请先安装 jq。"
-    exit 5
-  fi
-  if [[ -n "${MAIL_ASSISTANT_UPSTREAM_ENDPOINT:-}" ]]; then
-    jq --arg endpoint "$MAIL_ASSISTANT_UPSTREAM_ENDPOINT" \
-      '.UpstreamMailboxSync.Endpoint = $endpoint' \
-      "$APP_SETTINGS_PATH" > "$APP_SETTINGS_PATH.tmp"
-    mv "$APP_SETTINGS_PATH.tmp" "$APP_SETTINGS_PATH"
-  fi
-fi
 
 for excluded_directory in local-app mailbox-service-v2 tests windows-app desktop-updater; do
   if [[ -e "$APP_BUILD_PATH/Contents/Resources/server/$excluded_directory" ]]; then
@@ -233,7 +212,6 @@ codesign --verify --deep --verbose=2 "$APP_PATH"
 STAGING_DIR="$WORK_DIR/dmg-root"
 mkdir -p "$STAGING_DIR"
 ditto --noextattr --noqtn "$APP_BUILD_PATH" "$STAGING_DIR/$APP_NAME.app"
-cp "$SCRIPT_DIR/后端测试说明.md" "$STAGING_DIR/后端测试说明.md"
 codesign --verify --deep --strict --verbose=2 "$STAGING_DIR/$APP_NAME.app"
 /usr/bin/ditto -c -k --sequesterRsrc --keepParent "$STAGING_DIR/$APP_NAME.app" \
   "$BUILD_DIR/MailAssistant-AppleSilicon-v$APP_VERSION-update.zip"

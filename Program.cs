@@ -69,9 +69,14 @@ var isLocalApp = builder.Configuration.GetValue<bool>("LocalApp:Enabled") ||
 
 if (isLocalApp)
 {
-    BundledPlatformAuthorization.Apply(builder.Configuration);
+
     builder.Configuration["AccountStorage:Enabled"] = "false";
 }
+
+// Account credentials are supplied by CSV only, even when old settings enable platform sync.
+builder.Configuration["UpstreamMailboxSync:Enabled"] = "false";
+builder.Configuration["UpstreamMailboxSync:BearerToken"] = string.Empty;
+builder.Configuration["UpstreamMailboxSync:Endpoint"] = string.Empty;
 
 // Configure Forwarded Headers for reverse proxy support
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
@@ -120,15 +125,17 @@ builder.Services.Configure<MailSyncOptions>(
 builder.Services.AddOptions<MailConcurrencyOptions>()
     .Bind(builder.Configuration.GetSection(MailConcurrencyOptions.SectionName))
     .ValidateDataAnnotations()
-    .Validate(options => options.AutomaticLimit <= 2,
-        "后台自动验证最多只能并发 2 个，请降低 MailConcurrency:AutomaticLimit。")
-    .Validate(options => options.PerDomainLimit >= options.AutomaticLimit + 2,
-        "每个域名至少需要为手动同步预留两个连接名额。")
+    .Validate(options => options.AutomaticLimit <= 8,
+        "后台自动验证总并发不得超过 8。")
+    .Validate(options => options.PerDomainLimit >= options.PerProviderAutomaticLimit,
+        "每域名后台容量不得小于每服务商容量。")
     .ValidateOnStart();
 builder.Services.AddSingleton<IMailConcurrencyCoordinator, MailConcurrencyCoordinator>();
 builder.Services.AddScoped<ISyncFailureRecorder, SyncFailureRecorder>();
 builder.Services.AddHostedService<SyncFailureRetentionService>();
-builder.Services.AddSingleton<INetworkPolicyStore, NetworkPolicyStore>();
+builder.Services.AddSingleton<INetworkPolicyStore>(provider => isLocalApp
+    ? new DeviceNetworkPolicyStore()
+    : ActivatorUtilities.CreateInstance<NetworkPolicyStore>(provider));
 builder.Services.AddSingleton<INetworkPolicyResolver, NetworkPolicyResolver>();
 builder.Services.AddSingleton<INetworkHttpClientFactory, NetworkHttpClientFactory>();
 builder.Services.AddSingleton<INetworkMailProxyFactory, NetworkMailProxyFactory>();
@@ -216,7 +223,7 @@ builder.Services.AddSingleton<CsvImportService>();
 builder.Services.AddSingleton<ICsvImportService>(provider => provider.GetRequiredService<CsvImportService>());
 builder.Services.AddHostedService<CsvImportService>(provider => provider.GetRequiredService<CsvImportService>());
 builder.Services.AddScoped<MailArchiver.Services.IMailCredentialVerifier, MailArchiver.Services.MailCredentialVerifier>();
-builder.Services.AddScoped<MailArchiver.Services.IUpstreamMailboxSyncService, MailArchiver.Services.UpstreamMailboxSyncService>();
+builder.Services.AddCsvOnlyAccountSource();
 builder.Services.AddSingleton<UpstreamMailboxSyncProgress>();
 builder.Services.AddSingleton<UpstreamMailboxRequestJournal>();
 builder.Services.AddSingleton<MailArchiver.Services.IUpstreamMailboxConnectionStore, MailArchiver.Services.UpstreamMailboxConnectionStore>();

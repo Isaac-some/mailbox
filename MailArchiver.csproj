@@ -2,20 +2,21 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
-    <Version>2.4.1</Version>
-    <AssemblyVersion>2.4.1.0</AssemblyVersion>
-    <FileVersion>2.4.1.0</FileVersion>
+    <Version>2.4.4</Version>
+    <AssemblyVersion>2.4.4.0</AssemblyVersion>
+    <FileVersion>2.4.4.0</FileVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <GenerateRuntimeConfigurationFiles>true</GenerateRuntimeConfigurationFiles>
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="$(BundledPlatformTokenSource)" Condition="'$(BundledPlatformTokenSource)' != ''" />
     <Compile Remove="local-app\**;mailbox-service-v2\**;tests\**;windows-app\**;desktop-updater\**" />
     <Content Remove="local-app\**;mailbox-service-v2\**;tests\**;windows-app\**;desktop-updater\**" />
     <None Remove="local-app\**;mailbox-service-v2\**;tests\**;windows-app\**;desktop-updater\**" />
     <EmbeddedResource Include="DesktopUpdate/update-public-key.pem" LogicalName="UpdatePublicKey" />
+    <Content Update="network-settings.json;mail-domain-profiles.json;upstream-mailbox-connection.json;appsettings.Development.json;appsettings.Test.json"
+             CopyToPublishDirectory="Never" />
   </ItemGroup>
 
   <ItemGroup>

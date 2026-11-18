@@ -6,15 +6,8 @@ namespace MailArchiver.Models.ViewModels
         public int UpdatedCount { get; set; }
         public int SkippedCount { get; set; }
         public int FailedCount { get; set; }
-        public int PendingVerificationCount { get; set; }
-        public int FormatWarningCount { get; set; }
-        public int WarningCount { get; set; }
-        public int VerificationSuccessCount { get; set; }
-        public int VerificationFailedCount { get; set; }
-        public int VerificationFormatFailureCount { get; set; }
-        public int VerificationAuthFailureCount { get; set; }
-        public int VerificationNetworkFailureCount { get; set; }
-        public int VerificationRateLimitCount { get; set; }
+        public bool CanStartVerification { get; set; }
+        public bool VerificationStarted { get; set; }
         public string? JobId { get; set; }
         public string? Status { get; set; }
         public string? ErrorMessage { get; set; }

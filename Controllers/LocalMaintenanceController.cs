@@ -142,7 +142,7 @@ public sealed class LocalMaintenanceController : Controller
         }
         if (!result.Enabled)
         {
-            TempData["ErrorMessage"] = "交付包未启用平台邮箱同步，请联系交付方。";
+            TempData["ErrorMessage"] = "线上账号拉取已关闭，请通过 CSV 导入或更新邮箱。";
             return RedirectToAction(nameof(Index));
         }
         if (!result.Succeeded)

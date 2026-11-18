@@ -70,7 +70,7 @@ public sealed class MailConcurrencyCoordinatorTests
         });
         await Task.WhenAll(tasks);
         Assert.InRange(peak, 1, 2);
-        Assert.All(peakByProvider, providerPeak => Assert.Equal(1, providerPeak));
+        Assert.All(peakByProvider, providerPeak => Assert.InRange(providerPeak, 1, 2));
 
         await using var first = await coordinator.AcquireAutomaticAsync("gmail.com");
         await using var second = await coordinator.AcquireAutomaticAsync("gmx.com");
@@ -80,6 +80,60 @@ public sealed class MailConcurrencyCoordinatorTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => waiting);
         await first.DisposeAsync();
         await using var replacement = await coordinator.AcquireAutomaticAsync("yahoo.com");
+    }
+
+    [Fact]
+    public async Task Saturated_background_provider_cannot_delay_selected_mailbox_or_another_provider()
+    {
+        using var coordinator = new MailConcurrencyCoordinator(Options.Create(new MailConcurrencyOptions {
+            AutomaticLimit = 8, PerDomainLimit = 2 }));
+        await using var a = await coordinator.AcquireAutomaticAsync("gmx.com", provider: MailProviderKind.Gmx);
+        // Old shared domain gates block this interactive acquisition when saturated.
+        await using var b = await coordinator.AcquireAutomaticAsync("gmx.com");
+        using var deadline = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
+        await using var interactive = await coordinator.AcquireInteractiveAsync("gmx.com", deadline.Token);
+        await using var other = await coordinator.AcquireAutomaticAsync("yahoo.com", deadline.Token, MailProviderKind.Yahoo);
+    }
+
+    [Fact]
+    public async Task Provider_limits_are_shared_across_alias_domains_and_independent_between_providers()
+    {
+        using var c = new MailConcurrencyCoordinator(Options.Create(new MailConcurrencyOptions()));
+        await using var gmx1 = await c.AcquireAutomaticAsync("gmx.es", provider: MailProviderKind.Gmx);
+        await using var gmx2 = await c.AcquireAutomaticAsync("gmx.fr", provider: MailProviderKind.Gmx);
+        using var deadline = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
+        var gmx3 = c.AcquireAutomaticAsync("gmx.com", deadline.Token, MailProviderKind.Gmx);
+        await using var outlook = await c.AcquireAutomaticAsync("outlook.com", deadline.Token, MailProviderKind.Outlook);
+        await using var yahoo = await c.AcquireAutomaticAsync("yahoo.com", deadline.Token, MailProviderKind.Yahoo);
+        var yahoo2 = c.AcquireAutomaticAsync("yahoo.es", deadline.Token, MailProviderKind.Yahoo);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => gmx3);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => yahoo2);
+    }
+
+    [Fact]
+    public async Task Already_queued_requests_observe_provider_cooldown_but_interactive_requests_do_not()
+    {
+        using var c = new MailConcurrencyCoordinator(Options.Create(new MailConcurrencyOptions()));
+        await using var first = await c.AcquireAutomaticAsync("yahoo.com", provider: MailProviderKind.Yahoo);
+        using var deadline = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
+        var queued = c.AcquireAutomaticAsync("yahoo.es", deadline.Token, MailProviderKind.Yahoo);
+        c.ReportRateLimit("yahoo.com", MailProviderKind.Yahoo);
+        await first.DisposeAsync();
+        await using var selected = await c.AcquireInteractiveAsync("yahoo.com", deadline.Token);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => queued);
+    }
+
+    [Fact]
+    public void Selecting_same_account_cancels_background_login_and_keeps_future_background_work_out()
+    {
+        using var c = CreateCoordinator();
+        using var background = c.BeginBackgroundVerification(42, default);
+        using var other = c.BeginBackgroundVerification(43, default);
+        c.PrioritizeAccount(42);
+        Assert.True(background.IsCancellationRequested); Assert.False(other.IsCancellationRequested);
+        c.EndBackgroundVerification(42);
+        using var later = c.BeginBackgroundVerification(42, default);
+        Assert.True(later.IsCancellationRequested);
     }
 
     private static MailConcurrencyCoordinator CreateCoordinator()

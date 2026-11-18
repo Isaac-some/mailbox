@@ -6,7 +6,6 @@
     var csvStatusUrl = Url.Action("CsvImportStatusJson", "MailAccounts");
     var csvResultUrl = Url.Action("CsvImportStatus", "MailAccounts");
     var csvVerifyUrl = Url.Action("VerifyCsvImport", "MailAccounts");
-    var csvRetryUrl = Url.Action("RetryCsvImportVerification", "MailAccounts");
 }
 <!DOCTYPE html>
 <html lang="@currentCulture">
@@ -116,7 +115,6 @@
             const statusUrl = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(csvStatusUrl));
             const resultUrl = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(csvResultUrl));
             const verifyUrl = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(csvVerifyUrl));
-            const retryUrl = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(csvRetryUrl));
             const storageKey = 'mailAssistant.csvImportJobs';
             const collapsedKey = 'mailAssistant.csvImportTasksCollapsed';
             const panel = document.getElementById('csvImportTasks');
@@ -124,9 +122,8 @@
             const toggle = document.getElementById('csvImportTasksToggle');
             const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value;
             const labels = {
-                Queued: '排队中', Running: '正在保存', AwaitingVerification: '等待验证',
-                Verifying: '正在验证', Completed: '已完成',
-                CompletedWithErrors: '已完成，部分失败', Failed: '任务失败'
+                Queued: '等待导入', Running: '正在导入', Completed: '导入完成',
+                CompletedWithErrors: '导入完成，部分记录未导入', Failed: '导入失败'
             };
 
             let jobs;
@@ -146,33 +143,38 @@
                 panel.classList.toggle('csv-import-tasks--collapsed', collapsed);
                 toggle.setAttribute('aria-expanded', String(!collapsed));
                 list.innerHTML = visibleRecords.map(job => {
-                    const total = job.verificationStarted && job.verificationTotal ? job.verificationTotal : job.total;
-                    const processed = job.verificationStarted
-                        && (job.status === 'Verifying' || job.status === 'Completed' || job.status === 'CompletedWithErrors')
-                        ? job.verificationProcessed : job.processed;
-                    const phase = job.verificationStarted ? '验证' : '保存';
+                    const importing = ['Queued', 'Running'].includes(job.status);
+                    const total = job.total, processed = job.processed;
                     const percent = total ? Math.min(100, Math.round(processed * 100 / total)) : 0;
-                    const verify = job.status === 'AwaitingVerification'
-                        ? `<button class="btn btn-primary btn-sm csv-import-verify" data-job-id="${job.jobId}" data-action-url="${verifyUrl}">验证本批账号</button>`
-                        : job.status === 'CompletedWithErrors' && job.verificationFailed > 0
-                            ? `<button class="btn btn-outline-primary btn-sm csv-import-verify" data-job-id="${job.jobId}" data-action-url="${retryUrl}">重试失败账号</button>` : '';
+                    const verify = job.canStartVerification
+                        ? `<button class="btn btn-primary btn-sm csv-import-verify" data-job-id="${job.jobId}" data-action-url="${verifyUrl}">后台验证</button>` : '';
                     return `<section class="csv-import-task">
-                        <div class="d-flex justify-content-between gap-2"><span>${labels[job.status] || job.status}</span><span>${processed}/${total}</span></div>
-                        <div class="progress mt-1" role="progressbar" aria-label="${phase}进度" aria-valuenow="${percent}" aria-valuemin="0" aria-valuemax="100"><div class="progress-bar" style="width:${percent}%"></div></div>
-                        <div class="csv-import-task__counts">保存 ${job.created + job.updated} · 待验证 ${job.pendingVerification} · 格式待确认 ${job.formatWarnings} · 字段警告 ${job.warnings} · 失败 ${job.failed + job.verificationFailed}</div>
-                        ${job.verificationFailed ? `<div class="csv-import-task__counts">格式 ${job.verificationFormatFailures} · 认证 ${job.verificationAuthFailures} · 网络/TLS ${job.verificationNetworkFailures} · 限流 ${job.verificationRateLimits}</div>` : ''}
-                        <div class="csv-import-task__actions">${verify}<a href="${resultUrl}?jobId=${encodeURIComponent(job.jobId)}" class="btn btn-outline-secondary btn-sm">查看结果</a></div>
+                        <div class="d-flex justify-content-between gap-2"><span>${labels[job.status] || '导入完成'}</span>${importing ? `<span>${processed}/${total}</span>` : ''}</div>
+                        ${importing ? `<div class="progress mt-1" role="progressbar" aria-label="导入进度" aria-valuenow="${percent}" aria-valuemin="0" aria-valuemax="100"><div class="progress-bar" style="width:${percent}%"></div></div>` : ''}
+                        <div class="csv-import-task__counts">导入成功 ${job.created + job.updated} · 导入失败 ${job.failed}</div>
+                        ${job.verificationStarted ? '<p class="small mt-2 mb-0" role="status">已在后台执行自动验证。直接打开邮箱将优先验证并获取邮件。</p>' : ''}
+                        <div class="csv-import-task__actions">${verify}<a href="${resultUrl}?jobId=${encodeURIComponent(job.jobId)}" class="btn btn-outline-secondary btn-sm">查看导入结果</a></div>
                     </section>`;
                 }).join('') + (refreshError ? '<div class="csv-import-tasks__error">暂时无法刷新进度。</div>' : '');
                 list.querySelectorAll('.csv-import-verify').forEach(button => button.addEventListener('click', async () => {
                     button.disabled = true;
                     try {
-                        await fetch(button.dataset.actionUrl, {
+                        const response = await fetch(button.dataset.actionUrl, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' },
                             body: `jobId=${encodeURIComponent(button.dataset.jobId)}&__RequestVerificationToken=${encodeURIComponent(token || '')}`
                         });
-                    } finally { refresh(); }
+                        const result = await response.json();
+                        if (!response.ok) throw new Error(result.message || '暂时无法启动后台验证，请重试。');
+                        refresh();
+                    } catch (error) {
+                        button.disabled = false;
+                        const notice = document.createElement('p');
+                        notice.className = 'small text-danger mt-2';
+                        notice.setAttribute('role', 'alert');
+                        notice.textContent = error.message;
+                        button.parentElement.appendChild(notice);
+                    }
                 }));
             };
 

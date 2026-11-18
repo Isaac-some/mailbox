@@ -5,51 +5,26 @@ param(
 
 $ErrorActionPreference = "Stop"
 $PSNativeCommandUseErrorActionPreference = $true
-if ([string]::IsNullOrWhiteSpace($env:MAIL_ASSISTANT_UPSTREAM_TOKEN)) {
-    throw "缺少租户 Token，不能生成交付包。请设置 MAIL_ASSISTANT_UPSTREAM_TOKEN。"
-}
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $serverOutput = Join-Path $OutputDirectory "server"
 $wrapperProject = Join-Path $PSScriptRoot "MailAssistant.Windows.csproj"
 $serverProject = Join-Path $projectRoot "MailArchiver.csproj"
+$makensisCommand = Get-Command makensis -ErrorAction SilentlyContinue
+$makensis = if ($makensisCommand) { $makensisCommand.Source } else { Join-Path ${env:ProgramFiles(x86)} "NSIS\makensis.exe" }
+if (-not (Test-Path $makensis)) {
+    throw "请先安装 NSIS（https://nsis.sourceforge.io/），再生成完整 EXE 安装包。"
+}
+$OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
+$serverOutput = Join-Path $OutputDirectory "server"
 
 if (Test-Path $OutputDirectory) {
     Remove-Item -Recurse -Force $OutputDirectory
 }
 New-Item -ItemType Directory -Path $OutputDirectory, $serverOutput | Out-Null
 
-# Keep generated authorization outside both source control and the package.
-$tokenDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ("mailbox-token-" + [guid]::NewGuid())
-New-Item -ItemType Directory -Path $tokenDirectory | Out-Null
-$tokenSource = Join-Path $tokenDirectory "PlatformAuthorization.g.cs"
-$encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($env:MAIL_ASSISTANT_UPSTREAM_TOKEN.Trim()))
-$source = @"
-namespace MailArchiver.Services;
-internal static partial class BundledPlatformAuthorization
-{
-    static partial void ApplyReleaseToken(Microsoft.Extensions.Configuration.IConfiguration configuration)
-    {
-        if (string.IsNullOrWhiteSpace(configuration["UpstreamMailboxSync:BearerToken"]))
-            configuration["UpstreamMailboxSync:BearerToken"] =
-                System.Text.Encoding.UTF8.GetString(System.Convert.FromBase64String("$encoded"));
-    }
-}
-"@
-try {
-    [System.IO.File]::WriteAllText($tokenSource, $source)
-    dotnet publish $serverProject `
-        --configuration Release `
-        --runtime win-x64 `
-        --self-contained true `
-        --output $serverOutput `
-        "-p:BundledPlatformTokenSource=$tokenSource" `
-        -p:PublishSingleFile=false `
-        -p:PublishTrimmed=false
-} finally {
-    Remove-Item -Recurse -Force $tokenDirectory
-    $encoded = $null
-    $source = $null
-}
+dotnet publish $serverProject `
+    --configuration Release --runtime win-x64 --self-contained true `
+    --output $serverOutput -p:PublishSingleFile=false -p:PublishTrimmed=false
 
 dotnet publish $wrapperProject `
     --configuration Release `
@@ -72,13 +47,6 @@ foreach ($requiredFile in @($launcher, $serverExecutable, $localSettings)) {
     }
 }
 
-if ($env:MAIL_ASSISTANT_UPSTREAM_ENDPOINT) {
-    $settings = Get-Content $localSettings -Raw | ConvertFrom-Json
-    if ($env:MAIL_ASSISTANT_UPSTREAM_ENDPOINT) {
-        $settings.UpstreamMailboxSync.Endpoint = $env:MAIL_ASSISTANT_UPSTREAM_ENDPOINT
-    }
-    $settings | ConvertTo-Json -Depth 20 | Set-Content $localSettings -Encoding UTF8
-}
 
 Rename-Item -Path $launcher -NewName "邮箱助手.exe"
 dotnet publish (Join-Path $projectRoot "desktop-updater/MailAssistant.Updater.csproj") `
@@ -86,4 +54,24 @@ dotnet publish (Join-Path $projectRoot "desktop-updater/MailAssistant.Updater.cs
     --output (Join-Path $serverOutput "updater") `
     -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
 Copy-Item (Join-Path $PSScriptRoot "README.md") (Join-Path $OutputDirectory "README.md")
+$version = ([xml](Get-Content $wrapperProject)).Project.PropertyGroup.Version
+$installerOutput = Join-Path (Split-Path -Parent $OutputDirectory) "MailAssistant-Windows-x64-v$version-Setup.exe"
+$uninstallList = [IO.Path]::GetTempFileName()
+try {
+    $commands = @(Get-ChildItem $OutputDirectory -Recurse -File | Sort-Object FullName | ForEach-Object {
+        $relative = [IO.Path]::GetRelativePath($OutputDirectory, $_.FullName).Replace('$', '$$').Replace('"', '$\"')
+        'Delete "$INSTDIR\' + $relative + '"'
+    })
+    $commands += @(Get-ChildItem $OutputDirectory -Recurse -Directory | Sort-Object { $_.FullName.Length } -Descending | ForEach-Object {
+        $relative = [IO.Path]::GetRelativePath($OutputDirectory, $_.FullName).Replace('$', '$$').Replace('"', '$\"')
+        'RMDir "$INSTDIR\' + $relative + '"'
+    })
+    [IO.File]::WriteAllLines($uninstallList, $commands, [Text.UTF8Encoding]::new($false))
+    & $makensis /V3 "/DPACKAGE_DIR=$OutputDirectory" "/DOUTPUT_FILE=$installerOutput" `
+        "/DAPP_VERSION=$version" "/DUNINSTALL_FILES=$uninstallList" (Join-Path $PSScriptRoot "installer.nsi")
+    if ($LASTEXITCODE -ne 0) { throw "EXE 安装包构建失败。" }
+} finally {
+    Remove-Item $uninstallList -ErrorAction SilentlyContinue
+}
+Write-Host "完整 EXE 安装包已生成：$installerOutput"
 Write-Host "Windows 发布包已生成：$OutputDirectory"

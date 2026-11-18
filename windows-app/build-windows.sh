@@ -18,10 +18,6 @@ export DOTNET_CLI_HOME="${DOTNET_CLI_HOME:-$LOCAL_TOOLS_DIR/dotnet-home}"
 export NUGET_PACKAGES="${NUGET_PACKAGES:-$LOCAL_TOOLS_DIR/nuget-packages}"
 export DOTNET_CLI_TELEMETRY_OPTOUT=1
 export DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
-if [[ -z "${MAIL_ASSISTANT_UPSTREAM_TOKEN:-}" ]]; then
-  printf '%s\n' "缺少租户 Token，不能生成 Windows 交付包。" >&2
-  exit 2
-fi
 WORK_DIR="$(mktemp -d "${TMPDIR:-/private/tmp}/mail-assistant-windows-build.XXXXXX")"
 STAGING_DIR="$WORK_DIR/邮箱助手-Windows-x64"
 SERVER_DIR="$STAGING_DIR/server"
@@ -32,8 +28,6 @@ cleanup() {
 trap cleanup EXIT
 
 mkdir -p "$SERVER_DIR"
-TOKEN_SOURCE="$WORK_DIR/PlatformAuthorization.g.cs"
-python3 "$PROJECT_DIR/script/generate-bundled-platform-token.py" "$TOKEN_SOURCE"
 
 "$DOTNET_COMMAND" publish "$PROJECT_DIR/MailArchiver.csproj" \
   --configuration Release \
@@ -46,7 +40,6 @@ python3 "$PROJECT_DIR/script/generate-bundled-platform-token.py" "$TOKEN_SOURCE"
   -p:UseSharedCompilation=false \
   -p:NuGetAudit=false \
   -p:PublishSingleFile=false \
-  -p:BundledPlatformTokenSource="$TOKEN_SOURCE" \
   -p:PublishTrimmed=false
 
 # Keep static assets beside the server binaries. The generated static-web-assets
@@ -55,11 +48,6 @@ if [[ -d "$PROJECT_DIR/wwwroot" ]]; then
   ditto "$PROJECT_DIR/wwwroot" "$SERVER_DIR/wwwroot"
 fi
 cp "$PROJECT_DIR/appsettings.Local.template.json" "$SERVER_DIR/appsettings.Local.json"
-if [[ -n "${MAIL_ASSISTANT_UPSTREAM_ENDPOINT:-}" ]]; then
-  jq '.UpstreamMailboxSync.Endpoint = env.MAIL_ASSISTANT_UPSTREAM_ENDPOINT' \
-    "$SERVER_DIR/appsettings.Local.json" > "$SERVER_DIR/appsettings.Local.json.tmp"
-  mv "$SERVER_DIR/appsettings.Local.json.tmp" "$SERVER_DIR/appsettings.Local.json"
-fi
 
 "$DOTNET_COMMAND" publish "$SCRIPT_DIR/MailAssistant.Windows.csproj" \
   --configuration Release \
@@ -104,4 +92,5 @@ rm -rf "$OUTPUT_DIR"
 mkdir -p "$(dirname "$OUTPUT_DIR")"
 mv "$STAGING_DIR" "$OUTPUT_DIR"
 
+bash "$PROJECT_DIR/script/build-windows-installer.sh" "$OUTPUT_DIR"
 printf '%s\n' "$OUTPUT_DIR"

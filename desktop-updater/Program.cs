@@ -33,6 +33,8 @@ try
         ZipFile.ExtractToDirectory(archive, stage);
     var extracted = Path.Combine(stage, artifact.RootDirectory);
     await ValidatePackageAsync(extracted, manifest.Version, plan.Platform);
+    if (plan.Platform == "win-x64")
+        UpdateProtocol.PreserveWindowsInstallerSupport(plan.InstallDirectory, extracted);
     // Same-volume staging and a rename test fail BEFORE the running application exits.
     var probe = stage + ".probe";
     Directory.Move(stage, probe);
@@ -61,6 +63,13 @@ try
         throw new InvalidOperationException("新版未能正常启动，已恢复原版本。");
     }
     WriteResult(plan, true, manifest.Version, $"已成功更新至 v{manifest.Version}。", false);
+    if (OperatingSystem.IsWindows())
+    {
+        using var registry = Microsoft.Win32.RegistryKey.OpenBaseKey(
+            Microsoft.Win32.RegistryHive.CurrentUser, Microsoft.Win32.RegistryView.Registry32);
+        using var entry = registry.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\MailAssistant", writable: true);
+        entry?.SetValue("DisplayVersion", manifest.Version);
+    }
     DeleteRequest(plan);
     // Retain the previous program until startup and readiness have actually succeeded.
     TryDelete(backup);

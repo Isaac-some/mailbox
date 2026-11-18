@@ -1710,14 +1710,15 @@ namespace MailArchiver.Controllers
             var loaded = await ManageableMailAccounts().CountAsync(HttpContext.RequestAborted);
             var enabled = options.Enabled;
             var configured = !string.IsNullOrWhiteSpace(options.BearerToken);
-            var ready = loaded >= 20 || (progress.Started && !progress.Running && progress.Error is null);
-            var message = !configured && enabled ? "交付包缺少平台租户 Token，请联系交付方重新打包。"
+            var ready = !enabled || loaded >= 20 || (progress.Started && !progress.Running && progress.Error is null);
+            var message = !enabled ? $"已加载 {loaded} 个本地邮箱；请通过 CSV 导入或更新账号。"
+                : !configured && enabled ? "交付包缺少平台租户 Token，请联系交付方重新打包。"
                 : progress.Error is not null ? $"拉取暂未完成：{progress.Error} 已加载的邮箱仍可使用。"
                 : ready && progress.Running ? $"已加载 {loaded} 个邮箱，可以开始使用；其余邮箱正在后台拉取。"
                 : progress.Started && !progress.Running ? $"初始化完成，已加载 {loaded} 个邮箱。" + (progress.Rejected > 0 ? $" 已跳过 {progress.Rejected} 条无效记录。" : string.Empty)
                 : "正在初始化，正在检索与拉取邮箱信息；可直接搜索完整邮箱地址优先查看。";
             return Json(new { enabled, ready, loaded, progress.Total, progress.Rejected,
-                running = configured && (!progress.Started || progress.Running),
+                running = enabled && configured && (!progress.Started || progress.Running),
                 error = !configured && enabled ? message : progress.Error, message });
         }
 
@@ -3444,7 +3445,7 @@ namespace MailArchiver.Controllers
             var job = await GetOwnedCsvImportJobAsync(jobId);
             if (job is null)
                 return NotFound();
-            if (job.Status is CsvImportJobStatus.AwaitingVerification or CsvImportJobStatus.Completed or CsvImportJobStatus.CompletedWithErrors or CsvImportJobStatus.Failed)
+            if (job.ImportStatus is not (CsvImportJobStatus.Queued or CsvImportJobStatus.Running))
                 return View("CsvImportResult", ToCsvImportResult(job));
             return View(job);
         }
@@ -3458,7 +3459,7 @@ namespace MailArchiver.Controllers
             return Json(new
             {
                 jobId = job.JobId,
-                status = job.Status.ToString(),
+                status = job.ImportStatus.ToString(),
                 lastUpdated = job.LastUpdated,
                 total = job.TotalRows,
                 processed = job.ProcessedRows,
@@ -3466,17 +3467,7 @@ namespace MailArchiver.Controllers
                 updated = job.UpdatedCount,
                 skipped = job.SkippedCount,
                 failed = job.FailedCount,
-                pendingVerification = job.PendingVerificationCount,
-                formatWarnings = job.FormatWarningCount,
-                warnings = job.WarningCount,
-                verificationProcessed = job.VerificationProcessedCount,
-                verificationSuccess = job.VerificationSuccessCount,
-                verificationFailed = job.VerificationFailedCount,
-                verificationFormatFailures = job.VerificationFormatFailureCount,
-                verificationAuthFailures = job.VerificationAuthFailureCount,
-                verificationNetworkFailures = job.VerificationNetworkFailureCount,
-                verificationRateLimits = job.VerificationRateLimitCount,
-                verificationTotal = job.VerificationTotalCount,
+                canStartVerification = job.Status == CsvImportJobStatus.AwaitingVerification && !job.VerificationStarted,
                 verificationStarted = job.VerificationStarted,
                 error = job.ErrorMessage
             });
@@ -3494,8 +3485,12 @@ namespace MailArchiver.Controllers
             if (job is null)
                 return NotFound();
             var started = _csvImportService.StartVerification(jobId);
+            const string message = "已在后台执行自动验证。直接打开邮箱将优先验证并获取邮件。";
             if (Request.Headers.Accept.Any(value => value.Contains("application/json", StringComparison.OrdinalIgnoreCase)))
-                return Json(new { started, status = job.Status.ToString(), jobId });
+                return started || job.VerificationStarted
+                    ? Json(new { started = true, jobId, message })
+                    : Conflict(new { message = "请等待导入完成后再开始验证。" });
+            TempData["SuccessMessage"] = started || job.VerificationStarted ? message : "请等待导入完成后再开始验证。";
             TempData["CsvImportJobId"] = jobId;
             return RedirectToAction(nameof(Index));
         }
@@ -3528,20 +3523,13 @@ namespace MailArchiver.Controllers
             => new()
             {
                 JobId = job.JobId,
-                Status = job.Status.ToString(),
+                Status = job.ImportStatus.ToString(),
                 CreatedCount = job.CreatedCount,
                 UpdatedCount = job.UpdatedCount,
                 SkippedCount = job.SkippedCount,
                 FailedCount = job.FailedCount,
-                PendingVerificationCount = job.PendingVerificationCount,
-                FormatWarningCount = job.FormatWarningCount,
-                WarningCount = job.WarningCount,
-                VerificationSuccessCount = job.VerificationSuccessCount,
-                VerificationFailedCount = job.VerificationFailedCount,
-                VerificationFormatFailureCount = job.VerificationFormatFailureCount,
-                VerificationAuthFailureCount = job.VerificationAuthFailureCount,
-                VerificationNetworkFailureCount = job.VerificationNetworkFailureCount,
-                VerificationRateLimitCount = job.VerificationRateLimitCount,
+                CanStartVerification = job.Status == CsvImportJobStatus.AwaitingVerification && !job.VerificationStarted,
+                VerificationStarted = job.VerificationStarted,
                 ErrorMessage = job.ErrorMessage,
                 CreatedRows = job.CreatedSamples,
                 UpdatedRows = job.UpdatedSamples,

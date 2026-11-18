@@ -8,7 +8,7 @@ using MailAssistant.Updates;
 namespace MailArchiver.Services;
 
 public sealed record DesktopUpdateState(string Phase, string CurrentVersion, string? LatestVersion = null,
-    string? Notes = null, long Downloaded = 0, long Total = 0, string? Message = null);
+    string? Notes = null, long Downloaded = 0, long Total = 0, string? Message = null, bool WaitingForWork = false);
 
 public sealed class DesktopUpdateService(
     IHttpClientFactory clients, IConfiguration configuration, IHostApplicationLifetime lifetime,
@@ -22,8 +22,7 @@ public sealed class DesktopUpdateService(
     private byte[]? _manifestBytes;
     private byte[]? _signature;
 
-    public string CurrentVersion => configuration["ReleaseNotes:AppVersion"]
-        ?? typeof(DesktopUpdateService).Assembly.GetName().Version!.ToString(3);
+    public string CurrentVersion => typeof(DesktopUpdateService).Assembly.GetName().Version!.ToString(3);
     public string Platform => OperatingSystem.IsMacOS() && RuntimeInformation.ProcessArchitecture == Architecture.Arm64
         ? "osx-arm64" : OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64 ? "win-x64" : "unsupported";
     public bool Available => Environment.GetEnvironmentVariable("MAIL_ASSISTANT_LOCAL_APP") == "1"
@@ -45,7 +44,7 @@ public sealed class DesktopUpdateService(
             if (State.Phase == "ready") return State;
             Set(new("checking", CurrentVersion, Message: "正在检查更新…"));
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(TimeSpan.FromSeconds(40));
+            timeout.CancelAfter(TimeSpan.FromSeconds(120));
             // Fixed public release assets avoid the shared-IP anonymous GitHub API quota.
             // Test channels are selected only at native launch, never by a browser request.
             var releasePath = Channel == "stable" ? "latest/download" : "download/" + Uri.EscapeDataString(Channel);
@@ -58,10 +57,7 @@ public sealed class DesktopUpdateService(
             _manifest = manifest;
             _artifact = manifest.Artifacts.SingleOrDefault(a => a.Platform == Platform)
                 ?? throw new InvalidOperationException("新版暂未提供当前系统的更新包。");
-            var newer = UpdateProtocol.IsNewer(manifest.Version, CurrentVersion);
-            Set(new(newer ? "available" : "current", CurrentVersion, manifest.Version,
-                manifest.Notes,
-                Total: _artifact.Size, Message: newer ? "发现新版本，可下载更新。" : "当前已是最新版本。"));
+            Set(BuildVersionState(CurrentVersion, manifest, _artifact));
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
@@ -70,6 +66,17 @@ public sealed class DesktopUpdateService(
         }
         finally { _gate.Release(); }
         return State;
+    }
+
+    internal static DesktopUpdateState BuildVersionState(string currentVersion, UpdateManifest manifest, UpdateArtifact artifact)
+    {
+        var newer = UpdateProtocol.IsNewer(manifest.Version, currentVersion);
+        var ahead = UpdateProtocol.IsNewer(currentVersion, manifest.Version);
+        return new(newer ? "available" : ahead ? "ahead" : "current", currentVersion, manifest.Version,
+            ahead ? null : manifest.Notes, Total: artifact.Size,
+            Message: newer ? "发现新版本，正在自动更新。"
+                : ahead ? $"本机版本高于 GitHub 已发布版本（v{manifest.Version}），无需降级。"
+                : "当前版本与 GitHub 已发布版本一致。");
     }
 
     public async Task<DesktopUpdateState> StartDownloadAsync(CancellationToken cancellationToken)
@@ -132,17 +139,17 @@ public sealed class DesktopUpdateService(
             if (State.Phase != "ready" || _session is null) return State;
             if (!activity.TryBeginInstall())
             {
-                Set(State with { Message = "正在发送邮件，请等待发送完成后再更新。" });
+                Set(State with { Message = "正在发送邮件，完成后会自动更新。", WaitingForWork = true });
                 return State;
             }
             acquired = true;
             if (await hasPendingWork())
             {
                 activity.CancelInstall(); acquired = false;
-                Set(State with { Message = "后台任务正在处理，请等待完成后再更新。" });
+                Set(State with { Message = "正在导入账号或发送邮件，完成后会自动更新。", WaitingForWork = true });
                 return State;
             }
-            Set(State with { Phase = "preparing", Message = "正在校验并准备安装，请稍候…" });
+            Set(State with { Phase = "preparing", Message = "正在校验并准备安装，请稍候…", WaitingForWork = false });
             var installDirectory = Environment.GetEnvironmentVariable("MAIL_ASSISTANT_INSTALL_DIRECTORY")!;
             var nativePid = int.Parse(Environment.GetEnvironmentVariable("MAIL_ASSISTANT_NATIVE_PID")!);
             var port = int.Parse(Environment.GetEnvironmentVariable("MAIL_ASSISTANT_PORT") ?? "5180");
@@ -211,10 +218,38 @@ public sealed class DesktopUpdateService(
 
     private async Task<HttpResponseMessage> GetAsync(Uri uri, CancellationToken cancellationToken)
     {
+        try { return await GetCoreAsync(uri, false, cancellationToken); }
+        catch (Exception error) when (uri.Host == "github.com" && !cancellationToken.IsCancellationRequested
+            && error is HttpRequestException or TaskCanceledException)
+        {
+            // Some device networks reach api.github.com while the release web route times out.
+            // The alternate transport is still GitHub; the manifest signature and archive hash stay mandatory.
+            var release = Channel == "stable" ? "latest" : "tags/" + Uri.EscapeDataString(Channel);
+            var metadata = await GetSmallAsync(new Uri($"https://api.github.com/repos/{UpdateProtocol.Repository}/releases/{release}"),
+                200_000, cancellationToken);
+            var assetUri = ResolveGitHubApiAsset(metadata, Path.GetFileName(uri.AbsolutePath));
+            return await GetCoreAsync(assetUri, true, cancellationToken);
+        }
+    }
+
+    internal static Uri ResolveGitHubApiAsset(byte[] metadata, string fileName)
+    {
+        using var json = JsonDocument.Parse(metadata);
+        foreach (var asset in json.RootElement.GetProperty("assets").EnumerateArray())
+            if (asset.GetProperty("name").GetString() == fileName
+                && asset.GetProperty("id").TryGetInt64(out var id) && id > 0)
+                return new Uri($"https://api.github.com/repos/{UpdateProtocol.Repository}/releases/assets/{id}");
+        throw new InvalidOperationException("GitHub 发布中缺少所需更新文件。");
+    }
+
+    private async Task<HttpResponseMessage> GetCoreAsync(Uri uri, bool apiAsset, CancellationToken cancellationToken)
+    {
         // The project's network-policy handler intentionally disables redirects. Follow only GitHub's release CDN.
         using var client = clients.CreateClient("DesktopUpdates");
         client.Timeout = Timeout.InfiniteTimeSpan;
         client.DefaultRequestHeaders.UserAgent.ParseAdd("MailAssistant-DesktopUpdater/1.0");
+        if (apiAsset) client.DefaultRequestHeaders.Accept.ParseAdd("application/octet-stream");
+        client.DefaultRequestHeaders.CacheControl = new System.Net.Http.Headers.CacheControlHeaderValue { NoCache = true };
         for (var i = 0; i < 6; i++)
         {
             if (uri.Scheme != "https" || !(uri.Host is "github.com" or "api.github.com" or "release-assets.githubusercontent.com" or "objects.githubusercontent.com"))

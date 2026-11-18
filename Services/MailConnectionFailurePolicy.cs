@@ -119,7 +119,8 @@ public static class MailConnectionFailurePolicy
             or ProxyProtocolException;
 
     private static bool IsRateLimit(Exception exception)
-        => exception.Message.Contains("rate limit", StringComparison.OrdinalIgnoreCase)
+        => exception is HttpRequestException { StatusCode: System.Net.HttpStatusCode.TooManyRequests }
+            || exception.Message.Contains("rate limit", StringComparison.OrdinalIgnoreCase)
             || exception.Message.Contains("too many", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsProtocolFailure(Exception exception)

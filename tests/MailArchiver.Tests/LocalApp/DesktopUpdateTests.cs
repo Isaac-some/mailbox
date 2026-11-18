@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using System.Security.Cryptography;
 using System.Text;
 using MailAssistant.Updates;
@@ -7,6 +8,60 @@ namespace MailArchiver.Tests.LocalApp;
 
 public sealed class DesktopUpdateTests
 {
+    [Fact]
+    public void Current_version_comes_from_the_running_backend_not_a_display_configuration()
+    {
+        var configuration = new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["ReleaseNotes:AppVersion"] = "9.9.9" }).Build();
+        var service = new DesktopUpdateService(null!, configuration, null!, new DesktopUpdateActivity(), null!);
+        Assert.Equal(typeof(DesktopUpdateService).Assembly.GetName().Version!.ToString(3), service.CurrentVersion);
+        Assert.NotEqual("9.9.9", service.CurrentVersion);
+    }
+
+    [Theory]
+    [InlineData("2.4.3", "2.4.1", "ahead")]
+    [InlineData("2.4.1", "2.4.1", "current")]
+    [InlineData("2.4.0", "2.4.1", "available")]
+    public void Update_state_distinguishes_a_local_build_ahead_of_the_published_release(string local, string published, string expected)
+    {
+        var artifact = new UpdateArtifact("osx-arm64", "update.zip", "", 20, new string('a', 64), "邮箱助手.app");
+        var manifest = new UpdateManifest(1, published, "v" + published, false, [artifact], "Old release notes");
+        var state = DesktopUpdateService.BuildVersionState(local, manifest, artifact);
+        Assert.Equal(expected, state.Phase);
+        Assert.Equal(local, state.CurrentVersion);
+        Assert.Equal(published, state.LatestVersion);
+        if (expected == "ahead") {
+            Assert.Null(state.Notes);
+            Assert.Contains("本机版本高于 GitHub", state.Message);
+            Assert.DoesNotContain("已是最新", state.Message);
+        }
+    }
+
+    [Fact]
+    public void GitHub_api_fallback_constructs_a_fixed_repository_asset_url()
+    {
+        var metadata = Encoding.UTF8.GetBytes("""{"assets":[{"name":"desktop-update.json","id":42,"url":"https://untrusted.invalid/file"}]}""");
+        Assert.Equal("https://api.github.com/repos/Isaac-some/mailbox-releases/releases/assets/42",
+            DesktopUpdateService.ResolveGitHubApiAsset(metadata, "desktop-update.json").AbsoluteUri);
+        Assert.Throws<InvalidOperationException>(() => DesktopUpdateService.ResolveGitHubApiAsset(metadata, "missing.zip"));
+    }
+
+    [Fact]
+    public void In_app_update_preserves_installer_uninstall_support_and_prefers_new_package_support()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "updater-installer-" + Guid.NewGuid().ToString("N"));
+        var installed = Path.Combine(root, "installed"); var extracted = Path.Combine(root, "extracted");
+        Directory.CreateDirectory(installed); Directory.CreateDirectory(extracted);
+        try {
+            File.WriteAllText(Path.Combine(installed, "卸载邮箱助手.exe"), "existing-uninstaller");
+            UpdateProtocol.PreserveWindowsInstallerSupport(installed, extracted);
+            Assert.Equal("existing-uninstaller", File.ReadAllText(Path.Combine(extracted, "卸载邮箱助手.exe")));
+            File.WriteAllText(Path.Combine(extracted, "卸载邮箱助手.exe"), "new-uninstaller");
+            UpdateProtocol.PreserveWindowsInstallerSupport(installed, extracted);
+            Assert.Equal("new-uninstaller", File.ReadAllText(Path.Combine(extracted, "卸载邮箱助手.exe")));
+        } finally { Directory.Delete(root, recursive: true); }
+    }
+
     [Theory]
     [InlineData("2.4.0", "2.3.9", true)]
     [InlineData("2.3.10", "2.3.9", true)]

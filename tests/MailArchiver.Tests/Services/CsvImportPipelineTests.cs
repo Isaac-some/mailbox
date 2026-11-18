@@ -28,6 +28,9 @@ public sealed class CsvImportPipelineTests
         await fixture.WaitForAsync(job, CsvImportJobStatus.CompletedWithErrors);
         Assert.Equal(domains.Length, job.VerificationNetworkFailureCount);
         Assert.Equal(0, job.FailedCount);
+        Assert.Empty(job.FailedSamples); // Verification errors must never become CSV import errors.
+        Assert.Equal(CsvImportJobStatus.Completed, job.ImportStatus);
+        Assert.Null(job.ErrorMessage);
         Assert.Equal(domains.Length, await fixture.CountAccountsAsync());
         Assert.All(job.FailedSamples, r => Assert.DoesNotContain("opaque-secret", r.Reason));
     }
@@ -69,15 +72,82 @@ public sealed class CsvImportPipelineTests
         Assert.Equal(2, await fixture.CountAccountsAsync());
     }
 
+    [Fact]
+    public async Task Selecting_mailbox_interrupts_its_background_verification_without_recording_a_failure()
+    {
+        await using var f = await Fixture.CreateAsync();
+        f.Verifier.Block = true;
+        var job = f.Job(["gmx.com"]);
+        f.Worker.QueueImport(job);
+        await f.WaitForAsync(job, CsvImportJobStatus.AwaitingVerification);
+        f.Worker.StartVerification(job.JobId);
+        await f.Verifier.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.False(f.Worker.HasActiveImports());
+        Assert.True(f.Worker.HasActiveJobs());
+        using var scope = f._services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MailArchiverDbContext>();
+        var account = await db.MailAccounts.SingleAsync();
+        f.Coordinator.PrioritizeAccount(account.Id);
+        await f.WaitForAsync(job, CsvImportJobStatus.Completed);
+        Assert.Equal(0, job.VerificationFailedCount);
+        Assert.Equal(1, job.VerificationDeferredCount);
+        Assert.Empty(job.FailedSamples);
+        await db.Entry(account).ReloadAsync();
+        Assert.Equal("PendingVerification", account.CredentialDetectionStatus);
+    }
+
+    [Fact]
+    public async Task Reimport_replaces_even_identical_csv_after_token_rotation_without_duplicates()
+    {
+        await using var f = await Fixture.CreateAsync();
+        var first = f.Job(["outlook.com"]);
+        first.Rows[0].ClientId = "first-client";
+        f.Worker.QueueImport(first);
+        await f.WaitForAsync(first, CsvImportJobStatus.AwaitingVerification);
+        using (var scope = f._services.CreateScope()) {
+            var db = scope.ServiceProvider.GetRequiredService<MailArchiverDbContext>();
+            var account = await db.MailAccounts.SingleAsync();
+            account.OAuthRefreshToken = "rotated-token";
+            account.OAuthAccessToken = "stale-access";
+            account.CredentialDetectionStatus = "IncomingVerified";
+            db.ArchivedEmails.Add(new ArchivedEmail {
+                MailAccountId = account.Id, MessageId = "preserved-mail", Subject = "keep",
+                Body = "keep", HtmlBody = "", From = "sender@example.com", To = account.EmailAddress,
+                Cc = "", Bcc = "", FolderName = "INBOX" });
+            await db.SaveChangesAsync();
+        }
+        var second = f.Job(["outlook.com"]);
+        second.Rows[0].ClientId = "first-client";
+        f.Worker.QueueImport(second);
+        await f.WaitForAsync(second, CsvImportJobStatus.AwaitingVerification);
+        Assert.Equal(0, second.CreatedCount); Assert.Equal(1, second.UpdatedCount);
+        using var read = f._services.CreateScope();
+        var account2 = await read.ServiceProvider.GetRequiredService<MailArchiverDbContext>().MailAccounts.SingleAsync();
+        Assert.Equal("opaque-secret", account2.OAuthRefreshToken);
+        Assert.Null(account2.OAuthAccessToken);
+        Assert.Equal("PendingVerification", account2.CredentialDetectionStatus);
+        var third = f.Job(["outlook.com"]);
+        third.Rows[0].Password = "latest-password"; third.Rows[0].ClientId = "latest-client";
+        f.Worker.QueueImport(third); await f.WaitForAsync(third, CsvImportJobStatus.AwaitingVerification);
+        using var final = f._services.CreateScope();
+        var latest = await final.ServiceProvider.GetRequiredService<MailArchiverDbContext>().MailAccounts.SingleAsync();
+        Assert.Equal("enc:latest-password", latest.Password); Assert.Equal("latest-client", latest.ClientId);
+        var preserved = await final.ServiceProvider.GetRequiredService<MailArchiverDbContext>().ArchivedEmails.SingleAsync();
+        Assert.Equal(latest.Id, preserved.MailAccountId);
+        Assert.Equal("preserved-mail", preserved.MessageId);
+        Assert.Equal(0, f.Verifier.Calls);
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly string _directory;
-        private readonly ServiceProvider _services;
+        public readonly ServiceProvider _services;
         public CsvImportService Worker { get; }
         public OfflineVerifier Verifier { get; }
+        public MailConcurrencyCoordinator Coordinator { get; }
         private readonly int _userId;
-        private Fixture(string directory, ServiceProvider services, CsvImportService worker, OfflineVerifier verifier, int userId)
-        { _directory = directory; _services = services; Worker = worker; Verifier = verifier; _userId = userId; }
+        private Fixture(string directory, ServiceProvider services, CsvImportService worker, OfflineVerifier verifier, int userId, MailConcurrencyCoordinator coordinator)
+        { _directory = directory; _services = services; Worker = worker; Verifier = verifier; _userId = userId; Coordinator = coordinator; }
 
         public static async Task<Fixture> CreateAsync()
         {
@@ -110,10 +180,11 @@ public sealed class CsvImportPipelineTests
                 userId = user.Id;
             }
             var options = Options.Create(new MailConcurrencyOptions());
+            var coordinator = new MailConcurrencyCoordinator(options);
             var worker = new CsvImportService(provider, NullLogger<CsvImportService>.Instance,
-                new MailConcurrencyCoordinator(options), options);
+                coordinator, options);
             await worker.StartAsync(CancellationToken.None);
-            return new(root, provider, worker, verifier, userId);
+            return new(root, provider, worker, verifier, userId, coordinator);
         }
 
         public CsvImportJob Job(string[] domains)
@@ -141,6 +212,7 @@ public sealed class CsvImportPipelineTests
         {
             await Worker.StopAsync(CancellationToken.None);
             Worker.Dispose();
+            Coordinator.Dispose();
             await _services.DisposeAsync();
             Directory.Delete(_directory, true);
         }
@@ -150,13 +222,19 @@ public sealed class CsvImportPipelineTests
         private int _calls;
         public int Calls => _calls;
         public string? SuccessDomain { get; set; }
-        public Task VerifyAsync(MailAccount account, CancellationToken cancellationToken = default)
+        public bool Block { get; set; }
+        public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public async Task VerifyAsync(MailAccount account, CancellationToken cancellationToken = default)
         {
             Interlocked.Increment(ref _calls);
+            if (Block) {
+                Entered.TrySetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            }
             if (account.EmailAddress.EndsWith("@" + SuccessDomain, StringComparison.Ordinal))
             {
                 account.CredentialDetectionStatus = "IncomingVerified";
-                return Task.CompletedTask;
+                return;
             }
             throw new HttpRequestException("offline opaque-secret");
         }

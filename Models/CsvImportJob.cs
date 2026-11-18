@@ -28,6 +28,7 @@ public sealed class CsvImportJob
     public DateTime? Started { get; set; }
     public DateTime? Completed { get; set; }
     public CsvImportJobStatus Status { get; set; } = CsvImportJobStatus.Queued;
+    public CsvImportJobStatus ImportStatus { get; set; } = CsvImportJobStatus.Queued;
     public int TotalRows { get; set; }
     public int ProcessedRows { get; set; }
     public int CreatedCount { get; set; }
@@ -44,10 +45,12 @@ public sealed class CsvImportJob
     public int VerificationAuthFailureCount { get; set; }
     public int VerificationNetworkFailureCount { get; set; }
     public int VerificationRateLimitCount { get; set; }
+    public int VerificationDeferredCount { get; set; }
     public int VerificationTotalCount { get; set; }
     public DateTime LastUpdated { get; set; } = DateTime.UtcNow;
     public bool VerificationStarted { get; set; }
     public string? ErrorMessage { get; set; }
+    internal string? VerificationErrorMessage { get; set; }
     public List<CsvImportCreatedRow> CreatedSamples { get; } = new();
     public List<CsvImportCreatedRow> UpdatedSamples { get; } = new();
     public List<CsvImportSkippedRow> SkippedSamples { get; } = new();

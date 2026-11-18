@@ -14,6 +14,7 @@ public interface ICsvImportService
     string QueueImport(CsvImportJob job);
     CsvImportJob? GetJob(string jobId);
     bool HasActiveJobs();
+    bool HasActiveImports() => HasActiveJobs();
     void CleanupOldJobs();
     bool StartVerification(string jobId);
     bool RetryVerification(string jobId);
@@ -52,6 +53,7 @@ public sealed class CsvImportService : BackgroundService, ICsvImportService
     public string QueueImport(CsvImportJob job)
     {
         job.Status = CsvImportJobStatus.Queued;
+        job.ImportStatus = CsvImportJobStatus.Queued;
         job.LastUpdated = DateTime.UtcNow;
         _jobs[job.JobId] = job;
         _queue.Enqueue(job);
@@ -64,6 +66,9 @@ public sealed class CsvImportService : BackgroundService, ICsvImportService
 
     public bool HasActiveJobs()
         => _jobs.Values.Any(job => job.Status is CsvImportJobStatus.Queued or CsvImportJobStatus.Running or CsvImportJobStatus.Verifying);
+
+    public bool HasActiveImports()
+        => _jobs.Values.Any(job => job.ImportStatus is CsvImportJobStatus.Queued or CsvImportJobStatus.Running);
 
     public bool StartVerification(string jobId)
     {
@@ -93,6 +98,7 @@ public sealed class CsvImportService : BackgroundService, ICsvImportService
             job.VerificationProcessedCount = 0;
             job.VerificationSuccessCount = 0;
             job.VerificationFailedCount = 0;
+            job.VerificationDeferredCount = 0;
             job.VerificationFormatFailureCount = 0;
             job.VerificationAuthFailureCount = 0;
             job.VerificationNetworkFailureCount = 0;
@@ -144,6 +150,7 @@ public sealed class CsvImportService : BackgroundService, ICsvImportService
     private async Task ProcessJobAsync(CsvImportJob job, CancellationToken cancellationToken)
     {
         job.Status = CsvImportJobStatus.Running;
+        job.ImportStatus = CsvImportJobStatus.Running;
         job.Started = DateTime.UtcNow;
         job.LastUpdated = DateTime.UtcNow;
 
@@ -153,6 +160,7 @@ public sealed class CsvImportService : BackgroundService, ICsvImportService
             var intake = scope.ServiceProvider.GetRequiredService<MailCredentialIntakeService>();
             var context = scope.ServiceProvider.GetRequiredService<MailArchiverDbContext>();
             var encryption = scope.ServiceProvider.GetRequiredService<ICredentialEncryptionService>();
+            var importedIds = new HashSet<int>();
 
             foreach (var row in job.Rows)
             {
@@ -168,7 +176,8 @@ public sealed class CsvImportService : BackgroundService, ICsvImportService
                         enabled: job.Enabled,
                         cancellationToken: cancellationToken,
                         verifyCredential: false,
-                        allowCrossUserCredentialUpdate: job.AllowCrossUserCredentialUpdate);
+                        allowCrossUserCredentialUpdate: job.AllowCrossUserCredentialUpdate,
+                        replaceCredential: true);
 
                     // Read through the database again before reporting success. Compare
                     // fingerprints so the credential itself never enters logs or errors.
@@ -197,8 +206,11 @@ public sealed class CsvImportService : BackgroundService, ICsvImportService
                         job.UpdatedCount++;
                         AddSample(job.UpdatedSamples, display);
                     }
-                    job.AccountIds.Add(result.Account.Id);
-                    job.PendingVerificationCount++;
+                    if (importedIds.Add(result.Account.Id))
+                    {
+                        job.AccountIds.Add(result.Account.Id);
+                        job.PendingVerificationCount++;
+                    }
                     if (result.Account.MailProviderKind == MailProviderKind.Gmail
                         && !ExternalOAuthProviderPolicy.HasUsableCredentials(result.Account)
                         && MailCredentialInputPolicy.Normalize(row.Password).Length != 16)
@@ -233,6 +245,7 @@ public sealed class CsvImportService : BackgroundService, ICsvImportService
             job.Rows.Clear();
             job.PendingVerificationCount = job.AccountIds.Count;
             job.VerificationTotalCount = job.AccountIds.Count;
+            job.ImportStatus = job.FailedCount > 0 ? CsvImportJobStatus.CompletedWithErrors : CsvImportJobStatus.Completed;
             job.Status = job.AccountIds.Count > 0
                 ? CsvImportJobStatus.AwaitingVerification
                 : CsvImportJobStatus.CompletedWithErrors;
@@ -253,6 +266,7 @@ public sealed class CsvImportService : BackgroundService, ICsvImportService
         {
             job.Rows.Clear();
             job.Status = CsvImportJobStatus.Failed;
+            job.ImportStatus = CsvImportJobStatus.Failed;
             job.ErrorMessage = "导入任务已停止。";
             job.Completed = DateTime.UtcNow;
             job.LastUpdated = DateTime.UtcNow;
@@ -261,6 +275,7 @@ public sealed class CsvImportService : BackgroundService, ICsvImportService
         {
             job.Rows.Clear();
             job.Status = CsvImportJobStatus.Failed;
+            job.ImportStatus = CsvImportJobStatus.Failed;
             job.ErrorMessage = "导入任务失败，请稍后重试。";
             job.Completed = DateTime.UtcNow;
             job.LastUpdated = DateTime.UtcNow;
@@ -274,10 +289,19 @@ public sealed class CsvImportService : BackgroundService, ICsvImportService
     {
         try
         {
-            await Parallel.ForEachAsync(job.AccountIds,
+            using var groupingScope = _serviceProvider.CreateScope();
+            var groupingDb = groupingScope.ServiceProvider.GetRequiredService<MailArchiverDbContext>();
+            var kinds = await groupingDb.MailAccounts.AsNoTracking()
+                .Where(a => job.AccountIds.Contains(a.Id)).Select(a => new { a.Id, a.MailProviderKind })
+                .ToDictionaryAsync(a => a.Id, a => a.MailProviderKind, cancellationToken);
+            var lanes = job.AccountIds.GroupBy(id => kinds.GetValueOrDefault(id))
+                .Select(group => group.ToArray()).ToArray();
+            await Task.WhenAll(lanes.Select(lane => Parallel.ForEachAsync(lane,
                 new ParallelOptions { MaxDegreeOfParallelism = _automaticLimit, CancellationToken = cancellationToken },
-                async (accountId, token) =>
+                async (accountId, batchToken) =>
             {
+                using var priority = _concurrency.BeginBackgroundVerification(accountId, batchToken);
+                var token = priority.Token;
                 MailAccount? account = null;
                 ISyncFailureRecorder? recorder = null;
                 try
@@ -321,11 +345,6 @@ public sealed class CsvImportService : BackgroundService, ICsvImportService
                                 job.VerificationFailedCount++;
                                 job.VerificationFailedAccountIds.Add(accountId);
                                 job.VerificationFormatFailureCount++;
-                                AddSample(job.FailedSamples, new CsvImportFailedRow
-                                {
-                                    Email = account.EmailAddress,
-                                    Reason = "Gmail 应用专用密码去除空白和不可见字符后必须恰好是 16 位。"
-                                });
                             }
                             return;
                         }
@@ -337,6 +356,7 @@ public sealed class CsvImportService : BackgroundService, ICsvImportService
                         await context.SaveChangesAsync(token);
                         lock (job) job.VerificationSuccessCount++;
                     }
+                    catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
                     catch (Exception ex)
                     {
                         account.CredentialDetectionStatus = "VerificationFailed";
@@ -351,18 +371,22 @@ public sealed class CsvImportService : BackgroundService, ICsvImportService
                             {
                                 case MailFailureCode.GmailCredentialFormatInvalid: job.VerificationFormatFailureCount++; break;
                                 case MailFailureCode.AuthenticationRejected: job.VerificationAuthFailureCount++; break;
-                                case MailFailureCode.RateLimited: job.VerificationRateLimitCount++; break;
+                                case MailFailureCode.RateLimited:
+                                    _concurrency.ReportRateLimit(domain, account.MailProviderKind);
+                                    job.VerificationRateLimitCount++; break;
                                 case MailFailureCode.TargetUnavailable or MailFailureCode.ProxyUnavailable or MailFailureCode.TlsFailed:
                                     job.VerificationNetworkFailureCount++; break;
                             }
-                            AddSample(job.FailedSamples, new CsvImportFailedRow { Email = account.EmailAddress, Reason = failure.Message });
                         }
                     }
                 }
-                catch (OperationCanceledException) when (token.IsCancellationRequested)
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && token.IsCancellationRequested)
                 {
-                    throw;
+                    // The selected mailbox is now owned by the interactive worker.
+                    // Keep it pending rather than recording a cancelled login as a failure.
+                    lock (job) job.VerificationDeferredCount++;
                 }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
                 catch (Exception ex)
                 {
                     var failure = MailConnectionFailurePolicy.Classify(ex);
@@ -372,23 +396,19 @@ public sealed class CsvImportService : BackgroundService, ICsvImportService
                     {
                         job.VerificationFailedCount++;
                         job.VerificationFailedAccountIds.Add(accountId);
-                        AddSample(job.FailedSamples, new CsvImportFailedRow
-                        {
-                            Email = account?.EmailAddress ?? string.Empty,
-                            Reason = failure.Message
-                        });
                     }
                 }
                 finally
                 {
+                    _concurrency.EndBackgroundVerification(accountId);
                     lock (job)
                     {
                         job.VerificationProcessedCount++;
                         job.LastUpdated = DateTime.UtcNow;
                     }
                 }
-            });
-            job.PendingVerificationCount = Math.Max(0, job.AccountIds.Count - job.VerificationProcessedCount);
+            })));
+            job.PendingVerificationCount = Math.Max(0, job.AccountIds.Count - job.VerificationProcessedCount + job.VerificationDeferredCount);
             job.Status = job.VerificationFailedCount > 0 || job.FailedCount > 0 || job.SkippedCount > 0
                 ? CsvImportJobStatus.CompletedWithErrors
                 : CsvImportJobStatus.Completed;
@@ -398,14 +418,14 @@ public sealed class CsvImportService : BackgroundService, ICsvImportService
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             job.Status = CsvImportJobStatus.Failed;
-            job.ErrorMessage = "验证任务已停止。";
+            job.VerificationErrorMessage = "验证任务已停止。";
             job.Completed = DateTime.UtcNow;
             job.LastUpdated = DateTime.UtcNow;
         }
         catch (Exception ex)
         {
             job.Status = CsvImportJobStatus.Failed;
-            job.ErrorMessage = "验证任务失败，请稍后重试。";
+            job.VerificationErrorMessage = "验证任务失败，请稍后重试。";
             job.Completed = DateTime.UtcNow;
             job.LastUpdated = DateTime.UtcNow;
             var failure = MailConnectionFailurePolicy.Classify(ex);

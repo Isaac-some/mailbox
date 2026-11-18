@@ -52,7 +52,8 @@ public sealed class MailCredentialIntakeService
         CancellationToken cancellationToken = default,
         bool verifyCredential = true,
         bool allowCrossUserCredentialUpdate = false,
-        bool releaseTracking = false)
+        bool releaseTracking = false,
+        bool replaceCredential = false)
     {
         if (input is null)
             throw new ArgumentNullException(nameof(input));
@@ -99,7 +100,7 @@ public sealed class MailCredentialIntakeService
             : null;
         if (provider.Kind != MailProviderKind.Outlook && string.Equals(clientId, credential, StringComparison.Ordinal))
             clientId = null;
-        var unchanged = !created
+        var unchanged = !replaceCredential && !created
             && string.Equals(account.ImportedDomain, domain, StringComparison.Ordinal)
             && string.Equals(account.ClientId, clientId, StringComparison.Ordinal)
             && HasSameImportedCredential(account, credential);

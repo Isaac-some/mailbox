@@ -18,6 +18,14 @@ public class MailConnectionFailurePolicyTests
     }
 
     [Fact]
+    public void OAuth_http_429_is_rate_limited_even_without_english_error_text()
+    {
+        var failure = MailConnectionFailurePolicy.Classify(new HttpRequestException(
+            "provider response", null, System.Net.HttpStatusCode.TooManyRequests));
+        Assert.Equal(MailFailureCode.RateLimited, failure.Code);
+    }
+
+    [Fact]
     public void Provider_login_rate_limit_is_not_reported_as_an_invalid_authorization_code()
     {
         var failure = MailConnectionFailurePolicy.Classify(

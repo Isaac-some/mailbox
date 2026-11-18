@@ -62,7 +62,7 @@ public sealed class NetworkHttpClientFactory(
                 UseProxy = proxy is not null,
                 Proxy = proxy is null ? null : ToWebProxy(proxy),
                 AllowAutoRedirect = false,
-                ConnectTimeout = TimeSpan.FromSeconds(10)
+                ConnectTimeout = TimeSpan.FromSeconds(30)
             };
             using var invoker = new HttpMessageInvoker(handler, disposeHandler: false);
             return await invoker.SendAsync(request, cancellationToken);

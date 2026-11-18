@@ -1,29 +1,34 @@
-# Windows 打包
+# 邮箱助手 v2.4.4 · Windows
 
-在 Windows PowerShell 中生成 64 位发布文件夹。构建时输入租户 Token，用户打开应用时无需登录：
+对外只需发送 `MailAssistant-Windows-x64-v2.4.4-Setup.exe`，双击完成安装，通过桌面“邮箱助手”打开。安装程序已包含全部后端和 .NET 运行时，无需另发 `server` 文件夹。系统缺少 WebView2 时会在默认浏览器打开。
+
+ZIP 为可选便携版，需要解压完整文件夹；安装版不需要 ZIP。
+
+本版仅使用手动 CSV 导入账号。启动、搜索、刷新和发件准备均不会向旧平台拉取账号，也不需要平台 Token。同邮箱重复导入会覆盖凭据并重新等待验证，保留已下载邮件。
+
+后台按服务商独立并行：Outlook、GMX、Gmail 每家 2 个，Yahoo 1 个。打开指定邮箱优先处理，不等待批量验证；网络和服务商响应仍需时间。出现限流时该厂商后台冷却 60 秒。
+
+本机数据位于 `%LOCALAPPDATA%\MailAssistant`。升级不需要清空数据；该目录含账号、邮件和加密密钥，请妥善保留。
+
+开发者先安装 NSIS（https://nsis.sourceforge.io/），再在 Windows PowerShell 打包；脚本默认同时生成完整 EXE 安装程序：
 
 ```powershell
 cd "C:\path\to\mailbox"
-$secureToken = Read-Host "请输入租户 Token" -AsSecureString
-$env:MAIL_ASSISTANT_UPSTREAM_TOKEN = [System.Net.NetworkCredential]::new("", $secureToken).Password
 .\windows-app\build-windows.ps1
-Remove-Item Env:MAIL_ASSISTANT_UPSTREAM_TOKEN
 ```
 
-接口地址已有默认值。服务地址变化时，再设置 `MAIL_ASSISTANT_UPSTREAM_ENDPOINT` 为完整的 HTTPS 接口地址。缺少 Token 时构建会失败。授权编译进程序，JSON 配置不含 Token。公开二进制仍可被分析并提取授权，编译并非保密机制。
+也可在 Mac 工作区交叉构建：
 
-已有 Mac 交付包时，也可以在 Mac 工作区运行 `bash ./script/build-windows-on-macos.sh` 交叉构建；命令需通过 `MAIL_ASSISTANT_UPSTREAM_TOKEN` 提供同一 Token。具体命令见项目根目录 README。
+```sh
+cd "/Users/isaac/Downloads/邮箱/mailbox"
+bash script/build-windows-on-macos.sh
+```
 
-输出目录为 `windows-app\build\邮箱助手-Windows-x64`。把整个文件夹复制到 Windows 电脑后，双击 `邮箱助手.exe` 即可使用；不要只复制这个 exe，因为 `server` 文件夹包含应用本体。
+Mac 首次需要安装 NSIS：`brew install makensis`。已有完整发布目录时，可单独生成安装 EXE：
 
-数据存放在 `%LOCALAPPDATA%\MailAssistant`，不在安装目录。备份该目录即可保留本机邮件、账号和加密密钥。系统缺少 Microsoft Edge WebView2 Runtime 时，应用会自动在默认浏览器中打开。
+```sh
+cd "/Users/isaac/Downloads/邮箱/mailbox"
+bash script/build-windows-installer.sh
+```
 
-应用菜单“窗口”提供“桌面窗口”“手机窄窗”和“始终置顶”。窗口模式、两种模式各自的尺寸和置顶状态会保存在 `%LOCALAPPDATA%\MailAssistant\window-preferences.json`，切换窗口模式不会重新加载当前邮件页面。
-
-打包时会内置 .NET 运行时，目标电脑无需另装 .NET、Docker 或 PostgreSQL。
-
-## 接口验证与下载
-
-“本机数据 → 下载接口检测报告”可导出本次实际请求的 HTTP 状态、分页、数量和请求编号。后端按同一 `X-Request-ID` 对照日志；报告不含 Token、邮箱地址、密码或邮件正文。
-
-GitHub 下载无需登录或仓库授权。VPN 须覆盖 `github.com` 和 `release-assets.githubusercontent.com`；仅开启 VPN 开关但没有将这些域名走代理，仍可能连接失败。
+导入结果只显示导入成功与失败。后台验证不展示统计，打开邮箱优先验证并获取邮件。网络跟随本机系统与 VPN，不使用应用内保存的手动代理。“检查更新”发现 GitHub 新版后自动下载、校验并重启。

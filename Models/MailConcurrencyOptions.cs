@@ -7,7 +7,10 @@ public sealed class MailConcurrencyOptions
     public const string SectionName = "MailConcurrency";
 
     [Range(1, int.MaxValue)]
-    public int AutomaticLimit { get; set; } = 2;
+    public int AutomaticLimit { get; set; } = 8;
+
+    [Range(1, 3)]
+    public int PerProviderAutomaticLimit { get; set; } = 2;
 
     [Range(2, 16)]
     public int PerDomainLimit { get; set; } = 4;

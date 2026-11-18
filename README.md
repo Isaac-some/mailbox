@@ -33,49 +33,37 @@ cd "/Users/isaac/Downloads/邮箱/mailbox"
 
 发件成功后，程序会把副本保存到 Outlook“已发送”，并立即归档到本地。日志不会记录 OAuth Token、正文或附件内容。
 
-## 平台邮箱凭据同步
+## CSV 邮箱凭据导入（v2.4.4）
 
-发布版本机 App 不显示登录页。首次打开即自动拉取，先获取约 20 个邮箱铺满第一页，其余在后台继续初始化；界面显示真实数量及失败原因。输入完整邮箱地址后，即使账号尚未显示，也会优先检索授权、拉取邮件。用户无需填写账号、token、服务地址或导入 CSV。
+导入任务只显示保存成功与导入失败；后台验证错误不混入导入结果。点击“后台验证”后显示通知，打开指定邮箱会优先验证和收信。桌面端跟随使用者自己的系统网络/VPN，忽略历史应用代理配置。
 
-构建发布包时在终端隐式输入 Token，脚本会把它注入安装包。接口地址已有默认值。Token 会进入最终安装包，因此拿到安装包的人可以提取并使用它；不要把安装包公开发布：
+检查更新从 `Isaac-some/mailbox-releases` 最新正式 Release 获取签名清单，发现新版后自动下载、校验和重启安装。每次发布必须同时上传 `desktop-update.json`、`desktop-update.sig`、Mac 更新 ZIP、Windows ZIP；只上传 DMG/EXE 不会触发应用更新。
 
-```zsh
+账号来源为手动 CSV 导入，已关闭启动、搜索、刷新、授权识别和发件准备过程中的平台账号拉取。旧配置和环境变量不能重新开启它；发布包不再编译或注入平台 Token。
+
+进入“邮箱账号 → 导入 CSV”，沿用四字段格式。重复导入同一邮箱会完整覆盖凭据、清除旧访问令牌、重新进入待验证状态；不重复创建账号，不删除已归档邮件。导入只保存，不连接服务商；验证和收信直接连接邮箱服务商。
+
+后台按服务商独立并行，总计最多 8 个；Outlook、GMX、Gmail 每家最多 2 个，Yahoo 因实测限流限制为 1 个。同一厂商的不同域名共享额度。手动打开邮箱使用独立通道，并取消该账号当前的后台验证，避免等待整批任务。服务商限流后，该厂商后台冷却 60 秒；网络握手和服务商响应仍有实际耗时。
+
+Mac 构建：
+
+```sh
 cd "/Users/isaac/Downloads/邮箱/mailbox"
-read -rs "MAIL_ASSISTANT_UPSTREAM_TOKEN?请输入租户 Token: "
-echo
-export MAIL_ASSISTANT_UPSTREAM_TOKEN
-./script/build-local-macos-release.sh
-unset MAIL_ASSISTANT_UPSTREAM_TOKEN
+bash script/build-local-macos-release.sh
 ```
 
-Windows 发布包在 PowerShell 中使用同名环境变量，先进入工作区：
+Windows 可在 Mac 上交叉构建：
 
-```powershell
-cd "C:\path\to\mailbox"
-$secureToken = Read-Host "请输入租户 Token" -AsSecureString
-$env:MAIL_ASSISTANT_UPSTREAM_TOKEN = [System.Net.NetworkCredential]::new("", $secureToken).Password
-.\windows-app\build-windows.ps1
-Remove-Item Env:MAIL_ASSISTANT_UPSTREAM_TOKEN
-```
-
-已有本机生成的 Mac App 时，也可以直接在 Mac 上交叉构建 Windows ZIP，复用 Mac 包中的同一租户 Token：
-
-```zsh
+```sh
 cd "/Users/isaac/Downloads/邮箱/mailbox"
-MAIL_ASSISTANT_UPSTREAM_TOKEN="$(jq -r '.UpstreamMailboxSync.BearerToken' 'local-app/build/邮箱助手.app/Contents/Resources/server/appsettings.Local.json')" bash ./script/build-windows-on-macos.sh
+bash script/build-windows-on-macos.sh
 ```
 
-Windows 交付文件为 `windows-app/build/MailAssistant-Windows-x64-v2.3.6.zip`。解压整个文件夹后双击 `邮箱助手.exe`；不能只复制 exe。
-
-服务地址变化时，再设置 `MAIL_ASSISTANT_UPSTREAM_ENDPOINT` 为完整的 HTTPS 接口地址。缺少 Token 时，发布构建会直接失败。
-
-平台接口返回的 Outlook `credential` 会作为 Refresh Token 保存，`client_id` 会作为 Client ID 保存；单条坏数据只会被跳过，不会阻塞其他账号同步。
-
-分页请求固定串行执行，每页最多 1000 条；只有全部页面成功后才保存第一页返回的 `serverTimestamp`。token 错误会提示 HTTP 401，服务端 HTTP 500 会按 5 秒间隔最多重试 3 次。
+Windows 对外交付为单个 `windows-app/build/MailAssistant-Windows-x64-v2.4.4-Setup.exe`，包含应用、后端和运行时，安装后创建桌面快捷方式并保留本机邮箱数据。Mac 构建工具需预装 NSIS：`brew install makensis`。ZIP 便携版作为备用。
 
 ## 后续打包
 
-当前版本 v2.3.6 的更新与验收记录见 [发布说明](doc/release-v2.3.6.md) 和 [验收报告](doc/acceptance-20261015.md)。重新打包时执行：
+当前版本 v2.4.4 的实测和验收记录见 [验收报告](doc/acceptance-v2.4.4-20261118.md)。重新打包时执行：
 
 ```sh
 cd "/Users/isaac/Downloads/邮箱/mailbox"
@@ -90,7 +78,14 @@ cd "C:\path\to\mail-archiver-main"
 .\windows-app\build-windows.ps1
 ```
 
-两个外壳都加载同一套服务端源码，因此重新打包后会获得相同的 Outlook 功能。
+两端构建完成后可生成全部带签名的发布资产（不会上传 GitHub，输出目录应为空）：
+
+```sh
+cd "/Users/isaac/Downloads/邮箱/mailbox"
+python3 script/prepare-desktop-release.py --output "/Users/isaac/Downloads/邮箱/待发布版本"
+```
+
+两个外壳都加载同一套服务端源码。DMG 中只放应用和 Applications 拖拽入口，测试文档保留在源码目录。
 
 ## 浏览器版快速启动
 

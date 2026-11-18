@@ -81,6 +81,7 @@ public sealed class OnDemandMailSyncQueue : BackgroundService, IOnDemandMailSync
         MailSyncRequestKind kind = MailSyncRequestKind.Synchronize,
         MailSyncRequestOptions? options = null)
     {
+        if (priority == MailSyncRequestPriority.Interactive) _concurrency.PrioritizeAccount(accountId);
         lock (_queueLock)
         {
             if (_entries.TryGetValue(accountId, out var existing))

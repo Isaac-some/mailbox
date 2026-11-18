@@ -65,6 +65,14 @@ public static class UpdateProtocol
     public static bool IsNewer(string candidate, string current) =>
         Version.TryParse(candidate, out var next) && Version.TryParse(current, out var installed) && next > installed;
 
+    public static void PreserveWindowsInstallerSupport(string installed, string extracted)
+    {
+        const string uninstaller = "卸载邮箱助手.exe";
+        var source = Path.Combine(installed, uninstaller);
+        var target = Path.Combine(extracted, uninstaller);
+        if (File.Exists(source) && !File.Exists(target)) File.Copy(source, target);
+    }
+
     public static void WriteJson(string path, object value)
     {
         var temporary = path + ".tmp";
