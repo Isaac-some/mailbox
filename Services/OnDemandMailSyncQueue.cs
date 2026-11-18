@@ -375,10 +375,11 @@ public sealed class OnDemandMailSyncQueue : BackgroundService, IOnDemandMailSync
     private static void UpdateCredentialCapabilities(MailAccount account, bool canReceive, bool canSend)
     {
         account.CredentialLastCheckedAt = DateTime.UtcNow;
+        var graphReceiving = account.CredentialScope is MailCredentialScope.Graph or MailCredentialScope.GraphAndSmtp;
         account.CredentialScope = (canReceive, canSend) switch
         {
-            (true, true) => MailCredentialScope.ImapAndSmtp,
-            (true, false) => MailCredentialScope.Imap,
+            (true, true) => graphReceiving ? MailCredentialScope.GraphAndSmtp : MailCredentialScope.ImapAndSmtp,
+            (true, false) => graphReceiving ? MailCredentialScope.Graph : MailCredentialScope.Imap,
             (false, true) => MailCredentialScope.Smtp,
             _ => MailCredentialScope.Unknown
         };

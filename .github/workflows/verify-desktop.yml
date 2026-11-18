@@ -45,7 +45,7 @@ jobs:
       - name: Install NSIS packaging tools
         run: choco install nsis --yes --no-progress
       - name: Verify desktop regression tests on Windows
-        run: dotnet test tests/MailArchiver.Tests/MailArchiver.Tests.csproj -c Release --filter "FullyQualifiedName~LocalApp|FullyQualifiedName~UpstreamMailboxSyncServiceTests|FullyQualifiedName~MailTransportPolicyTests|FullyQualifiedName~CsvOnlyAccountSourceTests|FullyQualifiedName~CsvImportPipelineTests|FullyQualifiedName~MailConcurrencyCoordinatorTests" --logger "trx;LogFileName=windows.trx" --results-directory TestResults
+        run: dotnet test tests/MailArchiver.Tests/MailArchiver.Tests.csproj -c Release --filter "FullyQualifiedName~LocalApp|FullyQualifiedName~UpstreamMailboxSyncServiceTests|FullyQualifiedName~MailTransportPolicyTests|FullyQualifiedName~CsvOnlyAccountSourceTests|FullyQualifiedName~CsvImportPipelineTests|FullyQualifiedName~MailConcurrencyCoordinatorTests|FullyQualifiedName~OutlookGraph|FullyQualifiedName~OutlookReceivingRoutingTests|FullyQualifiedName~MsaTokenManagerTests|FullyQualifiedName~MsaOAuthServiceTests|FullyQualifiedName~NetworkConnectionReuseTests" --logger "trx;LogFileName=windows.trx" --results-directory TestResults
       - name: Build the complete Windows package
         shell: pwsh
         run: ./windows-app/build-windows.ps1 -OutputDirectory "$env:RUNNER_TEMP/mailbox-package"
@@ -176,3 +176,17 @@ jobs:
         with:
           name: windows-desktop-validation
           path: TestResults/
+      - name: Prepare Windows delivery ZIP
+        shell: pwsh
+        run: |
+          $version = ([xml](Get-Content windows-app/MailAssistant.Windows.csproj)).Project.PropertyGroup.Version
+          $package = "$env:RUNNER_TEMP/MailAssistant-Windows-x64-v$version"
+          Move-Item "$env:RUNNER_TEMP/mailbox-package" $package
+          Compress-Archive -LiteralPath $package -DestinationPath "$env:RUNNER_TEMP/MailAssistant-Windows-x64-v$version.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installers
+          path: |
+            ${{ runner.temp }}/MailAssistant-Windows-x64-v*.zip
+            ${{ runner.temp }}/MailAssistant-Windows-x64-v*-Setup.exe
+          if-no-files-found: error

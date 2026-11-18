@@ -25,7 +25,7 @@ public sealed class OutboundAccountPreparation(
             if (!account.IsEnabled || account.Provider == ProviderType.IMPORT)
                 throw new InvalidOperationException("该账号已停用或仅支持本地归档。");
             if (!forceRefresh && account.CredentialLastCheckedAt > DateTime.UtcNow.AddMinutes(-2)
-                && account.CredentialScope is MailCredentialScope.Smtp or MailCredentialScope.ImapAndSmtp
+                && account.CredentialScope is MailCredentialScope.Smtp or MailCredentialScope.ImapAndSmtp or MailCredentialScope.GraphAndSmtp
                 && providers.For(account).Inspect(account).CanSend) return;
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(60));
@@ -38,18 +38,19 @@ public sealed class OutboundAccountPreparation(
             await context.Entry(account).ReloadAsync(timeout.Token);
             if (!account.IsEnabled) throw new InvalidOperationException("该邮箱已停用。");
             await discovery.DiscoverAsync(account, timeout.Token);
-            var receiving = account.CredentialScope is MailCredentialScope.Imap or MailCredentialScope.ImapAndSmtp;
+            var receiving = account.CredentialScope is MailCredentialScope.Imap or MailCredentialScope.ImapAndSmtp or MailCredentialScope.Graph or MailCredentialScope.GraphAndSmtp;
+            var graphReceiving = account.CredentialScope is MailCredentialScope.Graph or MailCredentialScope.GraphAndSmtp;
             var success = await providers.For(account).TestOutgoingConnectionAsync(account, timeout.Token);
             account.CredentialLastCheckedAt = DateTime.UtcNow;
             if (success)
             {
-                account.CredentialScope = receiving ? MailCredentialScope.ImapAndSmtp : MailCredentialScope.Smtp;
-                account.CredentialDetectionStatus = receiving ? "ImapSmtpVerified" : "SmtpVerified";
+                account.CredentialScope = receiving ? (graphReceiving ? MailCredentialScope.GraphAndSmtp : MailCredentialScope.ImapAndSmtp) : MailCredentialScope.Smtp;
+                account.CredentialDetectionStatus = receiving ? (graphReceiving ? "IncomingOutgoingVerified" : "ImapSmtpVerified") : "SmtpVerified";
             }
             else
             {
-                account.CredentialScope = receiving ? MailCredentialScope.Imap : MailCredentialScope.Unknown;
-                account.CredentialDetectionStatus = receiving ? "ImapVerified" : "VerificationFailed";
+                account.CredentialScope = receiving ? (graphReceiving ? MailCredentialScope.Graph : MailCredentialScope.Imap) : MailCredentialScope.Unknown;
+                account.CredentialDetectionStatus = receiving ? (graphReceiving ? "IncomingVerified" : "ImapVerified") : "VerificationFailed";
             }
             await context.SaveChangesAsync(cancellationToken);
             if (!success) throw new InvalidOperationException("发件验证未通过，请检查该账号授权和网络后重试。");

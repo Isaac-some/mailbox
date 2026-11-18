@@ -13,6 +13,7 @@ public sealed class MsaTokenManager : IMsaTokenManager
 
     private readonly IMsaOAuthService _oauth;
     private readonly IMsaGraphTokenCache _graphTokenCache;
+    private readonly MsaGraphReadTokenCache _readTokenCache;
     private readonly MailArchiverDbContext _dbContext;
     private readonly ILogger<MsaTokenManager> _logger;
 
@@ -20,8 +21,9 @@ public sealed class MsaTokenManager : IMsaTokenManager
         IMsaOAuthService oauth,
         IMsaGraphTokenCache graphTokenCache,
         MailArchiverDbContext dbContext,
-        ILogger<MsaTokenManager> logger)
+        ILogger<MsaTokenManager> logger, MsaGraphReadTokenCache? readTokenCache = null)
     {
+        _readTokenCache = readTokenCache ?? new MsaGraphReadTokenCache();
         _oauth = oauth;
         _graphTokenCache = graphTokenCache;
         _dbContext = dbContext;
@@ -101,6 +103,43 @@ public sealed class MsaTokenManager : IMsaTokenManager
         {
             accountLock.Release();
         }
+    }
+
+    public async Task<MsaAccessToken> GetGraphReadAccessTokenAsync(
+        MailAccount account, bool forceRefresh = false, CancellationToken cancellationToken = default)
+    {
+        ValidateAccount(account);
+        string Key(MailAccount a) => Fingerprint($"{a.ClientId}\n{a.ClientSecret}\n{a.OAuthRefreshToken}");
+        if (!forceRefresh && _readTokenCache.TryGet(account.Id, out var cached)
+            && cached.RefreshTokenFingerprint == Key(account) && cached.ExpiryUtc > DateTime.UtcNow.AddMinutes(1))
+            return new MsaAccessToken(account.Username ?? account.EmailAddress, cached.AccessToken);
+        var accountLock = AccountLocks.GetOrAdd(account.Id, _ => new SemaphoreSlim(1, 1));
+        await accountLock.WaitAsync(cancellationToken);
+        try
+        {
+            var tracked = await _dbContext.MailAccounts.FirstOrDefaultAsync(a => a.Id == account.Id, cancellationToken) ?? account;
+            if (!forceRefresh && _readTokenCache.TryGet(account.Id, out cached)
+                && cached.RefreshTokenFingerprint == Key(tracked) && cached.ExpiryUtc > DateTime.UtcNow.AddMinutes(1))
+            {
+                account.OAuthRefreshToken = tracked.OAuthRefreshToken;
+                return new MsaAccessToken(tracked.Username ?? tracked.EmailAddress, cached.AccessToken);
+            }
+            var result = await _oauth.RefreshGraphReadAccessTokenAsync(
+                tracked.OAuthRefreshToken!, tracked.ClientId, tracked.ClientSecret, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(result.RefreshToken))
+            {
+                tracked.OAuthRefreshToken = result.RefreshToken;
+                account.OAuthRefreshToken = result.RefreshToken;
+                if (_dbContext.Entry(tracked).State != EntityState.Detached)
+                    await _dbContext.SaveChangesAsync(cancellationToken);
+            }
+            if (!string.IsNullOrWhiteSpace(result.GrantedScopes) && !MsaOAuthScopePolicy.CanRead(result.GrantedScopes))
+                throw new Providers.Outlook.OutlookGraphReadException(403);
+            // OAuthAccessToken / OAuthGrantedScopes remain exclusively IMAP fields.
+            _readTokenCache.Set(account.Id, new CachedMsaGraphToken(result.AccessToken, result.Expiry, Key(tracked)));
+            return new MsaAccessToken(tracked.Username ?? tracked.EmailAddress, result.AccessToken);
+        }
+        finally { accountLock.Release(); }
     }
 
     public async Task<MsaAccessToken> GetSmtpAccessTokenAsync(

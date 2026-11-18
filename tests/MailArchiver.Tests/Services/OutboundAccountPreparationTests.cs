@@ -43,6 +43,20 @@ public sealed class OutboundAccountPreparationTests
         Assert.Equal(0, f.Provider.Sends);
     }
 
+    [Theory]
+    [InlineData(true, MailCredentialScope.GraphAndSmtp)]
+    [InlineData(false, MailCredentialScope.Graph)]
+    public async Task Outgoing_probe_preserves_a_verified_Graph_receiving_channel(bool success, MailCredentialScope expected)
+    {
+        await using var f = await Fixture.Create();
+        f.Account.CredentialScope = MailCredentialScope.Graph; await f.Db.SaveChangesAsync();
+        f.Provider.Success = success;
+        if (success) await f.Service.PrepareAsync(f.Account, 7, default);
+        else await Assert.ThrowsAsync<InvalidOperationException>(() => f.Service.PrepareAsync(f.Account, 7, default));
+        Assert.Equal(expected, f.Account.CredentialScope);
+        Assert.Equal(0, f.Provider.IncomingLogins); Assert.Equal(0, f.Provider.Sends);
+    }
+
     [Fact]
     public async Task Sending_reuses_recent_success_without_repeating_upstream_or_smtp_probe()
     {

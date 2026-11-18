@@ -149,7 +149,10 @@ namespace MailArchiver.Services.Providers.Graph
                 var checkFrom = message.From?.EmailAddress?.Address ?? "";
                 var checkTo = string.Join(",", message.ToRecipients?.Select(r => r.EmailAddress?.Address) ?? new List<string>());
                 var checkSubject = message.Subject ?? "(No Subject)";
-                var checkDate = message.SentDateTime?.DateTime ?? DateTime.UtcNow;
+                var checkDate = message.SentDateTime.HasValue
+                    ? _dateTimeHelper.ConvertToDisplayTimeZone(message.SentDateTime.Value) : DateTime.UtcNow;
+                var earliest = checkDate.AddSeconds(-2);
+                var latest = checkDate.AddSeconds(2);
 
                 var existingInfo = await _context.ArchivedEmails
                     .AsNoTracking()
@@ -159,7 +162,7 @@ namespace MailArchiver.Services.Providers.Graph
                         (e.From == checkFrom &&
                          e.To == checkTo &&
                          e.Subject == checkSubject &&
-                         Math.Abs((e.SentDate - checkDate).TotalSeconds) < 2)
+                         e.SentDate > earliest && e.SentDate < latest)
                     )
                     .Select(e => new { e.Id, e.FolderName, e.Subject, e.ReceivedDate, e.IsLocked })
                     .FirstOrDefaultAsync();
@@ -200,7 +203,7 @@ namespace MailArchiver.Services.Providers.Graph
             {
                 _logger.LogError(ex, "Error checking if email {MessageId} exists for account {AccountName}: {Message}",
                     messageId, accountId, ex.Message);
-                return true; // Treat as duplicate to be safe
+                throw new InvalidOperationException("无法检查本地邮件记录，请重试；本次收件未完成。", ex);
             }
 
             return false;
@@ -380,7 +383,8 @@ namespace MailArchiver.Services.Providers.Graph
             };
 
             // Load attachments before hash calculation
-            await LoadAttachmentsAsync(graphClient, account.EmailAddress, message.Id, archivedEmail);
+            if (message.HasAttachments != false || message.Body?.Content?.Contains("cid:", StringComparison.OrdinalIgnoreCase) == true)
+                await LoadAttachmentsAsync(graphClient, account.EmailAddress, message.Id, archivedEmail, account.Provider == ProviderType.MSA);
 
             archivedEmail.HasAttachments = archivedEmail.Attachments != null && archivedEmail.Attachments.Count > 0;
 
@@ -536,13 +540,15 @@ namespace MailArchiver.Services.Providers.Graph
             GraphServiceClient graphClient,
             string userPrincipalName,
             string messageId,
-            ArchivedEmail archivedEmail)
+            ArchivedEmail archivedEmail, bool personalOutlook = false)
         {
             try
             {
                 _logger.LogDebug("Loading attachments for Graph API message {MessageId} before hash calculation", messageId);
 
-                var attachmentsResponse = await graphClient.Users[userPrincipalName].Messages[messageId].Attachments.GetAsync();
+                var attachmentsResponse = personalOutlook
+                    ? await graphClient.Me.Messages[messageId].Attachments.GetAsync()
+                    : await graphClient.Users[userPrincipalName].Messages[messageId].Attachments.GetAsync();
 
                 if (attachmentsResponse?.Value != null)
                 {

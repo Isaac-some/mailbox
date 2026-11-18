@@ -7,7 +7,7 @@ namespace MailArchiver.Services.Factories
 {
     /// <summary>
     /// Factory for creating the appropriate email service based on provider type
-    /// Routes operations to IMAP, M365 (Graph), or Import services
+    /// Routes operations to IMAP, personal Outlook, M365 (Graph), or Import services
     /// </summary>
     public class ProviderEmailServiceFactory
     {
@@ -28,7 +28,7 @@ namespace MailArchiver.Services.Factories
         /// <summary>
         /// Gets the appropriate provider service based on provider type
         /// </summary>
-        /// <param name="providerType">The provider type (IMAP, M365, IMPORT)</param>
+        /// <param name="providerType">The provider type (IMAP, MSA, M365, IMPORT)</param>
         /// <returns>Provider-specific email service</returns>
         /// <exception cref="NotSupportedException">Thrown when provider type is not supported</exception>
         public IProviderEmailService GetService(ProviderType providerType)
@@ -38,7 +38,7 @@ namespace MailArchiver.Services.Factories
             return providerType switch
             {
                 ProviderType.IMAP  => _serviceProvider.GetRequiredService<ImapEmailService>(),
-                ProviderType.MSA   => _serviceProvider.GetRequiredService<ImapEmailService>(),
+                ProviderType.MSA   => _serviceProvider.GetRequiredService<MailArchiver.Services.Providers.Outlook.OutlookEmailService>(),
                 ProviderType.M365  => _serviceProvider.GetRequiredService<IGraphEmailService>() as IProviderEmailService
                     ?? throw new InvalidOperationException("GraphEmailService does not implement IProviderEmailService"),
                 ProviderType.IMPORT => _serviceProvider.GetRequiredService<ImportEmailService>(),

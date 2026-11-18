@@ -25,6 +25,10 @@ public static class MailConnectionFailurePolicy
                 SafeMessage(nameof(MailFailureCode.ProxyUnavailable)),
                 MailFailureStage.ProxyHandshake, exception);
 
+        if (failures.Any(failure => failure is Providers.Outlook.OutlookIncomingAuthorizationException))
+            return Failure(MailFailureCode.ReceivingAuthorizationRejected,
+                SafeMessage(nameof(MailFailureCode.ReceivingAuthorizationRejected)), MailFailureStage.Authentication, exception);
+
         if (failures.Any(failure => failure is AuthenticationException))
             return Failure(MailFailureCode.AuthenticationRejected,
                 "授权码无效，请检查邮箱与授权码是否匹配。",
@@ -61,6 +65,7 @@ public static class MailConnectionFailurePolicy
             ? code switch
             {
                 MailFailureCode.GmailCredentialFormatInvalid => "Gmail 应用专用密码去除空白和不可见字符后必须恰好是 16 位。",
+                MailFailureCode.ReceivingAuthorizationRejected => "此邮箱暂不能通过可用收件通道登录，请检查收件权限或重新授权。",
                 MailFailureCode.AuthenticationRejected => "授权码无效，请检查邮箱与授权码是否匹配。",
                 MailFailureCode.ProxyUnavailable => "当前代理节点拒绝连接该邮箱域名的收发端口，请切换节点后重试，或联系节点提供方检查端口限制。",
                 MailFailureCode.TargetUnavailable => "连接失败，请检查网络、VPN、代理或邮箱服务是否可访问。",
@@ -119,7 +124,8 @@ public static class MailConnectionFailurePolicy
             or ProxyProtocolException;
 
     private static bool IsRateLimit(Exception exception)
-        => exception is HttpRequestException { StatusCode: System.Net.HttpStatusCode.TooManyRequests }
+        => exception is MsaOAuthTokenException { StatusCode: System.Net.HttpStatusCode.TooManyRequests }
+            || exception is HttpRequestException { StatusCode: System.Net.HttpStatusCode.TooManyRequests }
             || exception.Message.Contains("rate limit", StringComparison.OrdinalIgnoreCase)
             || exception.Message.Contains("too many", StringComparison.OrdinalIgnoreCase);
 

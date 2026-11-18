@@ -15,7 +15,9 @@ public enum MailCredentialScope
     Unknown,
     Imap,
     Smtp,
-    ImapAndSmtp
+    ImapAndSmtp,
+    Graph,
+    GraphAndSmtp
 }
 
 public enum MailAuthenticationMethod

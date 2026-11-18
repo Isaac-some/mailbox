@@ -4,7 +4,8 @@ public sealed record MailSyncRequestOptions(
     int LookbackDays,
     MailboxFolderCategory? TargetCategory = null,
     int? TargetLimit = null,
-    int? RequestedByUserId = null)
+    int? RequestedByUserId = null,
+    MailboxFolderCategory? PriorityCategory = null)
 {
     public int RemoteDiscoveryLookbackDays => Math.Max(30, LookbackDays);
 
@@ -25,6 +26,7 @@ public sealed record MailSyncRequestOptions(
             Math.Max(left.LookbackDays, right.LookbackDays),
             target,
             target.HasValue ? Math.Max(left.TargetLimit ?? 10, right.TargetLimit ?? 10) : null,
-            right.RequestedByUserId ?? left.RequestedByUserId);
+            right.RequestedByUserId ?? left.RequestedByUserId,
+            right.PriorityCategory ?? left.PriorityCategory);
     }
 }

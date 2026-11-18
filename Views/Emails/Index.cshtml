@@ -38,6 +38,7 @@
         <div class="mailbox-header__actions">
             <form id="mailbox-refresh-form" class="mailbox-sync-form" data-mailbox-sync-form asp-controller="MailAccounts" asp-action="Sync" asp-route-id="@account?.Id" method="post">
                 @Html.AntiForgeryToken()
+                <input type="hidden" name="folderCategory" value="@Model.SelectedFolderCategory" />
                 <div class="mailbox-window" aria-label="同步时间范围">
                     <label class="@(Model.MailboxSyncLookbackDays == 7 ? "selected" : "")">
                         <input type="radio" name="lookbackDays" value="7" checked="@(Model.MailboxSyncLookbackDays == 7 ? "checked" : null)" />7天
@@ -315,8 +316,11 @@
             refreshForm.requestSubmit();
         }
 
+        let watchInFlight = false;
+        const progressKey = `mailbox-progress-${accountId}`;
         const watch = async () => {
-            if (preparingAuthorization) return;
+            if (preparingAuthorization || watchInFlight) return;
+            watchInFlight = true;
             try {
                 const body = new URLSearchParams({
                     id: accountId,
@@ -334,8 +338,20 @@
                 const payload = await response.json();
                 const active = payload.state === 'Queued' || payload.state === 'Running';
                 setStatus(active);
+                // Show freshly archived mail while other folders are still being
+                // processed. Persist the cursor across the reload to avoid loops.
+                if (active && payload.job?.status === 'Running' && payload.job.newEmails > 0) {
+                    let previous = null;
+                    try { previous = JSON.parse(sessionStorage.getItem(progressKey) || 'null'); } catch (_) { sessionStorage.removeItem(progressKey); }
+                    if (previous?.jobId !== payload.job.jobId || previous.count < payload.job.newEmails) {
+                        sessionStorage.setItem(progressKey, JSON.stringify({ jobId: payload.job.jobId, count: payload.job.newEmails }));
+                        window.location.reload();
+                        return;
+                    }
+                }
                 if (!active && sawActiveSync && payload.job) {
                     sawActiveSync = false;
+                    sessionStorage.removeItem(progressKey);
                     if (payload.job.status === 'Failed') {
                         showSyncError(friendlySyncError(payload.job.message));
                     } else if (payload.job.status === 'Cancelled' || payload.job.status === 'RateLimited') {
@@ -348,11 +364,11 @@
                 sawActiveSync = sawActiveSync || active;
             } catch (_) {
                 // A transient local network failure must not interrupt mailbox reading.
-            }
+            } finally { watchInFlight = false; }
         };
 
         setStatus(sawActiveSync);
-        window.setInterval(watch, 5000);
+        window.setInterval(watch, 1000);
     })();
 </script>
 }

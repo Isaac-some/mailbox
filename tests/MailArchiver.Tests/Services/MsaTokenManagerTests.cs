@@ -121,8 +121,44 @@ public class MsaTokenManagerTests
         Assert.Equal(2, oauth.GraphRefreshCount);
     }
 
+    [Fact]
+    public async Task Read_token_is_cached_separately_and_invalidated_by_imported_credentials()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var db = new MailArchiverDbContext(new DbContextOptionsBuilder<MailArchiverDbContext>().UseSqlite(connection).Options);
+        await db.Database.EnsureCreatedAsync();
+        var account = new MailAccount { Name = "Read", EmailAddress = "read@outlook.com", Provider = ProviderType.MSA,
+            ClientId = "client", OAuthRefreshToken = "refresh", OAuthAccessToken = "imap-access", OAuthGrantedScopes = MsaOAuthScopePolicy.Imap };
+        db.Add(account); await db.SaveChangesAsync();
+        var oauth = new FakeOAuthService();
+        var manager = new MsaTokenManager(oauth, new MsaGraphTokenCache(), db, NullLogger<MsaTokenManager>.Instance, new());
+        Assert.Equal("read-access", (await manager.GetGraphReadAccessTokenAsync(account)).AccessToken);
+        Assert.Equal("read-access", (await manager.GetGraphReadAccessTokenAsync(account)).AccessToken);
+        Assert.Equal(1, oauth.ReadRefreshCount);
+        Assert.Equal("read-refresh", account.OAuthRefreshToken);
+        Assert.Equal("imap-access", account.OAuthAccessToken);
+        Assert.Equal(MsaOAuthScopePolicy.Imap, account.OAuthGrantedScopes);
+        Assert.Equal("graph-access", (await manager.GetGraphAccessTokenAsync(account)).AccessToken);
+        Assert.Equal(1, oauth.GraphRefreshCount);
+        await manager.GetGraphReadAccessTokenAsync(account);
+        Assert.Equal(2, oauth.ReadRefreshCount); // sending rotated the shared refresh token
+        account.ClientId = "new-client"; await db.SaveChangesAsync();
+        await manager.GetGraphReadAccessTokenAsync(account); Assert.Equal(3, oauth.ReadRefreshCount);
+        account.OAuthRefreshToken = "imported-refresh"; await db.SaveChangesAsync();
+        await manager.GetGraphReadAccessTokenAsync(account); Assert.Equal(4, oauth.ReadRefreshCount);
+        Assert.Equal("imap-access", (await db.MailAccounts.AsNoTracking().SingleAsync()).OAuthAccessToken);
+    }
+
     private sealed class FakeOAuthService : IMsaOAuthService
     {
+        public int ReadRefreshCount { get; private set; }
+        public Task<MsaTokenResult> RefreshGraphReadAccessTokenAsync(string refreshToken, string? clientId, string? clientSecret, CancellationToken cancellationToken = default)
+        {
+            ReadRefreshCount++;
+            return Task.FromResult(new MsaTokenResult { AccessToken = "read-access", RefreshToken = "read-refresh",
+                Expiry = DateTime.UtcNow.AddHours(1), GrantedScopes = "Mail.ReadWrite" });
+        }
         public int GraphRefreshCount { get; private set; }
         public Task<DeviceCodeResult> StartDeviceCodeAsync(string? clientId) => throw new NotSupportedException();
         public Task<MsaPollResult> PollDeviceCodeAsync(string? clientId, string deviceCode, int currentInterval) => throw new NotSupportedException();

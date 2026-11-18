@@ -1594,7 +1594,8 @@ namespace MailArchiver.Controllers
             var syncOptions = new MailSyncRequestOptions(
                 account.MailboxSyncLookbackDays,
                 loadMore ? folderCategory : null,
-                loadMore ? 30 : null);
+                loadMore ? 30 : null,
+                PriorityCategory: folderCategory);
             var queueStatus = _onDemandSyncQueue.Enqueue(
                 id,
                 MailSyncRequestPriority.Interactive,

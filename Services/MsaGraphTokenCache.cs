@@ -14,7 +14,7 @@ public interface IMsaGraphTokenCache
     void Remove(int accountId);
 }
 
-public sealed class MsaGraphTokenCache : IMsaGraphTokenCache
+public class MsaGraphTokenCache : IMsaGraphTokenCache
 {
     private readonly ConcurrentDictionary<int, CachedMsaGraphToken> _tokens = new();
 
@@ -27,3 +27,6 @@ public sealed class MsaGraphTokenCache : IMsaGraphTokenCache
     public void Remove(int accountId)
         => _tokens.TryRemove(accountId, out _);
 }
+
+// Receiving and sending grants must never share a cached access token.
+public sealed class MsaGraphReadTokenCache : MsaGraphTokenCache;

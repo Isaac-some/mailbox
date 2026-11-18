@@ -81,6 +81,16 @@ public class MsaOAuthServiceTests
         Assert.DoesNotContain(MsaOAuthScopePolicy.GraphMailSend, scopes);
     }
 
+    [Fact]
+    public async Task Graph_receiving_uses_existing_default_consent_instead_of_requesting_a_different_Mail_Read_grant()
+    {
+        var handler = new CapturingHandler("https://graph.microsoft.com/Mail.ReadWrite");
+        var service = new MsaOAuthService(new SingleClientFactory(new HttpClient(handler)), NullLogger<MsaOAuthService>.Instance, Options.Create(new MsaOAuthOptions()));
+        await service.RefreshGraphReadAccessTokenAsync("vendor-refresh", "vendor-client", null);
+        Assert.Equal("https://graph.microsoft.com/.default offline_access", handler.Form["scope"]);
+        Assert.Equal("vendor-refresh", handler.Form["refresh_token"]);
+    }
+
     private sealed class SingleClientFactory(HttpClient client) : IHttpClientFactory
     {
         public HttpClient CreateClient(string name) => client;

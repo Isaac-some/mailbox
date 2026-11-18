@@ -216,6 +216,11 @@ builder.Services.AddSingleton<ICredentialEncryptionService, CredentialEncryption
 builder.Services.Configure<MsaOAuthOptions>(builder.Configuration.GetSection(MsaOAuthOptions.SectionName));
 builder.Services.AddScoped<MailArchiver.Services.IMsaOAuthService, MailArchiver.Services.MsaOAuthService>();
 builder.Services.AddSingleton<MailArchiver.Services.IMsaGraphTokenCache, MailArchiver.Services.MsaGraphTokenCache>();
+builder.Services.AddSingleton<MailArchiver.Services.MsaGraphReadTokenCache>();
+builder.Services.AddSingleton<MailArchiver.Services.Providers.Outlook.OutlookIncomingRoutePolicy>();
+builder.Services.AddScoped<MailArchiver.Services.Providers.Outlook.IOutlookGraphMailboxClient, MailArchiver.Services.Providers.Outlook.OutlookGraphMailboxClient>();
+builder.Services.AddScoped<MailArchiver.Services.Providers.Outlook.OutlookGraphMailSyncService>();
+builder.Services.AddScoped<MailArchiver.Services.Providers.Outlook.OutlookEmailService>();
 builder.Services.AddScoped<MailArchiver.Services.IMsaTokenManager, MailArchiver.Services.MsaTokenManager>();
 builder.Services.AddScoped<MailArchiver.Services.IExternalOAuthTokenManager, MailArchiver.Services.ExternalOAuthTokenManager>();
 builder.Services.AddScoped<MailArchiver.Services.MailCredentialIntakeService>();

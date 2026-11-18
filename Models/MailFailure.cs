@@ -10,7 +10,8 @@ public enum MailFailureCode
     ProtocolFailed,
     RateLimited,
     Cancelled,
-    Unexpected
+    Unexpected,
+    ReceivingAuthorizationRejected
 }
 
 public enum MailFailureStage

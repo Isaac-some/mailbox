@@ -18,6 +18,11 @@ public static class MsaOAuthScopePolicy
     public static readonly string[] SmtpRefreshScopes =
         [SmtpSend, "offline_access"];
 
+    public static bool CanRead(string? grantedScopes) => (grantedScopes ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries)
+        .Any(scope => scope.Equals("Mail.Read", StringComparison.OrdinalIgnoreCase) || scope.Equals("Mail.ReadWrite", StringComparison.OrdinalIgnoreCase)
+            || scope.Equals("https://graph.microsoft.com/Mail.Read", StringComparison.OrdinalIgnoreCase)
+            || scope.Equals("https://graph.microsoft.com/Mail.ReadWrite", StringComparison.OrdinalIgnoreCase));
+
     public static bool CanSend(string? grantedScopes)
     {
         if (string.IsNullOrWhiteSpace(grantedScopes))

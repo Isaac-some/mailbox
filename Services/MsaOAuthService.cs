@@ -11,6 +11,7 @@ namespace MailArchiver.Services
         Task<MsaPollResult> PollDeviceCodeAsync(string? clientId, string deviceCode, int currentInterval);
         Task<MsaTokenResult> RefreshAccessTokenAsync(string refreshToken, string? clientId, string? clientSecret, CancellationToken cancellationToken = default);
         Task<MsaTokenResult> RefreshGraphAccessTokenAsync(string refreshToken, string? clientId, string? clientSecret);
+        Task<MsaTokenResult> RefreshGraphReadAccessTokenAsync(string refreshToken, string? clientId, string? clientSecret, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         Task<MsaTokenResult> RefreshSmtpAccessTokenAsync(string refreshToken, string? clientId, string? clientSecret);
         /// <summary>
         /// Returns the configured default ClientId (or null when none is configured).
@@ -239,6 +240,22 @@ namespace MailArchiver.Services
             if (!string.IsNullOrEmpty(clientSecret))
                 body["client_secret"] = clientSecret;
             return await PostTokenAsync(body);
+        }
+
+        public Task<MsaTokenResult> RefreshGraphReadAccessTokenAsync(
+            string refreshToken, string? clientId, string? clientSecret, CancellationToken cancellationToken = default)
+        {
+            // Imported grants can include Mail.ReadWrite without consenting to the
+            // separately requested Mail.Read scope. Use the existing consent, then
+            // verify access by reading mail rather than by reading the user profile.
+            var body = new Dictionary<string, string>
+            {
+                ["grant_type"] = "refresh_token", ["client_id"] = ResolveClientId(clientId),
+                ["refresh_token"] = refreshToken,
+                ["scope"] = "https://graph.microsoft.com/.default offline_access"
+            };
+            if (!string.IsNullOrEmpty(clientSecret)) body["client_secret"] = clientSecret;
+            return PostTokenAsync(body, cancellationToken);
         }
 
         public async Task<MsaTokenResult> RefreshSmtpAccessTokenAsync(

@@ -33,7 +33,7 @@ cd "/Users/isaac/Downloads/邮箱/mailbox"
 
 发件成功后，程序会把副本保存到 Outlook“已发送”，并立即归档到本地。日志不会记录 OAuth Token、正文或附件内容。
 
-## CSV 邮箱凭据导入（v2.4.4）
+## CSV 邮箱凭据导入（v2.4.5）
 
 导入任务只显示保存成功与导入失败；后台验证错误不混入导入结果。点击“后台验证”后显示通知，打开指定邮箱会优先验证和收信。桌面端跟随使用者自己的系统网络/VPN，忽略历史应用代理配置。
 
@@ -59,11 +59,11 @@ cd "/Users/isaac/Downloads/邮箱/mailbox"
 bash script/build-windows-on-macos.sh
 ```
 
-Windows 对外交付为单个 `windows-app/build/MailAssistant-Windows-x64-v2.4.4-Setup.exe`，包含应用、后端和运行时，安装后创建桌面快捷方式并保留本机邮箱数据。Mac 构建工具需预装 NSIS：`brew install makensis`。ZIP 便携版作为备用。
+Windows 对外交付为单个 `windows-app/build/MailAssistant-Windows-x64-v2.4.5-Setup.exe`，包含应用、后端和运行时，安装后创建桌面快捷方式并保留本机邮箱数据。Mac 构建工具需预装 NSIS：`brew install makensis`。ZIP 便携版作为备用。
 
 ## 后续打包
 
-当前版本 v2.4.4 的实测和验收记录见 [验收报告](doc/acceptance-v2.4.4-20261118.md)。重新打包时执行：
+当前版本 v2.4.5 的实测和验收记录见 [验收报告](doc/acceptance-v2.4.5-20261118.md)。重新打包时执行：
 
 ```sh
 cd "/Users/isaac/Downloads/邮箱/mailbox"

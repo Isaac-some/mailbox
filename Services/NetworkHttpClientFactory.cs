@@ -1,4 +1,7 @@
 using System.Net;
+using System.Collections.Concurrent;
+using System.Security.Cryptography;
+using System.Text;
 using System.Security.Authentication;
 using MailArchiver.Models;
 
@@ -11,11 +14,30 @@ public interface INetworkHttpClientFactory
 
 public sealed class NetworkHttpClientFactory(
     INetworkPolicyResolver resolver,
-    ILogger<NetworkHttpClientFactory>? logger = null) : INetworkHttpClientFactory, IHttpClientFactory
+    ILogger<NetworkHttpClientFactory>? logger = null) : INetworkHttpClientFactory, IHttpClientFactory, IDisposable
 {
+    private readonly ConcurrentDictionary<string, Lazy<HttpMessageInvoker>> _connections = new();
+    private HttpMessageInvoker Connection(NetworkProxySettings? proxy)
+    {
+        // Resolve the current device route for each request; never reuse a
+        // connection pool belonging to a different proxy or credential set.
+        var identity = proxy is null ? "direct" : $"{proxy.Type}|{proxy.Host}|{proxy.Port}|{proxy.Username}|{proxy.Password}";
+        var key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity)));
+        return _connections.GetOrAdd(key, _ => new Lazy<HttpMessageInvoker>(() => new(new SocketsHttpHandler
+        {
+            UseProxy = proxy is not null, Proxy = proxy is null ? null : RoutedHttpMessageHandler.ToWebProxy(proxy),
+            UseCookies = false, AllowAutoRedirect = false, ConnectTimeout = TimeSpan.FromSeconds(30),
+            PooledConnectionLifetime = TimeSpan.FromMinutes(2), PooledConnectionIdleTimeout = TimeSpan.FromSeconds(30)
+        }, disposeHandler: true))).Value;
+    }
+    public void Dispose()
+    {
+        foreach (var connection in _connections.Values) if (connection.IsValueCreated) connection.Value.Dispose();
+        _connections.Clear();
+    }
     public HttpClient CreateClient(string name)
     {
-        var handler = new RoutedHttpMessageHandler(resolver, logger);
+        var handler = new RoutedHttpMessageHandler(resolver, logger, Connection);
         var client = new HttpClient(handler, disposeHandler: true);
         if (name == "MailAutoconfig")
         {
@@ -32,7 +54,7 @@ public sealed class NetworkHttpClientFactory(
 
     private sealed class RoutedHttpMessageHandler(
         INetworkPolicyResolver resolver,
-        ILogger<NetworkHttpClientFactory> logger) : HttpMessageHandler
+        ILogger<NetworkHttpClientFactory>? logger, Func<NetworkProxySettings?, HttpMessageInvoker> connection) : HttpMessageHandler
     {
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -52,23 +74,10 @@ public sealed class NetworkHttpClientFactory(
             }
         }
 
-        private static async Task<HttpResponseMessage> SendOnceAsync(
-            HttpRequestMessage request,
-            NetworkProxySettings? proxy,
-            CancellationToken cancellationToken)
-        {
-            using var handler = new SocketsHttpHandler
-            {
-                UseProxy = proxy is not null,
-                Proxy = proxy is null ? null : ToWebProxy(proxy),
-                AllowAutoRedirect = false,
-                ConnectTimeout = TimeSpan.FromSeconds(30)
-            };
-            using var invoker = new HttpMessageInvoker(handler, disposeHandler: false);
-            return await invoker.SendAsync(request, cancellationToken);
-        }
+        private Task<HttpResponseMessage> SendOnceAsync(HttpRequestMessage request, NetworkProxySettings? proxy, CancellationToken cancellationToken)
+            => connection(proxy).SendAsync(request, cancellationToken);
 
-        private static WebProxy ToWebProxy(NetworkProxySettings proxy)
+        internal static WebProxy ToWebProxy(NetworkProxySettings proxy)
         {
             var scheme = proxy.Type == NetworkProxyType.Socks5 ? "socks5" : "http";
             var webProxy = new WebProxy(new Uri($"{scheme}://{proxy.Host}:{proxy.Port}"));

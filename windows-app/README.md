@@ -1,6 +1,6 @@
-# 邮箱助手 v2.4.4 · Windows
+# 邮箱助手 v2.4.5 · Windows
 
-对外只需发送 `MailAssistant-Windows-x64-v2.4.4-Setup.exe`，双击完成安装，通过桌面“邮箱助手”打开。安装程序已包含全部后端和 .NET 运行时，无需另发 `server` 文件夹。系统缺少 WebView2 时会在默认浏览器打开。
+对外只需发送 `MailAssistant-Windows-x64-v2.4.5-Setup.exe`，双击完成安装，通过桌面“邮箱助手”打开。安装程序已包含全部后端和 .NET 运行时，无需另发 `server` 文件夹。系统缺少 WebView2 时会在默认浏览器打开。
 
 ZIP 为可选便携版，需要解压完整文件夹；安装版不需要 ZIP。
 

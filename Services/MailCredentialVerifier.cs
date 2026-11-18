@@ -12,13 +12,36 @@ public interface IMailCredentialVerifier
     Task VerifyAsync(MailAccount account, CancellationToken cancellationToken = default);
 }
 
-/// <summary>Checks incoming authentication on a detached candidate, without opening a folder or fetching mail.</summary>
+/// <summary>Checks the actual receiving capability; Outlook uses the same Graph/IMAP decision as mailbox sync.</summary>
 public sealed class MailCredentialVerifier(
     IMailProviderRegistry registry,
     IMailEndpointDiscoveryService discovery,
-    INetworkMailProxyFactory networkMail, IMailDomainProfileStore? profiles = null) : IMailCredentialVerifier
+    INetworkMailProxyFactory networkMail, IMailDomainProfileStore? profiles = null,
+    Providers.Outlook.IOutlookGraphMailboxClient? outlookReader = null,
+    Providers.Outlook.OutlookIncomingRoutePolicy? outlookRoutes = null) : IMailCredentialVerifier
 {
     public async Task VerifyAsync(MailAccount account, CancellationToken cancellationToken = default)
+    {
+        if (account.MailProviderKind != MailProviderKind.Outlook || outlookReader is null)
+        { await VerifyImapAsync(account, cancellationToken); return; }
+        var routes = outlookRoutes ?? new Providers.Outlook.OutlookIncomingRoutePolicy();
+        await routes.ExecuteAsync(account, async () =>
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(20));
+            try { await outlookReader.VerifyAsync(account, timeout.Token); }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            { throw new TimeoutException("邮箱收件验证超时，请稍后重试；超时不代表授权码错误。"); }
+            account.CredentialLastCheckedAt = DateTime.UtcNow;
+            account.CredentialDetectionStatus = "IncomingVerified";
+            account.CredentialScope = MailCredentialScope.Graph;
+            account.CredentialKind = MailCredentialKind.OAuth2RefreshToken;
+            account.PreferredIncomingAuth = MailAuthenticationMethod.OAuth2;
+            return true;
+        }, async () => { await VerifyImapAsync(account, cancellationToken); return true; });
+    }
+
+    private async Task VerifyImapAsync(MailAccount account, CancellationToken cancellationToken)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(20));
