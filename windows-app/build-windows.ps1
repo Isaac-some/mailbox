@@ -67,7 +67,7 @@ try {
         'RMDir "$INSTDIR\' + $relative + '"'
     })
     [IO.File]::WriteAllLines($uninstallList, $commands, [Text.UTF8Encoding]::new($false))
-    & $makensis /V3 "/DPACKAGE_DIR=$OutputDirectory" "/DOUTPUT_FILE=$installerOutput" `
+    & $makensis /V3 /INPUTCHARSET UTF8 "/DPACKAGE_DIR=$OutputDirectory" "/DOUTPUT_FILE=$installerOutput" `
         "/DAPP_VERSION=$version" "/DUNINSTALL_FILES=$uninstallList" (Join-Path $PSScriptRoot "installer.nsi")
     if ($LASTEXITCODE -ne 0) { throw "EXE 安装包构建失败。" }
 } finally {

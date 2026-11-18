@@ -67,7 +67,7 @@ Section "邮箱助手" MainSection
   SetShellVarContext current
   SetOutPath "$INSTDIR"
   SetOverwrite on
-  File /r "${PACKAGE_DIR}/*"
+  File /r "${PACKAGE_DIR}\*"
   WriteUninstaller "$INSTDIR\卸载邮箱助手.exe"
   CreateShortCut "$DESKTOP\邮箱助手.lnk" "$INSTDIR\邮箱助手.exe"
   CreateDirectory "$SMPROGRAMS\邮箱助手"
