@@ -3,17 +3,15 @@ on:
   workflow_dispatch:
     inputs:
       base_tag:
-        description: Isolated baseline prerelease tag
+        description: Existing public baseline release tag
         required: true
-        default: v2.3.90-update-test
+        default: v2.4.4
       target_tag:
-        description: Signed update target prerelease tag
+        description: New signed release tag (must be newer than the baseline)
         required: true
-        default: v2.4.0-rc.1
       expected_version:
         description: Expected installed version
         required: true
-        default: 2.4.0
 permissions:
   contents: read
 jobs:
