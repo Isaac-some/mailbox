@@ -16,6 +16,7 @@ root = Path(__file__).resolve().parent.parent
 p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('--assets', type=Path, required=True)
 p.add_argument('--test-report', type=Path, required=True)
+p.add_argument('--source-commit', help='Actual compiled source; only a verifier-only follow-up commit may differ from HEAD')
 args = p.parse_args()
 assets = args.assets.resolve()
 def run(command):
@@ -37,7 +38,11 @@ for project in (root / 'MailArchiver.csproj', root / 'windows-app/MailAssistant.
 require(plistlib.loads((root / 'local-app/Info.plist').read_bytes())['CFBundleShortVersionString'] == version, 'Source plist version mismatch')
 require(json.loads((root / 'appsettings.json').read_text())['ReleaseNotes']['AppVersion'] == version, 'Source display version mismatch')
 require(not run(['git', 'status', '--porcelain']).strip(), 'Commit the reviewed source before producing release provenance.')
-source_commit = run(['git', 'rev-parse', 'HEAD']).strip()
+verification_commit = run(['git', 'rev-parse', 'HEAD']).strip()
+source_commit = run(['git', 'rev-parse', args.source_commit or 'HEAD']).strip()
+if source_commit != verification_commit:
+    changes = run(['git', 'diff', '--name-only', source_commit, verification_commit]).splitlines()
+    require(set(changes) <= {'script/verify-desktop-release.py'}, 'Application/build source changed; rebuild instead of reusing a source commit.')
 manifest = json.loads((assets / 'desktop-update.json').read_text())
 require(manifest['version'] == version and manifest['tag'] == 'v' + version and not manifest['prerelease'], 'Signed release version/tag mismatch')
 run(['openssl', 'dgst', '-sha256', '-verify', root / 'DesktopUpdate/update-public-key.pem', '-signature', assets / 'desktop-update.sig', assets / 'desktop-update.json'])
@@ -74,8 +79,11 @@ with tempfile.TemporaryDirectory(prefix='mailbox-release-verification-') as temp
         require(plistlib.loads((mounted_app / 'Contents/Info.plist').read_bytes())['CFBundleShortVersionString'] == version, 'DMG actual app version mismatch')
         with zipfile.ZipFile(assets / f'MailAssistant-AppleSilicon-v{version}-update.zip') as z:
             require(z.testzip() is None, 'Mac update ZIP CRC failure')
+            # ditto uses UTF-8 names but can omit the ZIP UTF-8 flag. Match its
+            # raw names as macOS and the production updater do, without changing any payload.
+            entries = {(i.filename if i.flag_bits & 0x800 else i.filename.encode('cp437').decode('utf-8')): i for i in z.infolist()}
             for relative in ('Contents/Info.plist', 'Contents/MacOS/邮箱助手', 'Contents/Resources/server/MailArchiver.dll'):
-                require(hashlib.sha256(z.read('邮箱助手.app/' + relative)).hexdigest() == sha(mounted_app / relative), 'DMG differs from update archive: ' + relative)
+                require(hashlib.sha256(z.read(entries['邮箱助手.app/' + relative])).hexdigest() == sha(mounted_app / relative), 'DMG differs from update archive: ' + relative)
     finally: run(['hdiutil', 'detach', mount])
     run(['7zz', 't', setup])
     extracted = temp / 'installer'
@@ -92,7 +100,7 @@ counters = next(e for e in trx.iter() if e.tag.endswith('Counters')).attrib
 require(int(counters['failed']) == 0 and int(counters['passed']) == int(counters['total']), 'Regression suite did not fully pass')
 all_assets = [f for f in assets.iterdir() if f.is_file() and f.name not in ('SHA256SUMS.txt', 'build-manifest.json')]
 provenance = dict(appVersion=version, sourceRepository='https://github.com/Isaac-some/mailbox', sourceCommit=source_commit,
-    sourceTag='v' + version, artifacts={f.name:dict(sha256=sha(f), size=f.stat().st_size) for f in sorted(all_assets)},
+    sourceTag='v' + version, verificationCommit=verification_commit, artifacts={f.name:dict(sha256=sha(f), size=f.stat().st_size) for f in sorted(all_assets)},
     validation=dict(regression={k:int(counters[k]) for k in ('total','passed','failed')}, binaryVersionsAligned=True,
         dmgContainsOnlyApplicationAndShortcut=True, macDmgMatchesUpdateZip=True, installerPayloadFiles=len(files),
         allWindowsInstallerAndZipFilesMatch=True), macSigning='ad-hoc; not notarized')
